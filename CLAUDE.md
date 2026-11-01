@@ -1,10 +1,6 @@
-\# Travel Planning and Booking Platform
+@AGENTS.md
 
-
-
-Stack: NestJS (backend), Next.js (frontend), MongoDB Atlas.
-
-Node 24, npm.
-
-Never commit secrets or .env files.
-
+Read `specs/campus-maintenance.md` before planning a feature.
+Prefer plan → small implementation steps → verification → concise explanation.
+Never modify `.env` or secret-bearing files.
+Use Context7 for current framework docs and Playwright for UI verification.
