@@ -1,28 +1,10 @@
-# dependencies
 node_modules/
-
-# build output
-dist/
-build/
 .next/
-out/
+dist/
 coverage/
-
-# environment files (never commit secrets)
 .env
 .env.*
 !.env.example
-
-# uploaded files
-backend/uploads/*
-!backend/uploads/.gitkeep
-
-# logs
-*.log
-npm-debug.log*
-
-# OS and IDE files
+apps/api/.env
+apps/web/.env.local
 .DS_Store
-Thumbs.db
-.idea/
-.vscode/
