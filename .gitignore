@@ -1,10 +1,32 @@
+# dependencies
 node_modules/
-.next/
+
+# build output
 dist/
+build/
+.next/
+out/
 coverage/
+
+# environment files (never commit secrets)
 .env
 .env.*
 !.env.example
-apps/api/.env
-apps/web/.env.local
+
+# uploaded files
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# logs
+*.log
+npm-debug.log*
+
+# OS and IDE files
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Claude Code personal files
+.claude/settings.local.json
+CLAUDE.local.md
