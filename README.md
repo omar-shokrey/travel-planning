@@ -1,21 +1,22 @@
-# Campus Maintenance Demo Kit
+# Travel Planning and Booking Platform
 
-Supporting kit for the Campus Maintenance Request System assignment.
+Software Project I (Winter 2026): a web platform that combines flight booking, hotel booking, itinerary planning with budgeting, and a travel blog.
 
-Stack: NestJS + Mongoose, Next.js App Router + shadcn/ui, MongoDB Atlas, Swagger/OpenAPI.
+Stack: NestJS + Mongoose, Next.js (App Router, TypeScript), MongoDB Atlas, Stripe (test mode), Swagger/OpenAPI.
 
-MVP:
-1. Report a maintenance request.
-2. Browse requests.
-3. Filter by category.
-4. Mark a request as resolved.
+## Repository layout
+- `backend/`: NestJS API (Milestone 1)
+- `frontend/`: Next.js app (Milestone 2)
+- `docs/requirements/`: project description and requirements workbook
+- `docs/api/`: API documentation
+- `specs/travel-platform.md`: working specification
+- `AGENTS.md`, `CLAUDE.md`: rules for AI coding assistants
+- `AI_PROMPTS.txt`: AI usage log (required)
 
-Read `specs/campus-maintenance.md` before coding.
+## Setup
+Full setup instructions will be added here (prerequisites, environment variables, running, seeding, Swagger URL). Requirements: Node 24 (see `.nvmrc`) and npm.
 
-Team slices:
-- Student D — MaintenanceRequest schema + module shell, layout, design tokens (goes first).
-- Student A — POST /requests + /requests/new.
-- Student B — GET /requests?category= + /requests.
-- Student C — PATCH /requests/:id/resolve + resolve button.
-
-Never commit `.env` or secrets.
+## Team rules
+- Never commit `.env` or secrets. Copy `.env.example` to your own `.env` and fill in the values.
+- Work on short-lived branches from `develop`, for example `feature/FLT-11-flight-search`.
+- Open pull requests into `develop`. The team leader or the second reviewer approves each one.

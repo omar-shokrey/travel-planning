@@ -1,2 +1,19 @@
 AI PROMPT LOG - Travel Planning and Booking Platform
 Every member records prompts that materially contributed to the project.
+Never include secrets, passwords, tokens, .env values, or connection strings.
+
+Copy the template below for each new entry and add it under the last one.
+
+================================================
+Date: YYYY-MM-DD
+Student: Student Name
+Tool: Claude Code / ChatGPT / Copilot / Gemini
+Branch / Issue: feature/FLT-11-flight-search / #12
+Related Requirement: FLT-11
+Prompt:
+(the prompt, or the important prompts of a multi-turn conversation)
+How the output was used:
+(what you used it for)
+Accepted, changed, or rejected:
+(what you kept, edited, or discarded)
+================================================

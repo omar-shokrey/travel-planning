@@ -1,5 +1,5 @@
 {
-  "name": "campus-maintenance-root",
+  "name": "travel-planning-root",
   "private": true,
   "scripts": {
     "prepare": "husky",
