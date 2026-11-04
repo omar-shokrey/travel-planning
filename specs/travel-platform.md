@@ -2,6 +2,8 @@
 
 Source of truth: the project description (`docs/requirements/`) and the official requirements workbook. If this file disagrees with them, they win. Exact business rules, limits and acceptance criteria are in the workbook.
 
+The project description was revised on 2 Nov 2026 (the changes are highlighted in yellow in the PDF in `docs/requirements/`). This file follows the revised version.
+
 ## Problem
 Travelers need one platform to search and book flights and hotels, plan day-by-day itineraries with budgets, and share travel content. Airlines and hotels need to manage their inventory and policies, and administrators need to supervise accounts, bookings and community content.
 
@@ -18,7 +20,7 @@ Requirement IDs are listed in the workbook. The mandatory/bonus split is also de
 
 | Module | ID prefix | Covers |
 |---|---|---|
-| Accounts and administration | ACC | Registration, login with lockout, logout and session expiry, password change, profile, deactivation, moderator accounts, account management, admin booking list, admin seeding |
+| Accounts and administration | ACC | Registration, login with lockout, logout and session expiry, password change, profile, own-account deactivation, moderator accounts, account management, hotel and airline deactivation, admin booking list, admin seeding |
 | Flights | FLT | Airline profile, airports, flights, cabins, baggage and cancellation policies, search, filters, booking, seat hold, cancellation, passenger lists |
 | Hotels | HTL | Hotel profile, rooms, availability, policies, search, multi-room reservation, room hold, cancellation, reviews |
 | Payments and policies | PAY | Stripe payment (test mode), policy acceptance, refunds, single platform currency |
@@ -43,6 +45,8 @@ Base path `/api`. The full endpoint table is section 8 of the project descriptio
 | Itineraries | `/api/itineraries`, `/api/activities`, `/api/budgets`, `/api/transport-costs` |
 | Blog | `/api/posts`, `/api/comments`, `/api/tags`, `/api/authors` |
 
+Provider status (ACC-15): `PATCH /api/admin/providers/:type/:id/deactivate` and `PATCH /api/admin/providers/:type/:id/reactivate`, where `:type` is `hotel` or `airline`. Deactivating a provider is separate from suspending its moderator account. A deactivated hotel or airline is hidden from search and cannot be booked, while its existing Confirmed bookings remain valid. Affected parties receive an in-app notification.
+
 Swagger UI is served at `/api/docs`.
 
 ## Validation and security
@@ -65,6 +69,8 @@ Swagger UI is served at `/api/docs`.
 
 ## Reference data
 Countries, cities, airports and attractions are seeded from the official reference datasets. Records and identifiers must match the datasets, because they are used in the final evaluation. The seed script is idempotent and creates the admin account from environment variables.
+
+Each airport has its IANA time zone (`time_zone` in `airports.csv`), used to show flight times in local time (GEN-06) and to read search dates as local dates (FLT-11). The supported currencies are the currency codes listed in `countries.csv` (GEN-12); these are the currencies a user can choose as preferred currency (ACC-09) and convert itinerary budgets into (ITN-18).
 
 ## Out of scope
 - Cloud deployment (optional bonus)
