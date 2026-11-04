@@ -17,3 +17,56 @@ How the output was used:
 Accepted, changed, or rejected:
 (what you kept, edited, or discarded)
 ================================================
+
+================================================
+Date: 2026-11-02
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: no branch (GitHub setup); issues #9 to #106
+Related Requirement: All Milestone 1 mandatory requirements (issue creation only)
+Prompt:
+I asked Claude to guide me through the GitHub project setup (board columns and workflows, labels
+per module plus mandatory/bonus, the two milestones) and to turn the official requirements
+workbook into one GitHub issue per requirement, created with the GitHub CLI. Follow-up prompts:
+whether the issues are required by the project description, how the import script and its dry
+run work, which label each issue should get (for example why ACC-19 is labelled GEN), and
+whether Milestone 2 and bonus issues should be created now.
+How the output was used:
+I used the generated issue data and an import script (kept outside the repository) to create
+98 Milestone 1 issues in the board's Backlog, after reading the dry run, creating 3 issues
+first, then the rest. I checked the issue count and labels on GitHub afterwards.
+Accepted, changed, or rejected:
+Accepted: titles, issue bodies, module labels and milestone assignment, after checking them
+against the workbook. Changed: acceptance criteria of UI-only requirements were rewritten so
+they no longer mention the backend or Swagger. Rejected for now (my decision): the 6 UI-only
+Milestone 2 issues and the 11 bonus issues are held back until after the Milestone 2 overview.
+================================================
+
+================================================
+Date: 2026-11-04
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: chore/backend-init / no issue (project setup)
+Related Requirement: None (setup); prepares ACC-19, ACC-06, FLT-23, FLT-29, ITN-18, GEN-06, GEN-13
+Prompt:
+I asked Claude to guide me step by step through generating the NestJS backend in backend/ and
+installing its dependencies, and to scan the folder before every commit. I pasted terminal
+output at each step (Nest CLI prompts, Node version warnings, the TypeScript rootDir error,
+the Jest "Must use import to load ES Module" error, build/test/lint/start results). I also
+asked Claude to choose the dependency list from the requirements workbook instead of a
+generic template.
+How the output was used:
+I followed the steps to generate the app with Nest CLI 12 (CommonJS, Jest), upgraded Node to
+v24.22.2, and ran build, tests, lint and the server. I installed the packages Claude selected
+(config, Mongoose, JWT, bcrypt, cookie-parser, helmet, class-validator, Swagger, Stripe,
+serve-static, schedule, luxon, pdfkit, csv-parse, csv-stringify and their type packages),
+confirmed bcrypt works on Windows with Node 24, that every package loads, and that
+npm audit reports 0 vulnerabilities in production dependencies.
+Accepted, changed, or rejected:
+Accepted: rootDir fix in tsconfig.json, Jest scripts using --experimental-vm-modules, engines
+(Node >=24.15 <25) with engine-strict in backend/.npmrc, ignoring *.tsbuildinfo, a short
+backend README. Changed: removed the unused @nestjs/mau package and its deploy script that
+the generator added; fixed my own typo in the .npmrc file name. Rejected: the optional Nest
+observability prompt, and packages we do not need yet (passport, joi, mongodb-memory-server,
+file-type, an HTTP client), to keep dependencies minimal.
+================================================
