@@ -45,12 +45,16 @@
 ## Commands
 First time on a machine, from the repo root: `cp .env.example backend/.env`, then edit `backend/.env`. `backend/.env` is git-ignored, so keys never go to GitHub. Environment variables are checked at startup by `backend/src/config/env.validation.ts`; add a variable there when code starts using it.
 
-Backend (after the NestJS project is generated):
+Backend:
 ```bash
 cd backend
-npm run start:dev
-npm test
-npm run lint
+npm ci                # first time, installs the exact versions from package-lock.json
+npm run start:dev     # API with auto-reload
+npm run format        # Prettier, before every commit
+npm run lint          # oxlint, must report 0 warnings
+npm run build         # compile with the Nest CLI
+npm test              # unit tests
+npm run test:e2e      # end-to-end tests (supertest)
 ```
 With `start:dev` running, the API is at `http://localhost:3001/api` and Swagger at `http://localhost:3001/api/docs`.
 
