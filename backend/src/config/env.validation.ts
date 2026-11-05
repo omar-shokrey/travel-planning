@@ -4,6 +4,8 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsNotEmpty,
+  IsString,
   IsUrl,
   Max,
   Min,
@@ -39,6 +41,11 @@ export class EnvironmentVariables {
     protocols: ['http', 'https'],
   })
   FRONTEND_URL: string = 'http://localhost:3000';
+
+  /** Folder for uploaded images (GEN-08). Relative to backend/ unless absolute. */
+  @IsString()
+  @IsNotEmpty()
+  UPLOADS_DIR: string = 'uploads';
 
   /** Minutes an access token, and the cookie that holds it, stays valid. */
   @Type(() => Number)

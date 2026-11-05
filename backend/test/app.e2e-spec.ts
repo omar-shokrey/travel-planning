@@ -1,14 +1,8 @@
-import {
-  Controller,
-  Get,
-  type INestApplication,
-  Query,
-  Req,
-} from '@nestjs/common';
+import { Controller, Get, Query, Req } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
 import { PaginationQueryDto } from './../src/common/dto/pagination-query.dto';
@@ -31,7 +25,7 @@ class ProbeController {
 }
 
 describe('App setup (e2e)', () => {
-  let app: INestApplication<App>;
+  let app: NestExpressApplication;
 
   beforeEach(async () => {
     const moduleFixture = await Test.createTestingModule({
@@ -39,7 +33,7 @@ describe('App setup (e2e)', () => {
       controllers: [ProbeController],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
+    app = moduleFixture.createNestApplication<NestExpressApplication>();
     configureApp(app);
     setupSwagger(app);
     await app.init();

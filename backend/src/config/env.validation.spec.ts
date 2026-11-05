@@ -8,6 +8,7 @@ const invalidCases: [Record<string, string>, RegExp][] = [
   [{ FRONTEND_URL: 'not a url' }, /FRONTEND_URL/],
   [{ FRONTEND_URL: 'localhost:3000' }, /FRONTEND_URL/],
   [{ FRONTEND_URL: '' }, /FRONTEND_URL/],
+  [{ UPLOADS_DIR: '' }, /UPLOADS_DIR/],
   [{ ACCESS_TOKEN_MINUTES: '0' }, /ACCESS_TOKEN_MINUTES/],
   [{ ACCESS_TOKEN_MINUTES: 'ten' }, /ACCESS_TOKEN_MINUTES/],
   [{ SESSION_INACTIVITY_MINUTES: '5000' }, /SESSION_INACTIVITY_MINUTES/],
@@ -22,6 +23,7 @@ describe('validateEnv', () => {
 
     expect(env.PORT).toBe(3001);
     expect(env.FRONTEND_URL).toBe('http://localhost:3000');
+    expect(env.UPLOADS_DIR).toBe('uploads');
     expect(env.ACCESS_TOKEN_MINUTES).toBe(10);
     expect(env.SESSION_INACTIVITY_MINUTES).toBe(30);
     expect(env.COOKIE_SECURE).toBe(true);
@@ -35,6 +37,12 @@ describe('validateEnv', () => {
   it('accepts the frontend URL it is given', () => {
     const env = validateEnv({ FRONTEND_URL: 'https://app.example.com' });
     expect(env.FRONTEND_URL).toBe('https://app.example.com');
+  });
+
+  it('reads the uploads folder', () => {
+    expect(validateEnv({ UPLOADS_DIR: 'files/images' }).UPLOADS_DIR).toBe(
+      'files/images',
+    );
   });
 
   it('reads the session and cookie settings', () => {

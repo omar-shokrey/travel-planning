@@ -22,6 +22,7 @@
 - Role values are in the `Role` enum (`backend/src/common/enums/role.enum.ts`). Every route requires login unless it is marked `@Public()`. Restrict a route with `@Roles(...)`.
 - Code shared by several modules lives in `backend/src/common/`: `RolesGuard`, `@Public()`, `@Roles()`, `@CurrentUser()`, `ParseObjectIdPipe`, the exception filter and the pagination DTOs. Use them instead of writing your own.
 - Error bodies and paginated lists follow the shapes in the "Response conventions" section of `specs/travel-platform.md`.
+- Images (GEN-08): put `@UploadImages()` (or `@UploadImage()` for one file) on the route, then use `UploadsService` from `backend/src/uploads/`: `assertWithinLimit` before saving, `saveImages`, and `deleteImage` when an image or its owner is deleted. Keep the returned `filename` in the owner's document. Files are stored in `backend/uploads/` (git-ignored) and served at `/api/uploads/<filename>`.
 - Moderators manage only their one assigned airline or hotel.
 - Private bookings and itineraries are visible only to their owner. Check ownership on the backend.
 - Authentication uses a secure `httpOnly` cookie. Never store tokens in localStorage or sessionStorage.

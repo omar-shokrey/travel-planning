@@ -65,7 +65,7 @@ Swagger UI is served at `/api/docs`. Log in with `POST /api/auth/login` in Swagg
 }
 ```
 
-- Status codes: 400 invalid input, 401 not logged in, 403 wrong role or not the owner, 404 not found, 409 conflict such as a duplicate email.
+- Status codes: 400 invalid input, 401 not logged in, 403 wrong role or not the owner, 404 not found, 409 conflict such as a duplicate email, 413 image larger than 5 MB, 415 image that is not a JPG or PNG.
 - Roles are `user`, `admin`, `airline_moderator` and `hotel_moderator`. A guest has no role. Every route requires login unless it is marked public.
 
 ## Validation and security
@@ -73,6 +73,7 @@ Swagger UI is served at `/api/docs`. Log in with `POST /api/auth/login` in Swagg
 - The client cannot set role, status, prices, booking reference, owner or payment state.
 - Authentication uses a secure `httpOnly` cookie, never localStorage or sessionStorage.
 - Two cookies (ACC-19): `access_token` (valid `ACCESS_TOKEN_MINUTES`, sent to `/api`) and `refresh_token` (valid `SESSION_INACTIVITY_MINUTES`, sent only to `/api/auth`). Both are `httpOnly`, `Secure` and `SameSite=Lax` by default. Logging in or refreshing issues new tokens. Logging out clears both cookies and revokes the refresh token on the server (ACC-06). A session with no authenticated request for 30 minutes expires. The frontend sends requests with `credentials: 'include'` and learns the current user from `GET /api/auth/me`.
+- Images (GEN-08): only JPG and PNG, recognised by the first bytes of the file and not by its name or declared type; at most 5 MB each; at most 5 per post, activity or hotel and 1 logo per airline. A file is stored under a random name in `backend/uploads/` and served to anyone at `/api/uploads/<file>`. A request outside these limits is rejected with 413 (too large), 415 (not a JPG or PNG) or 400 (too many, or no file).
 - Role checks and ownership checks happen on the backend. Moderators are limited to their assigned provider.
 - Passwords are hashed. Account emails are unique.
 - A booking is confirmed only after successful payment verification through the Stripe webhook.
@@ -105,7 +106,7 @@ Each module lives in `backend/src/<module>/` and holds its own controller, servi
 | `notifications` | In-app notifications (GEN-01) | to be defined |
 | `audit` | Administrative audit records (GEN-07) | used by `admin` |
 | `exchange-rates` | FXRatesAPI client, daily cached rates, conversion, supported currencies (ITN-18) | to be defined |
-| `uploads` | Image upload validation and storage (GEN-08) | used by other modules |
+| `uploads` | Image upload validation, storage and serving (GEN-08) | used by other modules; serves `/api/uploads/<file>` |
 | `reference` | Seeded, read-only countries, cities, airports and attractions (GEN-12, FLT-02) | `/api/airports` |
 | `reports` | Content reports from users (GEN-09); admins handle them through `admin` (GEN-10) | to be defined |
 
