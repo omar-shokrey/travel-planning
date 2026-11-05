@@ -1,6 +1,21 @@
 import 'reflect-metadata';
-import { plainToInstance, Type } from 'class-transformer';
-import { IsInt, IsUrl, Max, Min, validateSync } from 'class-validator';
+import { plainToInstance, Transform, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsUrl,
+  Max,
+  Min,
+  validateSync,
+} from 'class-validator';
+
+/** Reads "true" and "false" from the environment. Anything else fails IsBoolean. */
+const toBoolean = ({ value }: { value: unknown }) => {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return value;
+};
 
 /**
  * The environment variables the code reads, checked once at startup. A wrong
@@ -24,6 +39,28 @@ export class EnvironmentVariables {
     protocols: ['http', 'https'],
   })
   FRONTEND_URL: string = 'http://localhost:3000';
+
+  /** Minutes an access token, and the cookie that holds it, stays valid. */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  ACCESS_TOKEN_MINUTES: number = 10;
+
+  /** Minutes without an authenticated request before the session expires (ACC-06). */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  SESSION_INACTIVITY_MINUTES: number = 30;
+
+  /** Send the authentication cookies over HTTPS only (ACC-19). */
+  @Transform(toBoolean)
+  @IsBoolean()
+  COOKIE_SECURE: boolean = true;
+
+  @IsIn(['lax', 'strict', 'none'])
+  COOKIE_SAME_SITE: 'lax' | 'strict' | 'none' = 'lax';
 }
 
 /** Passed to ConfigModule as `validate`. Returns the checked values or throws. */

@@ -72,6 +72,7 @@ Swagger UI is served at `/api/docs`. Log in with `POST /api/auth/login` in Swagg
 - Required fields, types and enums are validated by DTOs. Unknown properties are rejected.
 - The client cannot set role, status, prices, booking reference, owner or payment state.
 - Authentication uses a secure `httpOnly` cookie, never localStorage or sessionStorage.
+- Two cookies (ACC-19): `access_token` (valid `ACCESS_TOKEN_MINUTES`, sent to `/api`) and `refresh_token` (valid `SESSION_INACTIVITY_MINUTES`, sent only to `/api/auth`). Both are `httpOnly`, `Secure` and `SameSite=Lax` by default. Logging in or refreshing issues new tokens. Logging out clears both cookies and revokes the refresh token on the server (ACC-06). A session with no authenticated request for 30 minutes expires. The frontend sends requests with `credentials: 'include'` and learns the current user from `GET /api/auth/me`.
 - Role checks and ownership checks happen on the backend. Moderators are limited to their assigned provider.
 - Passwords are hashed. Account emails are unique.
 - A booking is confirmed only after successful payment verification through the Stripe webhook.
