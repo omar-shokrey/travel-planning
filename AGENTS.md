@@ -42,6 +42,8 @@
 - Never expose or edit `.env`, credentials, tokens, API keys or connection strings.
 
 ## Commands
+First time on a machine, from the repo root: `cp .env.example backend/.env`, then edit `backend/.env`. `backend/.env` is git-ignored, so keys never go to GitHub. Environment variables are checked at startup by `backend/src/config/env.validation.ts`; add a variable there when code starts using it.
+
 Backend (after the NestJS project is generated):
 ```bash
 cd backend
