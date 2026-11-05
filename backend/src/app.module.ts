@@ -1,9 +1,42 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AdminModule } from './admin/admin.module';
+import { AuditModule } from './audit/audit.module';
+import { AuthModule } from './auth/auth.module';
+import { BlogModule } from './blog/blog.module';
+import { ExchangeRatesModule } from './exchange-rates/exchange-rates.module';
+import { FlightBookingsModule } from './flight-bookings/flight-bookings.module';
+import { FlightsModule } from './flights/flights.module';
+import { HotelBookingsModule } from './hotel-bookings/hotel-bookings.module';
+import { HotelsModule } from './hotels/hotels.module';
+import { ItinerariesModule } from './itineraries/itineraries.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { PaymentsModule } from './payments/payments.module';
+import { ReferenceModule } from './reference/reference.module';
+import { ReportsModule } from './reports/reports.module';
+import { UploadsModule } from './uploads/uploads.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
-  imports: [],
+  imports: [
+    AdminModule,
+    AuditModule,
+    AuthModule,
+    BlogModule,
+    ExchangeRatesModule,
+    FlightBookingsModule,
+    FlightsModule,
+    HotelBookingsModule,
+    HotelsModule,
+    ItinerariesModule,
+    NotificationsModule,
+    PaymentsModule,
+    ReferenceModule,
+    ReportsModule,
+    UploadsModule,
+    UsersModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })

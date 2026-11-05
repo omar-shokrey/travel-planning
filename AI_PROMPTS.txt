@@ -81,7 +81,7 @@ Prompt:
 I gave Claude the revised project description (changes highlighted in yellow) and asked it to
 review the changes, compare them with what we had already done and what was planned, and say
 what has to change in the past steps and in the upcoming steps. Follow-up: I asked where the
-requirements workbook in the repository comes from.
+requirements workbook in the repository comes from and had it checked against the official sheets.
 How the output was used:
 Claude compared the revised PDF word by word with the copy in the repository and found nine
 changes: airport time zones and supported currencies come from the CSV files, new provider
@@ -91,6 +91,7 @@ specs/travel-platform.md.
 Accepted, changed, or rejected:
 Accepted: the list of changes and the spec additions, after checking them against the revised
 PDF. Not changed: the 98 issues, the scaffold and the dependencies, which are not affected.
-Postponed: comparing the workbook and the reference CSV files with the official Google Sheets
-until I download them.
+Checked afterwards: I downloaded the two official Google Sheets and Claude compared them with
+the repository. The requirements workbook is identical (same file hash) and the four reference
+CSV files match the provided Mock_Data sheet row for row, so no other change was needed.
 ================================================

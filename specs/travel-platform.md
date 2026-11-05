@@ -65,10 +65,32 @@ Swagger UI is served at `/api/docs`.
 - Mongoose schema/model: persistence.
 - DTO: validation.
 - Frontend calls the API and never accesses MongoDB directly.
-- One feature module per area: auth, users, admin, flights, flight-bookings, hotels, hotel-bookings, payments, itineraries, blog, notifications, audit, exchange-rates, uploads.
+- One feature module per area, listed in the table below.
+
+### Backend modules
+Each module lives in `backend/src/<module>/` and holds its own controller, service, `schemas/` and `dto/`. Modules start empty and are filled in by the feature that needs them.
+
+| Module | Responsibility | Base routes |
+|---|---|---|
+| `auth` | Registration, login with lockout, logout, cookie tokens, change password, current user | `/api/auth/*` |
+| `users` | Own profile and own-account deactivation | `/api/users/me` |
+| `admin` | Account management, moderator accounts, provider activation, admin booking list, report handling, audit log views | `/api/admin/*` |
+| `flights` | Airlines with their policies, flights, cabins, flight search, passenger list and CSV export | `/api/airlines`, `/api/flights` |
+| `flight-bookings` | Seat holds, flight bookings, cancellation, PDF e-ticket | `/api/flight-bookings` |
+| `hotels` | Hotels, rooms, availability, policies, hotel search | `/api/hotels` |
+| `hotel-bookings` | Room holds, reservations, cancellation, hotel reviews | `/api/hotel-bookings`, `/api/reviews` |
+| `payments` | Stripe payments and webhook, refunds, policy display and acceptance | `/api/payments`, `/api/refunds`, `/api/bookings/:type/:id/policies` |
+| `itineraries` | Itineraries, days, activities, budgets, transport costs, clone and public search | `/api/itineraries`, `/api/activities`, `/api/budgets`, `/api/transport-costs` |
+| `blog` | Posts, comments, likes, tags, author pages | `/api/posts`, `/api/comments`, `/api/tags`, `/api/authors` |
+| `notifications` | In-app notifications (GEN-01) | to be defined |
+| `audit` | Administrative audit records (GEN-07) | used by `admin` |
+| `exchange-rates` | FXRatesAPI client, daily cached rates, conversion, supported currencies (ITN-18) | to be defined |
+| `uploads` | Image upload validation and storage (GEN-08) | used by other modules |
+| `reference` | Seeded, read-only countries, cities, airports and attractions (GEN-12, FLT-02) | `/api/airports` |
+| `reports` | Content reports from users (GEN-09); admins handle them through `admin` (GEN-10) | to be defined |
 
 ## Reference data
-Countries, cities, airports and attractions are seeded from the official reference datasets. Records and identifiers must match the datasets, because they are used in the final evaluation. The seed script is idempotent and creates the admin account from environment variables.
+Countries, cities, airports and attractions are seeded from the official reference datasets. Records and identifiers must match the datasets, because they are used in the final evaluation. The seed script is idempotent and creates the admin account from environment variables. It loads whatever rows the CSV files contain (8 each today) and does not hard-code any record.
 
 Each airport has its IANA time zone (`time_zone` in `airports.csv`), used to show flight times in local time (GEN-06) and to read search dates as local dates (FLT-11). The supported currencies are the currency codes listed in `countries.csv` (GEN-12); these are the currencies a user can choose as preferred currency (ACC-09) and convert itinerary budgets into (ITN-18).
 
