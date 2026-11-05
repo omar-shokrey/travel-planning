@@ -47,7 +47,7 @@ Base path `/api`. The full endpoint table is section 8 of the project descriptio
 
 Provider status (ACC-15): `PATCH /api/admin/providers/:type/:id/deactivate` and `PATCH /api/admin/providers/:type/:id/reactivate`, where `:type` is `hotel` or `airline`. Deactivating a provider is separate from suspending its moderator account. A deactivated hotel or airline is hidden from search and cannot be booked, while its existing Confirmed bookings remain valid. Affected parties receive an in-app notification.
 
-Swagger UI is served at `/api/docs`.
+Swagger UI is served at `/api/docs`. Log in with `POST /api/auth/login` in Swagger: the browser then keeps the `httpOnly` cookies and sends them with every later request, so no token is ever pasted.
 
 ### Response conventions
 - A successful response is the resource itself, with no wrapper object.

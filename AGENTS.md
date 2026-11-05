@@ -51,6 +51,7 @@ npm run start:dev
 npm test
 npm run lint
 ```
+With `start:dev` running, the API is at `http://localhost:3001/api` and Swagger at `http://localhost:3001/api/docs`.
 
 Repo root (formatting and Git hooks):
 ```bash
