@@ -49,6 +49,25 @@ Provider status (ACC-15): `PATCH /api/admin/providers/:type/:id/deactivate` and 
 
 Swagger UI is served at `/api/docs`.
 
+### Response conventions
+- A successful response is the resource itself, with no wrapper object.
+- Lists are paginated with `?page=1&limit=10` (GEN-05): page size 10 by default, at most 50. A list response is `{ "items": [...], "meta": { "page", "limit", "total", "totalPages" } }`, and an empty result is `"items": []` (GEN-04).
+- Every error has the same body: `{ "statusCode", "error", "message", "errors"?, "path", "timestamp" }`. `errors` appears only when validation fails (400) and lists `{ "field", "messages" }` for each invalid field (GEN-02), for example:
+
+```json
+{
+  "statusCode": 400,
+  "error": "Bad Request",
+  "message": "Validation failed",
+  "errors": [{ "field": "email", "messages": ["email must be an email"] }],
+  "path": "/api/auth/register",
+  "timestamp": "2026-11-05T11:00:00.000Z"
+}
+```
+
+- Status codes: 400 invalid input, 401 not logged in, 403 wrong role or not the owner, 404 not found, 409 conflict such as a duplicate email.
+- Roles are `user`, `admin`, `airline_moderator` and `hotel_moderator`. A guest has no role. Every route requires login unless it is marked public.
+
 ## Validation and security
 - Required fields, types and enums are validated by DTOs. Unknown properties are rejected.
 - The client cannot set role, status, prices, booking reference, owner or payment state.
@@ -88,6 +107,8 @@ Each module lives in `backend/src/<module>/` and holds its own controller, servi
 | `uploads` | Image upload validation and storage (GEN-08) | used by other modules |
 | `reference` | Seeded, read-only countries, cities, airports and attractions (GEN-12, FLT-02) | `/api/airports` |
 | `reports` | Content reports from users (GEN-09); admins handle them through `admin` (GEN-10) | to be defined |
+
+Code shared by several modules (the role enum, guards, decorators, pipes, the exception filter and the pagination DTOs) lives in `backend/src/common/`, not in a feature module.
 
 ## Reference data
 Countries, cities, airports and attractions are seeded from the official reference datasets. Records and identifiers must match the datasets, because they are used in the final evaluation. The seed script is idempotent and creates the admin account from environment variables. It loads whatever rows the CSV files contain (8 each today) and does not hard-code any record.

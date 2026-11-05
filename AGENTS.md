@@ -19,6 +19,9 @@
 ## Contract
 - All routes are under `/api`. The endpoint list is section 8 of the project description.
 - Roles: guest, registered user, administrator, airline moderator, hotel moderator.
+- Role values are in the `Role` enum (`backend/src/common/enums/role.enum.ts`). Every route requires login unless it is marked `@Public()`. Restrict a route with `@Roles(...)`.
+- Code shared by several modules lives in `backend/src/common/`: `RolesGuard`, `@Public()`, `@Roles()`, `@CurrentUser()`, `ParseObjectIdPipe`, the exception filter and the pagination DTOs. Use them instead of writing your own.
+- Error bodies and paginated lists follow the shapes in the "Response conventions" section of `specs/travel-platform.md`.
 - Moderators manage only their one assigned airline or hotel.
 - Private bookings and itineraries are visible only to their owner. Check ownership on the backend.
 - Authentication uses a secure `httpOnly` cookie. Never store tokens in localStorage or sessionStorage.
