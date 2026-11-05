@@ -10,7 +10,7 @@
 
 ## Architecture
 1. Follow MVC: Model = Mongoose schemas and services, View = Next.js, Controller = NestJS controllers.
-2. Organize the backend into feature modules: auth, users, admin, flights, flight-bookings, hotels, hotel-bookings, payments, itineraries, blog, notifications, audit, exchange-rates, uploads.
+2. Organize the backend into feature modules, one folder each in `backend/src/`: auth, users, admin, flights, flight-bookings, hotels, hotel-bookings, payments, itineraries, blog, notifications, audit, exchange-rates, uploads, reference, reports. What each module owns is in the module table of `specs/travel-platform.md`. Inside a module: `<module>.module.ts`, `<module>.controller.ts`, `<module>.service.ts`, `schemas/`, `dto/`.
 3. Controllers handle HTTP only. Services hold business logic and database access. Schemas define persistence. DTOs validate input.
 4. The frontend talks to the API only and never to MongoDB.
 5. Security, validation and authorization are enforced on the backend, even when the frontend also validates.
@@ -19,6 +19,10 @@
 ## Contract
 - All routes are under `/api`. The endpoint list is section 8 of the project description.
 - Roles: guest, registered user, administrator, airline moderator, hotel moderator.
+- Role values are in the `Role` enum (`backend/src/common/enums/role.enum.ts`). Every route requires login unless it is marked `@Public()`. Restrict a route with `@Roles(...)`.
+- Code shared by several modules lives in `backend/src/common/`: `RolesGuard`, `@Public()`, `@Roles()`, `@CurrentUser()`, `ParseObjectIdPipe`, the exception filter and the pagination DTOs. Use them instead of writing your own.
+- Error bodies and paginated lists follow the shapes in the "Response conventions" section of `specs/travel-platform.md`.
+- Images (GEN-08): put `@UploadImages()` (or `@UploadImage()` for one file) on the route, then use `UploadsService` from `backend/src/uploads/`: `assertWithinLimit` before saving, `saveImages`, and `deleteImage` when an image or its owner is deleted. Keep the returned `filename` in the owner's document. Files are stored in `backend/uploads/` (git-ignored) and served at `/api/uploads/<filename>`.
 - Moderators manage only their one assigned airline or hotel.
 - Private bookings and itineraries are visible only to their owner. Check ownership on the backend.
 - Authentication uses a secure `httpOnly` cookie. Never store tokens in localStorage or sessionStorage.
@@ -39,13 +43,20 @@
 - Never expose or edit `.env`, credentials, tokens, API keys or connection strings.
 
 ## Commands
-Backend (after the NestJS project is generated):
+First time on a machine, from the repo root: `cp .env.example backend/.env`, then edit `backend/.env`. `backend/.env` is git-ignored, so keys never go to GitHub. Environment variables are checked at startup by `backend/src/config/env.validation.ts`; add a variable there when code starts using it.
+
+Backend:
 ```bash
 cd backend
-npm run start:dev
-npm test
-npm run lint
+npm ci                # first time, installs the exact versions from package-lock.json
+npm run start:dev     # API with auto-reload
+npm run format        # Prettier, before every commit
+npm run lint          # oxlint, must report 0 warnings
+npm run build         # compile with the Nest CLI
+npm test              # unit tests
+npm run test:e2e      # end-to-end tests (supertest)
 ```
+With `start:dev` running, the API is at `http://localhost:3001/api` and Swagger at `http://localhost:3001/api/docs`.
 
 Repo root (formatting and Git hooks):
 ```bash

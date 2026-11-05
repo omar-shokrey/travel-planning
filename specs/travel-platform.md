@@ -47,12 +47,33 @@ Base path `/api`. The full endpoint table is section 8 of the project descriptio
 
 Provider status (ACC-15): `PATCH /api/admin/providers/:type/:id/deactivate` and `PATCH /api/admin/providers/:type/:id/reactivate`, where `:type` is `hotel` or `airline`. Deactivating a provider is separate from suspending its moderator account. A deactivated hotel or airline is hidden from search and cannot be booked, while its existing Confirmed bookings remain valid. Affected parties receive an in-app notification.
 
-Swagger UI is served at `/api/docs`.
+Swagger UI is served at `/api/docs`. Log in with `POST /api/auth/login` in Swagger: the browser then keeps the `httpOnly` cookies and sends them with every later request, so no token is ever pasted.
+
+### Response conventions
+- A successful response is the resource itself, with no wrapper object.
+- Lists are paginated with `?page=1&limit=10` (GEN-05): page size 10 by default, at most 50. A list response is `{ "items": [...], "meta": { "page", "limit", "total", "totalPages" } }`, and an empty result is `"items": []` (GEN-04).
+- Every error has the same body: `{ "statusCode", "error", "message", "errors"?, "path", "timestamp" }`. `errors` appears only when validation fails (400) and lists `{ "field", "messages" }` for each invalid field (GEN-02), for example:
+
+```json
+{
+  "statusCode": 400,
+  "error": "Bad Request",
+  "message": "Validation failed",
+  "errors": [{ "field": "email", "messages": ["email must be an email"] }],
+  "path": "/api/auth/register",
+  "timestamp": "2026-11-05T11:00:00.000Z"
+}
+```
+
+- Status codes: 400 invalid input, 401 not logged in, 403 wrong role or not the owner, 404 not found, 409 conflict such as a duplicate email, 413 image larger than 5 MB, 415 image that is not a JPG or PNG.
+- Roles are `user`, `admin`, `airline_moderator` and `hotel_moderator`. A guest has no role. Every route requires login unless it is marked public.
 
 ## Validation and security
 - Required fields, types and enums are validated by DTOs. Unknown properties are rejected.
 - The client cannot set role, status, prices, booking reference, owner or payment state.
 - Authentication uses a secure `httpOnly` cookie, never localStorage or sessionStorage.
+- Two cookies (ACC-19): `access_token` (valid `ACCESS_TOKEN_MINUTES`, sent to `/api`) and `refresh_token` (valid `SESSION_INACTIVITY_MINUTES`, sent only to `/api/auth`). Both are `httpOnly`, `Secure` and `SameSite=Lax` by default. Logging in or refreshing issues new tokens. Logging out clears both cookies and revokes the refresh token on the server (ACC-06). A session with no authenticated request for 30 minutes expires. The frontend sends requests with `credentials: 'include'` and learns the current user from `GET /api/auth/me`.
+- Images (GEN-08): only JPG and PNG, recognised by the first bytes of the file and not by its name or declared type; at most 5 MB each; at most 5 per post, activity or hotel and 1 logo per airline. A file is stored under a random name in `backend/uploads/` and served to anyone at `/api/uploads/<file>`. A request outside these limits is rejected with 413 (too large), 415 (not a JPG or PNG) or 400 (too many, or no file).
 - Role checks and ownership checks happen on the backend. Moderators are limited to their assigned provider.
 - Passwords are hashed. Account emails are unique.
 - A booking is confirmed only after successful payment verification through the Stripe webhook.
@@ -65,10 +86,34 @@ Swagger UI is served at `/api/docs`.
 - Mongoose schema/model: persistence.
 - DTO: validation.
 - Frontend calls the API and never accesses MongoDB directly.
-- One feature module per area: auth, users, admin, flights, flight-bookings, hotels, hotel-bookings, payments, itineraries, blog, notifications, audit, exchange-rates, uploads.
+- One feature module per area, listed in the table below.
+
+### Backend modules
+Each module lives in `backend/src/<module>/` and holds its own controller, service, `schemas/` and `dto/`. Modules start empty and are filled in by the feature that needs them.
+
+| Module | Responsibility | Base routes |
+|---|---|---|
+| `auth` | Registration, login with lockout, logout, cookie tokens, change password, current user | `/api/auth/*` |
+| `users` | Own profile and own-account deactivation | `/api/users/me` |
+| `admin` | Account management, moderator accounts, provider activation, admin booking list, report handling, audit log views | `/api/admin/*` |
+| `flights` | Airlines with their policies, flights, cabins, flight search, passenger list and CSV export | `/api/airlines`, `/api/flights` |
+| `flight-bookings` | Seat holds, flight bookings, cancellation, PDF e-ticket | `/api/flight-bookings` |
+| `hotels` | Hotels, rooms, availability, policies, hotel search | `/api/hotels` |
+| `hotel-bookings` | Room holds, reservations, cancellation, hotel reviews | `/api/hotel-bookings`, `/api/reviews` |
+| `payments` | Stripe payments and webhook, refunds, policy display and acceptance | `/api/payments`, `/api/refunds`, `/api/bookings/:type/:id/policies` |
+| `itineraries` | Itineraries, days, activities, budgets, transport costs, clone and public search | `/api/itineraries`, `/api/activities`, `/api/budgets`, `/api/transport-costs` |
+| `blog` | Posts, comments, likes, tags, author pages | `/api/posts`, `/api/comments`, `/api/tags`, `/api/authors` |
+| `notifications` | In-app notifications (GEN-01) | to be defined |
+| `audit` | Administrative audit records (GEN-07) | used by `admin` |
+| `exchange-rates` | FXRatesAPI client, daily cached rates, conversion, supported currencies (ITN-18) | to be defined |
+| `uploads` | Image upload validation, storage and serving (GEN-08) | used by other modules; serves `/api/uploads/<file>` |
+| `reference` | Seeded, read-only countries, cities, airports and attractions (GEN-12, FLT-02) | `/api/airports` |
+| `reports` | Content reports from users (GEN-09); admins handle them through `admin` (GEN-10) | to be defined |
+
+Code shared by several modules (the role enum, guards, decorators, pipes, the exception filter and the pagination DTOs) lives in `backend/src/common/`, not in a feature module.
 
 ## Reference data
-Countries, cities, airports and attractions are seeded from the official reference datasets. Records and identifiers must match the datasets, because they are used in the final evaluation. The seed script is idempotent and creates the admin account from environment variables.
+Countries, cities, airports and attractions are seeded from the official reference datasets. Records and identifiers must match the datasets, because they are used in the final evaluation. The seed script is idempotent and creates the admin account from environment variables. It loads whatever rows the CSV files contain (8 each today) and does not hard-code any record.
 
 Each airport has its IANA time zone (`time_zone` in `airports.csv`), used to show flight times in local time (GEN-06) and to read search dates as local dates (FLT-11). The supported currencies are the currency codes listed in `countries.csv` (GEN-12); these are the currencies a user can choose as preferred currency (ACC-09) and convert itinerary budgets into (ITN-18).
 

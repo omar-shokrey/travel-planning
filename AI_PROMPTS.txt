@@ -81,7 +81,7 @@ Prompt:
 I gave Claude the revised project description (changes highlighted in yellow) and asked it to
 review the changes, compare them with what we had already done and what was planned, and say
 what has to change in the past steps and in the upcoming steps. Follow-up: I asked where the
-requirements workbook in the repository comes from.
+requirements workbook in the repository comes from and had it checked against the official sheets.
 How the output was used:
 Claude compared the revised PDF word by word with the copy in the repository and found nine
 changes: airport time zones and supported currencies come from the CSV files, new provider
@@ -91,6 +91,44 @@ specs/travel-platform.md.
 Accepted, changed, or rejected:
 Accepted: the list of changes and the spec additions, after checking them against the revised
 PDF. Not changed: the 98 issues, the scaffold and the dependencies, which are not affected.
-Postponed: comparing the workbook and the reference CSV files with the official Google Sheets
-until I download them.
+Checked afterwards: I downloaded the two official Google Sheets and Claude compared them with
+the repository. The requirements workbook is identical (same file hash) and the four reference
+CSV files match the provided Mock_Data sheet row for row, so no other change was needed.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: chore/backend-structure / no issue (project setup)
+Related Requirement: None (setup); prepares GEN-02, GEN-05, GEN-08, ACC-04, ACC-06, ACC-15, ACC-19
+Prompt:
+I asked Claude to guide me step by step through the backend structure of the project and to take the design decisions itself: the 16 feature
+module folders, the shared code in backend/src/common (roles, guards, pipes, error filter,
+pagination), the application setup (API prefix, CORS, cookies, security headers, validation,
+Swagger), the authentication cookie settings, the validation of environment variables and the
+image upload rules (JPG and PNG only, 5 MB, limits per post, activity, hotel and airline). After
+each item I pasted the terminal output of format, lint, build, unit tests and end-to-end tests,
+and I asked Claude to scan the folder before every commit. Before this pull request I asked
+Claude to scan and test the whole backend structure once more and not to continue until it
+was accurate.
+How the output was used:
+I created and devaloped the files; using CLAUDE as a guide in design decisions, then added them to the repository, ran format, lint, build, test and
+test:e2e after each item, and made one commit per item. The result is 16 empty feature modules,
+the shared code in common/, one setup function used by both main.ts and the end-to-end tests,
+the cookie service, startup validation of the environment variables, and an uploads module
+(a service and two decorators) that the post, activity, hotel and airline endpoints will use.
+AGENTS.md and specs/travel-platform.md were updated with the modules, the response and error
+conventions and the image rules. At the last run, 11 unit test suites (108 tests) and 2
+end-to-end suites (20 tests) passed, lint reported 0 warnings and the build was clean.
+Accepted, changed, or rejected:
+Accepted: the response conventions (a success returns the resource itself, lists return items
+and meta, every error has one body), routes private by default, the cookie design (access and
+refresh tokens in httpOnly cookies), and the image checks based on the first bytes of the file.
+Changed: @nestjs/serve-static, installed in the setup pull request, was replaced by Express
+static file serving and uninstalled, after I read the package I found that it adds a
+fallback page for unknown URLs, answers with its own 404 body and may not work under Jest; the
+check of the JWT secrets moved from the cookie step to ACC-04, where the secrets are first used;
+the final scan found the commands in AGENTS.md out of date and they were updated. Rejected:
+wrapping every response in an envelope, and writing the authentication guard before ACC-04.
 ================================================
