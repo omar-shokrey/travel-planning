@@ -7,6 +7,7 @@ import {
   IsNotEmpty,
   IsString,
   IsUrl,
+  Matches,
   Max,
   Min,
   validateSync,
@@ -46,6 +47,11 @@ export class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   UPLOADS_DIR: string = 'uploads';
+
+  @Matches(/^mongodb(\+srv)?:\/\/\S+$/, {
+    message: 'MONGODB_URI must start with mongodb:// or mongodb+srv://',
+  })
+  MONGODB_URI: string;
 
   /** Minutes an access token, and the cookie that holds it, stays valid. */
   @Type(() => Number)
