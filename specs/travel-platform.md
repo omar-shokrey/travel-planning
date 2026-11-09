@@ -122,7 +122,582 @@ Each airport has its IANA time zone (`time_zone` in `airports.csv`), used to sho
 - Optional features above, until all mandatory requirements are done and the team agrees
 
 ## Data model diagram
-<!-- Paste the Mermaid ER diagram here once the schemas are designed. -->
+
+This is the design of the MongoDB collections. It follows section 5 of the project description and was checked against every mandatory requirement in the workbook. In each diagram a solid line labelled "embeds" means the data is stored inside its parent document, and a dashed line means a reference by id. Boxes joined by a solid line are not collections of their own.
+
+### Conventions
+
+- Ids are ObjectIds, except country, city, airport and attraction, which use the official ids from the reference datasets as `_id`.
+- Every collection also has `createdAt` and `updatedAt` (Mongoose timestamps). They are left out of the diagrams.
+- Money is stored as whole minor units (cents) plus a currency code. Bookings, payments and refunds use the single platform currency (PAY-04). Itinerary entries keep their own currency and are converted when read (ITN-18).
+- Moments in time are UTC dates. Calendar dates (hotel stays, itinerary start date) are `YYYY-MM-DD` strings. A flight also stores `departureDateLocal`, the date at the departure airport, for search and for the duplicate flight rule.
+- Enums are stored as strings.
+- A booking copies the prices and the cancellation tiers it was made under, so later edits never change an existing booking (FLT-05, HTL-05) and a refund always follows the policy the user accepted (PAY-02).
+- Counters (`heldSeats`, `bookedSeats`, `ratingCount`, `averageRating`, `likeCount`, `commentCount`, `dayCount`) are caches that the service keeps in step. They can always be recomputed from the documents they summarise.
+- Uploaded images are stored as file names; the files live in `UPLOADS_DIR` (GEN-08).
+
+### Overview
+
+```mermaid
+erDiagram
+    USER ||..o{ SESSION : "logs in with"
+    USER ||..o{ NOTIFICATION : "receives"
+    USER ||..o{ AUDIT_LOG : "admin actions"
+    USER ||..o{ REPORT : "files"
+    USER }o..o| AIRLINE : "moderates"
+    USER }o..o| HOTEL : "moderates"
+
+    AIRLINE ||..o{ FLIGHT : "operates"
+    AIRPORT ||..o{ FLIGHT : "departs or arrives"
+    USER ||..o{ FLIGHT_BOOKING : "books"
+    FLIGHT ||..o{ FLIGHT_BOOKING : "booked in"
+
+    HOTEL ||..o{ ROOM : "has"
+    ROOM ||..o{ ROOM_NIGHT : "occupied on"
+    USER ||..o{ HOTEL_BOOKING : "reserves"
+    HOTEL ||..o{ HOTEL_BOOKING : "reserved in"
+    HOTEL_BOOKING ||..o{ ROOM_NIGHT : "holds"
+    HOTEL_BOOKING ||..o| REVIEW : "reviewed by"
+    HOTEL ||..o{ REVIEW : "rated by"
+
+    FLIGHT_BOOKING ||..o| PAYMENT : "paid by"
+    HOTEL_BOOKING ||..o| PAYMENT : "paid by"
+    PAYMENT ||..o| REFUND : "refunded by"
+
+    USER ||..o{ ITINERARY : "owns"
+    CITY ||..o{ ITINERARY : "visited in days"
+    USER ||..o{ POST : "writes"
+    POST ||..o{ COMMENT : "has"
+    POST ||..o{ LIKE : "has"
+    USER ||..o{ COMMENT : "writes"
+    USER ||..o{ LIKE : "gives"
+
+    COUNTRY ||..o{ CITY : "contains"
+    CITY ||..o{ AIRPORT : "has"
+    CITY ||..o{ ATTRACTION : "has"
+    CITY ||..o{ HOTEL : "located in"
+
+    EXCHANGE_RATE
+    STRIPE_EVENT
+```
+
+### Collections by module
+
+| Module | Collections |
+|---|---|
+| `auth` | `sessions` |
+| `users` | `users` |
+| `flights` | `airlines`, `flights` |
+| `flight-bookings` | `flight_bookings` |
+| `hotels` | `hotels`, `rooms`, `room_nights` |
+| `hotel-bookings` | `hotel_bookings`, `reviews` |
+| `payments` | `payments`, `refunds`, `stripe_events` |
+| `itineraries` | `itineraries` |
+| `exchange-rates` | `exchange_rates` |
+| `blog` | `posts`, `comments`, `likes` |
+| `notifications` | `notifications` |
+| `audit` | `audit_logs` |
+| `reports` | `reports` |
+| `reference` | `countries`, `cities`, `airports`, `attractions` |
+
+The `admin` and `uploads` modules have no collections of their own.
+
+### Accounts and roles
+
+```mermaid
+erDiagram
+    USER {
+        ObjectId _id PK
+        string name
+        string email UK "lowercase"
+        string passwordHash "salted hash, never returned"
+        string phone "optional"
+        string preferredCurrency "supported currency code"
+        string role "user, admin, airline_moderator, hotel_moderator"
+        string status "active, suspended, deactivated"
+        date consentAcceptedAt "terms and privacy consent"
+        int failedLoginAttempts "reset on success"
+        date lockedUntil "15 minutes after 5 failures"
+        bool mustChangePassword "temporary password"
+        date deactivatedAt
+    }
+    MODERATOR_ASSIGNMENT {
+        string providerType "hotel or airline"
+        ObjectId providerId FK
+    }
+    SESSION {
+        ObjectId _id PK
+        ObjectId userId FK
+        string refreshTokenHash
+        date lastActivityAt "30 minutes of inactivity"
+        date expiresAt "TTL index"
+        date revokedAt "set on logout"
+    }
+    USER ||--o| MODERATOR_ASSIGNMENT : "embeds"
+    USER ||..o{ SESSION : "has"
+```
+
+- The moderator assignment is embedded in the user, because a moderator has exactly one provider and the ownership check reads it on every request (ACC-13).
+- Sessions are separate. One user has many, each holds the hash of a refresh token so logout can revoke it (ACC-06), and a TTL index deletes expired ones.
+- `status` covers suspension (ACC-15, ACC-16) and own-account deactivation (ACC-12). A deactivated user is shown as "Deleted user" on comments and reviews.
+- Indexes: unique `email`; `sessions.userId`; TTL on `sessions.expiresAt`; `users.assignment.providerId`.
+
+### Flights
+
+```mermaid
+erDiagram
+    AIRLINE {
+        ObjectId _id PK
+        string name
+        string code UK "IATA airline code"
+        string logo "uploaded file name"
+        bool active "false hides it from search"
+    }
+    AIRLINE_POLICY {
+        int extraBagPrice "minor units"
+        int maxExtraBags "per passenger"
+    }
+    CANCELLATION_TIER {
+        int daysBefore "days before departure"
+        int refundPercent "0 to 100"
+    }
+    FLIGHT {
+        ObjectId _id PK
+        ObjectId airlineId FK
+        string flightNumber
+        string departureAirport FK "IATA code"
+        string arrivalAirport FK "IATA code"
+        date departureAt "UTC"
+        date arrivalAt "UTC"
+        string departureDateLocal "YYYY-MM-DD at the departure airport"
+        string status "scheduled, cancelled, departed"
+    }
+    FLIGHT_CABIN {
+        string cabin "economy, premium_economy, business, first"
+        int totalSeats
+        int bookedSeats
+        int heldSeats
+        int price "minor units per seat"
+        int freeBags
+        int maxBagKg
+    }
+    AIRLINE ||--|| AIRLINE_POLICY : "embeds"
+    AIRLINE_POLICY ||--o{ CANCELLATION_TIER : "embeds"
+    AIRLINE ||..o{ FLIGHT : "operates"
+    FLIGHT ||--|{ FLIGHT_CABIN : "embeds"
+    AIRPORT ||..o{ FLIGHT : "departs or arrives"
+```
+
+- The cabins (at most 4) are embedded in the flight, so the seat counters live in the same document and one conditional update reserves seats only if enough remain (FLT-22). Available seats are `totalSeats - bookedSeats - heldSeats`.
+- `departureAt` and `arrivalAt` are UTC. The airport time zones (see Reference data) are used to show local times (GEN-06). `departureDateLocal` supports search by local date (FLT-11) and the rule that an airline cannot repeat a flight number on the same departure date (FLT-03).
+- Only `scheduled` flights are searchable, editable or bookable (FLT-30). A flight becomes `departed` once its departure time has passed.
+- Indexes: unique `airlines.code`; unique (`airlineId`, `flightNumber`, `departureDateLocal`); (`departureAirport`, `arrivalAirport`, `departureDateLocal`, `status`).
+
+### Flight bookings
+
+```mermaid
+erDiagram
+    FLIGHT_BOOKING {
+        ObjectId _id PK
+        string reference UK "booking reference"
+        ObjectId userId FK
+        string status "pending_payment, confirmed, completed, expired, cancelled"
+        date holdExpiresAt "10 minutes after payment starts"
+        string currency "platform currency"
+        int fareTotal "minor units"
+        int baggageTotal "minor units"
+        int total "minor units"
+        date policyAcceptedAt "set when the user accepts the policies"
+        date cancelledAt
+        string cancelledBy "user or provider"
+        int refundPercent
+    }
+    BOOKING_SEGMENT {
+        ObjectId flightId FK
+        ObjectId airlineId FK
+        string cabin
+        int fare "per adult or child, at booking time"
+        int seatsReserved "adults and children only"
+        int extraBagPrice "at booking time"
+    }
+    CANCELLATION_TIER {
+        int daysBefore "copy of the airline tier"
+        int refundPercent
+    }
+    PASSENGER {
+        string fullName
+        date dateOfBirth
+        string passportNumber
+        string type "adult, child, infant"
+    }
+    PASSENGER_BAGGAGE {
+        int segment "0 outbound, 1 return"
+        int bags
+        int weightKg
+    }
+    FLIGHT_BOOKING ||--|{ BOOKING_SEGMENT : "embeds"
+    BOOKING_SEGMENT ||--o{ CANCELLATION_TIER : "embeds"
+    FLIGHT_BOOKING ||--|{ PASSENGER : "embeds"
+    PASSENGER ||--o{ PASSENGER_BAGGAGE : "embeds"
+    FLIGHT ||..o{ BOOKING_SEGMENT : "referenced by"
+    USER ||..o{ FLIGHT_BOOKING : "books"
+```
+
+- A round trip is one booking with two embedded segments, one reference and one payment (FLT-12). Infants are stored as passengers but occupy no seat, so `seatsReserved` counts adults and children only.
+- Extra baggage is stored per passenger and per segment, because the two directions can be different airlines with different bag prices (FLT-08, FLT-19).
+- A segment stores the flight id, so flight times are always read from the flight. A schedule change (FLT-05) is visible in every booking without copying. The cancellation tiers and the extra bag price are copied, and a round trip is refunded using the first segment's tiers.
+- Indexes: unique `reference`; (`userId`, `status`); `segments.flightId`; (`status`, `holdExpiresAt`) for the hold-expiry job.
+
+### Hotels
+
+```mermaid
+erDiagram
+    HOTEL {
+        ObjectId _id PK
+        string name
+        string addressLine
+        string cityId FK
+        string countryCode FK
+        string description
+        array photos "up to 5 uploaded file names"
+        int starClass "1 to 5"
+        array amenities
+        bool active "false hides it from search"
+        int ratingCount "kept in step with reviews"
+        float averageRating "kept in step with reviews"
+    }
+    HOTEL_POLICY {
+        string checkInTime "HH:mm"
+        string checkOutTime "HH:mm"
+    }
+    CANCELLATION_TIER {
+        int daysBefore "days before check-in"
+        int refundPercent "0 to 100"
+    }
+    ROOM {
+        ObjectId _id PK
+        ObjectId hotelId FK
+        string number "unique within the hotel"
+        string type
+        int beds
+        int maxOccupancy
+        int pricePerNight "minor units"
+        bool active "false excludes it from search"
+    }
+    ROOM_AVAILABILITY {
+        string from "YYYY-MM-DD"
+        string to "YYYY-MM-DD, no overlaps"
+    }
+    ROOM_NIGHT {
+        ObjectId _id PK
+        ObjectId roomId FK
+        ObjectId hotelId FK
+        string date "YYYY-MM-DD, unique with roomId"
+        string state "held, booked, blocked"
+        ObjectId bookingId FK "empty when blocked"
+        date holdExpiresAt "only when held"
+    }
+    HOTEL ||--|| HOTEL_POLICY : "embeds"
+    HOTEL_POLICY ||--o{ CANCELLATION_TIER : "embeds"
+    HOTEL ||..o{ ROOM : "has"
+    ROOM ||--o{ ROOM_AVAILABILITY : "embeds"
+    ROOM ||..o{ ROOM_NIGHT : "occupied on"
+    CITY ||..o{ HOTEL : "located in"
+```
+
+- The policy and the date ranges when a room is bookable are embedded, because each belongs to exactly one hotel or room (HTL-04, HTL-09, HTL-10).
+- `room_nights` has one document per room per night, with the state `held`, `booked` or `blocked`. The unique index on (`roomId`, `date`) means two people can never hold the same night. Blocking a date range is rejected when any of its nights is already taken (HTL-06). The moderator's room status view (HTL-08) reads this collection.
+- Booking several rooms must be all-or-nothing (HTL-18), so it uses a MongoDB transaction (an Atlas free cluster is a three-node replica set); if a transaction turns out to be unavailable, the nights already inserted are deleted when one insert fails. Held nights whose `holdExpiresAt` has passed are ignored by every query and removed before a new hold is inserted.
+- Indexes: unique (`hotelId`, `number`); unique (`roomId`, `date`); (`hotelId`, `date`); (`cityId`, `active`).
+
+### Hotel bookings and reviews
+
+```mermaid
+erDiagram
+    HOTEL_BOOKING {
+        ObjectId _id PK
+        string reference UK "booking reference"
+        ObjectId userId FK
+        ObjectId hotelId FK
+        string checkIn "YYYY-MM-DD"
+        string checkOut "YYYY-MM-DD"
+        int nights
+        string status "pending_payment, confirmed, completed, expired, cancelled"
+        date holdExpiresAt "10 minutes after payment starts"
+        string currency "platform currency"
+        int total "minor units"
+        string checkInTime "copy of the hotel time"
+        string checkOutTime "copy of the hotel time"
+        date policyAcceptedAt "set when the user accepts the policies"
+        date cancelledAt
+        string cancelledBy "user or provider"
+        int refundPercent
+    }
+    BOOKED_ROOM {
+        ObjectId roomId FK
+        string roomLabel "number and type at booking time"
+        int pricePerNight "at booking time"
+        int adults
+        array childAges "each 0 to 17"
+    }
+    CANCELLATION_TIER {
+        int daysBefore "copy of the hotel tier"
+        int refundPercent
+    }
+    REVIEW {
+        ObjectId _id PK
+        ObjectId hotelId FK
+        ObjectId userId FK
+        ObjectId bookingId FK "unique, one review per reservation"
+        int rating "1 to 5"
+        string text "optional, max 1000"
+        string moderation "visible or hidden"
+    }
+    HOTEL_BOOKING ||--|{ BOOKED_ROOM : "embeds"
+    HOTEL_BOOKING ||--o{ CANCELLATION_TIER : "embeds"
+    HOTEL_BOOKING ||..o| REVIEW : "reviewed by"
+    HOTEL ||..o{ HOTEL_BOOKING : "reserved in"
+    HOTEL ||..o{ REVIEW : "rated by"
+    USER ||..o{ HOTEL_BOOKING : "reserves"
+    USER ||..o{ REVIEW : "writes"
+    ROOM ||..o{ BOOKED_ROOM : "referenced by"
+```
+
+- One reservation embeds all its rooms, with the price and the guests of each (HTL-16), plus a copy of the cancellation tiers and the check-in and check-out times.
+- Reviews are a separate collection because they are listed and paginated on their own and can be edited or deleted. The unique `bookingId` enforces one review per reservation (HTL-23). The hotel's `ratingCount` and `averageRating` are recalculated whenever a review is added, edited or deleted.
+- A confirmed reservation becomes `completed` once its check-out date has passed.
+- Indexes: unique `reference`; (`userId`, `status`); (`hotelId`, `status`); (`status`, `holdExpiresAt`); reviews (`hotelId`, `createdAt` descending); unique `reviews.bookingId`.
+
+### Payments
+
+```mermaid
+erDiagram
+    PAYMENT {
+        ObjectId _id PK
+        string bookingType "flight or hotel"
+        ObjectId bookingId FK
+        ObjectId userId FK
+        string stripePaymentIntentId UK
+        int amount "minor units"
+        string currency "platform currency"
+        string status "requires_payment, succeeded, failed, cancelled"
+    }
+    REFUND {
+        ObjectId _id PK
+        string bookingType "flight or hotel"
+        ObjectId bookingId FK
+        ObjectId paymentId FK
+        ObjectId userId FK
+        int amount "minor units"
+        int refundPercent
+        string reason "user_cancellation or flight_cancelled"
+        string status "pending, refunded, failed"
+        string stripeRefundId
+    }
+    STRIPE_EVENT {
+        string _id PK "Stripe event id"
+        string type
+        date processedAt "TTL index"
+    }
+    FLIGHT_BOOKING ||..o| PAYMENT : "paid by"
+    HOTEL_BOOKING ||..o| PAYMENT : "paid by"
+    PAYMENT ||..o| REFUND : "refunded by"
+```
+
+- A payment stores only the Stripe payment id, amount, currency and status (PAY-01). A booking has one payment, and a retry reuses the same payment intent.
+- A booking has at most one refund, because only whole cancellations exist (FLT-26, HTL-21). Its status is shown on the booking details (PAY-03).
+- `stripe_events` stores the id of every processed webhook event. When Stripe sends the same event again, the id already exists and the handler ignores it.
+- Indexes: unique `stripePaymentIntentId`; unique (`bookingType`, `bookingId`) on `payments` and on `refunds`; TTL on `stripe_events.processedAt`.
+
+### Itineraries
+
+```mermaid
+erDiagram
+    ITINERARY {
+        ObjectId _id PK
+        ObjectId ownerId FK
+        string title "max 100"
+        array countries "country codes"
+        string startDate "YYYY-MM-DD"
+        string visibility "private or public"
+        int dayCount "kept in step with days"
+        string moderation "visible or hidden"
+        bool authorDeactivated "hides public itineraries"
+    }
+    CLONE_SOURCE {
+        ObjectId itineraryId "not enforced, the original may be deleted"
+        ObjectId authorId
+        string authorName "copied at clone time"
+    }
+    ITINERARY_DAY {
+        ObjectId _id PK
+        string cityId FK
+        string notes
+    }
+    ACTIVITY {
+        ObjectId _id PK
+        string name
+        string description
+        string time "optional HH:mm"
+        int cost "optional, minor units"
+        string currency
+        array images "up to 5 uploaded file names"
+    }
+    BUDGET_ENTRY {
+        ObjectId _id PK
+        string category "food, accommodation, local_transport, activities"
+        int amount "minor units, 0 or more"
+        string currency
+    }
+    TRANSPORT_COST {
+        ObjectId _id PK
+        string mode
+        string fromCityId FK
+        string toCityId FK
+        int amount "minor units"
+        string currency
+    }
+    EXCHANGE_RATE {
+        string _id PK "rate date YYYY-MM-DD"
+        string base "USD"
+        object rates "currency code to rate"
+        date fetchedAt
+    }
+    ITINERARY ||--o| CLONE_SOURCE : "embeds"
+    ITINERARY ||--o{ ITINERARY_DAY : "embeds, array order is the day number"
+    ITINERARY_DAY ||--o{ ACTIVITY : "embeds"
+    ITINERARY_DAY ||--o{ BUDGET_ENTRY : "embeds"
+    ITINERARY_DAY ||--o{ TRANSPORT_COST : "embeds"
+    USER ||..o{ ITINERARY : "owns"
+    CITY ||..o{ ITINERARY_DAY : "visited on"
+```
+
+- Everything under an itinerary is embedded in one document. It belongs to one owner, is bounded (at most 60 days, ITN-05) and is always loaded together.
+- The day number is the position in the `days` array, so moving, deleting and renumbering days is one array update (ITN-07, ITN-08). Dates, city groups and budget totals are computed when read and never stored (ITN-09, ITN-14).
+- Cloning copies the document and makes the clone private (ITN-21). `cloneSource` keeps the original author's name, so deleting the original leaves clones untouched (ITN-01).
+- `exchange_rates` has one document per day, fetched once a day. The latest is used, and the last cached one when the API is unavailable (ITN-18).
+- Indexes: (`ownerId`, `updatedAt`); (`visibility`, `moderation`, `authorDeactivated`, `dayCount`); text on `title`; `countries`; `days.cityId`.
+
+### Community
+
+```mermaid
+erDiagram
+    POST {
+        ObjectId _id PK
+        ObjectId authorId FK
+        string title
+        string body
+        array tags "up to 5, each max 30, lowercase"
+        array images "up to 5 uploaded file names"
+        string status "draft or published"
+        int likeCount "kept in step with likes"
+        int commentCount "kept in step with comments"
+        string moderation "visible or hidden"
+        bool authorDeactivated "hides the post"
+        date publishedAt
+    }
+    COMMENT {
+        ObjectId _id PK
+        ObjectId postId FK
+        ObjectId authorId FK
+        string body "1 to 500"
+        string moderation "visible or hidden"
+    }
+    LIKE {
+        ObjectId _id PK
+        ObjectId postId FK
+        ObjectId userId FK "unique with postId"
+    }
+    USER ||..o{ POST : "writes"
+    POST ||..o{ COMMENT : "has"
+    POST ||..o{ LIKE : "has"
+    USER ||..o{ COMMENT : "writes"
+    USER ||..o{ LIKE : "gives"
+```
+
+- Tags are a list of strings inside the post. A separate tag collection would hold nothing but the name. Tag search and the tag page use an index on that list (BLG-08).
+- Likes and comments are separate because they are unbounded. The unique (`postId`, `userId`) index on likes enforces "like once" (BLG-06).
+- Search results are ordered by likes plus comments, newest first (BLG-09), computed from the two counters. Searching by author name first finds the users by name and then their posts, so no name is copied into the post.
+- Indexes: (`status`, `moderation`, `publishedAt`); `tags`; text on `title`; comments (`postId`, `createdAt`); unique likes (`postId`, `userId`).
+
+### Platform services and reference data
+
+```mermaid
+erDiagram
+    NOTIFICATION {
+        ObjectId _id PK
+        ObjectId userId FK
+        string type "booking_confirmed, booking_cancelled, refund, flight_changed, account_suspended, provider_deactivated"
+        string message
+        string linkType "flight_booking, hotel_booking, flight, hotel"
+        ObjectId linkId
+        date readAt "empty means unread"
+    }
+    AUDIT_LOG {
+        ObjectId _id PK
+        ObjectId adminId FK
+        string action "for example suspend_user, delete_post"
+        string targetType
+        string targetId
+        string details "short note"
+    }
+    REPORT {
+        ObjectId _id PK
+        ObjectId reporterId FK
+        string targetType "post, comment, review, itinerary"
+        ObjectId targetId
+        string reason
+        string status "open, dismissed, hidden, deleted"
+        ObjectId resolvedBy FK
+        date resolvedAt
+    }
+    COUNTRY {
+        string _id PK "country code"
+        string name
+        string currency "currency code"
+    }
+    CITY {
+        string _id PK "city_id"
+        string name
+        string countryCode FK
+    }
+    AIRPORT {
+        string _id PK "iata_code"
+        string name
+        string cityId FK
+        string countryCode FK
+        string timeZone "IANA"
+    }
+    ATTRACTION {
+        string _id PK "attraction_id"
+        string name
+        string cityId FK
+    }
+    USER ||..o{ NOTIFICATION : "receives"
+    USER ||..o{ AUDIT_LOG : "admin actions"
+    USER ||..o{ REPORT : "files"
+    COUNTRY ||..o{ CITY : "contains"
+    CITY ||..o{ AIRPORT : "has"
+    CITY ||..o{ ATTRACTION : "has"
+```
+
+- A notification is unread while `readAt` is empty (GEN-01). The audit log is append-only (GEN-07). A report is unique per (`reporterId`, `targetType`, `targetId`), which enforces "at most once per item" (GEN-09). Hidden content stays visible to its author and to admins (GEN-10) through the `moderation` field on posts, comments, reviews and itineraries.
+- The four reference collections keep the official ids, so the seed can run more than once without creating duplicates (GEN-12).
+- The supported currencies are the distinct `currency` values in `countries`, so they have no collection of their own.
+- Indexes: notifications (`userId`, `readAt`, `createdAt`); unique `reports` (`reporterId`, `targetType`, `targetId`); `reports.status`.
+
+### Holds, concurrency and time-based changes
+
+- Flight seats: one conditional update on the flight document reserves the seats, so concurrent requests can never book more seats than exist (FLT-22).
+- Hotel rooms: the unique (`roomId`, `date`) index decides who gets a night, and a multi-room request is one transaction (HTL-18).
+- Hold expiry: a scheduled job (`@nestjs/schedule`) finds `pending_payment` bookings whose `holdExpiresAt` has passed, sets them to `expired` with an update that only matches if they are still `pending_payment`, and then releases the seats or nights. The payment webhook confirms a booking with the same condition, so a booking cannot be both confirmed and released.
+- The same job moves confirmed hotel reservations to `completed` after check-out and flights to `departed` after the departure time (HTL-23, FLT-30).
+- Webhooks: the Stripe event id in `stripe_events` makes a repeated event harmless.
+- If a cached counter ever disagrees with the documents it summarises, it is recomputed from them.
+
+### Not modelled yet (optional features)
+
+Each of these can be added later without changing the collections above: favourites (BON-02, a new collection), hotel replies to reviews (HTL-26, a field on the review), seat selection (FLT-28, seat numbers on the cabin and the segment), email verification and password reset tokens (ACC-02, ACC-07, a new collection), bookings linked to itinerary days (ITN-27, a field on the day) and an itinerary attached to a post (BLG-13, a field on the post).
 
 ## Milestones
 - Milestone 1, backend and API: deadline 20/11. Evaluated through Swagger UI.
