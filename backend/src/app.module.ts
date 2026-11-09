@@ -1,9 +1,9 @@
-import { Logger, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
-import type { Connection } from 'mongoose';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { databaseOptions } from './config/database.config';
 import { validateEnv } from './config/env.validation';
 import { AdminModule } from './admin/admin.module';
 import { AuditModule } from './audit/audit.module';
@@ -31,20 +31,7 @@ import { UsersModule } from './users/users.module';
     }),
     MongooseModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        uri: config.getOrThrow<string>('MONGODB_URI'),
-        serverSelectionTimeoutMS: 10_000,
-        retryAttempts: 2,
-        retryDelay: 2_000,
-        connectionFactory: (connection: Connection) => {
-          const logger = new Logger('MongoDB');
-          logger.log(`Connected to database "${connection.name}"`);
-          connection.on('disconnected', () =>
-            logger.warn('Disconnected from the database'),
-          );
-          return connection;
-        },
-      }),
+      useFactory: databaseOptions,
     }),
     AdminModule,
     AuditModule,

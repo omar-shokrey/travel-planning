@@ -56,8 +56,12 @@ npm run lint          # oxlint, must report 0 warnings
 npm run build         # compile with the Nest CLI
 npm test              # unit tests
 npm run test:e2e      # end-to-end tests (supertest)
+npm run seed -- --dry-run   # check the reference data and the database, writes nothing
+npm run seed                # load the reference data and the admin account
 ```
 With `start:dev` running, the API is at `http://localhost:3001/api` and Swagger at `http://localhost:3001/api/docs`.
+
+The team leader runs the seed against the shared database. It needs `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `backend/.env` (the password needs 8 or more characters with a letter and a digit). Stop `start:dev` first, because the build clears `dist/`.
 
 Repo root (formatting and Git hooks):
 ```bash

@@ -115,6 +115,8 @@ Code shared by several modules (the role enum, guards, decorators, pipes, the ex
 ## Reference data
 Countries, cities, airports and attractions are seeded from the official reference datasets. Records and identifiers must match the datasets, because they are used in the final evaluation. The seed script is idempotent and creates the admin account from environment variables. It loads whatever rows the CSV files contain (8 each today) and does not hard-code any record.
 
+Run the seed from `backend/` with `npm run seed`. `npm run seed -- --dry-run` does every check and shows what would change, but writes nothing. The seed first checks the four files (unique ids, every city has a country, every airport has a city of the same country, every attraction has a city) and stops before writing anything if a row is wrong. It then adds missing records and updates changed ones, and never deletes. It creates the administrator from `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `backend/.env` only if no account with that email exists, so an existing administrator and their password stay unchanged. Only the team leader runs it against the shared database.
+
 Each airport has its IANA time zone (`time_zone` in `airports.csv`), used to show flight times in local time (GEN-06) and to read search dates as local dates (FLT-11). The supported currencies are the currency codes listed in `countries.csv` (GEN-12); these are the currencies a user can choose as preferred currency (ACC-09) and convert itinerary budgets into (ITN-18).
 
 ## Out of scope
