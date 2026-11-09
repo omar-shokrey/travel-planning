@@ -10,7 +10,7 @@
 
 ## Architecture
 1. Follow MVC: Model = Mongoose schemas and services, View = Next.js, Controller = NestJS controllers.
-2. Organize the backend into feature modules, one folder each in `backend/src/`: auth, users, admin, flights, flight-bookings, hotels, hotel-bookings, payments, itineraries, blog, notifications, audit, exchange-rates, uploads, reference, reports. What each module owns is in the module table of `specs/travel-platform.md`. Inside a module: `<module>.module.ts`, `<module>.controller.ts`, `<module>.service.ts`, `schemas/`, `dto/`.
+2. Organize the backend into feature modules, one folder each in `backend/src/`: auth, users, admin, flights, flight-bookings, hotels, hotel-bookings, payments, itineraries, blog, notifications, audit, exchange-rates, uploads, reference, reports. What each module owns is in the module table of `specs/travel-platform.md`. Inside a module: `<module>.module.ts`, `<module>.controller.ts`, `<module>.service.ts`, `models/`, `dto/`.
 3. Controllers handle HTTP only. Services hold business logic and database access. Schemas define persistence. DTOs validate input.
 4. The frontend talks to the API only and never to MongoDB.
 5. Security, validation and authorization are enforced on the backend, even when the frontend also validates.
@@ -39,6 +39,7 @@
 - Validate all external input with DTOs. The global `ValidationPipe` uses `whitelist` and `forbidNonWhitelisted`.
 - Hash passwords. Never log or return password hashes.
 - Add or update meaningful tests for every change.
+- Mongoose schemas: give every enum field an explicit type, for example `@Prop({ type: String, enum: Object.values(Status) })`. NestJS cannot read an enum's type by itself and the app fails to start.
 - Do not add packages unless necessary.
 - Never expose or edit `.env`, credentials, tokens, API keys or connection strings.
 

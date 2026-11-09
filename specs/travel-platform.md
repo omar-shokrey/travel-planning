@@ -89,7 +89,7 @@ Swagger UI is served at `/api/docs`. Log in with `POST /api/auth/login` in Swagg
 - One feature module per area, listed in the table below.
 
 ### Backend modules
-Each module lives in `backend/src/<module>/` and holds its own controller, service, `schemas/` and `dto/`. Modules start empty and are filled in by the feature that needs them.
+Each module lives in `backend/src/<module>/` and holds its own controller, service, `models/` and `dto/`. Modules start empty and are filled in by the feature that needs them.
 
 | Module | Responsibility | Base routes |
 |---|---|---|
