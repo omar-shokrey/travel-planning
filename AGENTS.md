@@ -43,6 +43,18 @@
 - Do not add packages unless necessary.
 - Never expose or edit `.env`, credentials, tokens, API keys or connection strings.
 
+## Conventions
+Follow the names the code already uses. The rules for ids, money and dates are also in "Data model diagram, Conventions" in `specs/travel-platform.md`.
+- Files and folders: lowercase kebab-case with the role as a suffix, for example `flight-bookings.service.ts`, `create-flight.dto.ts`, `user.schema.ts`, `role.enum.ts`, `roles.guard.ts`. A unit test sits next to its file as `<name>.spec.ts`. End-to-end tests live in `backend/test/` as `<name>.e2e-spec.ts`.
+- Classes and enums: PascalCase (`FlightBookingsService`, `Role`). Enum members are PascalCase and their values are lowercase snake_case strings (`AirlineModerator = 'airline_moderator'`).
+- Properties, JSON fields and query parameters: camelCase (`countryCode`, `passwordHash`), unless the project description names a parameter differently. Constants and environment variables: UPPER_SNAKE_CASE (`PASSWORD_SALT_ROUNDS`).
+- MongoDB collections: plural snake_case as in the data model (`flight_bookings`), set with `@Schema({ collection: '...' })`.
+- Routes: lowercase kebab-case plural nouns under `/api`, as in section 8 of the project description (`/api/flight-bookings`).
+- Moments in time are stored as UTC dates and returned as ISO 8601 strings in UTC that end in `Z`, for example `2026-11-05T11:00:00.000Z`. Accept ISO 8601 input and convert it to UTC before saving.
+- A date without a time (hotel check-in, itinerary start date) is a `YYYY-MM-DD` string, never a `Date`, so no time zone can shift it.
+- A flight keeps its times in UTC. Use the airport's IANA time zone (`timeZone`, from `airports.csv`) with `luxon` to show a local time or to compute `departureDateLocal`. Never add or subtract hours by hand.
+- Money is a whole number of minor units (cents) plus a currency code, never a floating-point number.
+
 ## Commands
 First time on a machine, from the repo root: `cp .env.example backend/.env`, then edit `backend/.env`. `backend/.env` is git-ignored, so keys never go to GitHub. Environment variables are checked at startup by `backend/src/config/env.validation.ts`; add a variable there when code starts using it.
 
