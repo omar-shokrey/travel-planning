@@ -37,7 +37,7 @@ describe('AuthCookiesService', () => {
       httpOnly: true,
       secure: true,
       sameSite: 'lax',
-      path: '/api',
+      path: '/',
       maxAge: 10 * 60 * 1000,
     });
     expect(response.cookie).toHaveBeenCalledWith(
@@ -95,7 +95,7 @@ describe('AuthCookiesService', () => {
       httpOnly: true,
       secure: true,
       sameSite: 'lax',
-      path: '/api',
+      path: '/',
     });
     expect(response.clearCookie).toHaveBeenCalledWith('refresh_token', {
       httpOnly: true,
