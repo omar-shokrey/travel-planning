@@ -44,11 +44,17 @@ describe('App setup (e2e)', () => {
   });
 
   it('serves routes under the /api prefix only', async () => {
-    await request(app.getHttpServer())
-      .get('/api')
-      .expect(200)
-      .expect('Hello World!');
+    await request(app.getHttpServer()).get('/api/health').expect(200);
+    await request(app.getHttpServer()).get('/health').expect(404);
     await request(app.getHttpServer()).get('/').expect(404);
+  });
+
+  it('reports that the API and the database are up', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/health')
+      .expect(200);
+
+    expect(response.body).toEqual({ status: 'ok', database: 'up' });
   });
 
   it('answers an unknown route with the standard error body', async () => {
@@ -103,7 +109,9 @@ describe('App setup (e2e)', () => {
   });
 
   it('sends security headers', async () => {
-    const response = await request(app.getHttpServer()).get('/api').expect(200);
+    const response = await request(app.getHttpServer())
+      .get('/api/health')
+      .expect(200);
 
     expect(response.headers['x-content-type-options']).toBe('nosniff');
     expect(response.headers['cross-origin-resource-policy']).toBe(
@@ -116,7 +124,7 @@ describe('App setup (e2e)', () => {
     const frontendUrl = app.get(ConfigService).get<string>('FRONTEND_URL');
 
     const response = await request(app.getHttpServer())
-      .options('/api')
+      .options('/api/health')
       .set('Origin', frontendUrl as string)
       .set('Access-Control-Request-Method', 'GET')
       .expect(204);
