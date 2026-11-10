@@ -1,5 +1,8 @@
 import { validateEnv } from './env.validation';
 
+const MONGODB_URI = 'mongodb://localhost:27017/travel-planning-test';
+const base = { MONGODB_URI };
+
 const invalidCases: [Record<string, string>, RegExp][] = [
   [{ PORT: 'abc' }, /PORT/],
   [{ PORT: '0' }, /PORT/],
@@ -15,12 +18,26 @@ const invalidCases: [Record<string, string>, RegExp][] = [
   [{ COOKIE_SECURE: 'yes' }, /COOKIE_SECURE/],
   [{ COOKIE_SECURE: '' }, /COOKIE_SECURE/],
   [{ COOKIE_SAME_SITE: 'banana' }, /COOKIE_SAME_SITE/],
+  [{ MONGODB_URI: '' }, /MONGODB_URI/],
+  [{ MONGODB_URI: 'localhost:27017' }, /MONGODB_URI/],
+  [{ MONGODB_URI: 'http://cluster.example.com' }, /MONGODB_URI/],
+  [{ MONGODB_URI: 'mongodb+srv://user:pass@host with space' }, /MONGODB_URI/],
 ];
 
-describe('validateEnv', () => {
-  it('uses the local development defaults when nothing is set', () => {
-    const env = validateEnv({});
+const errorMessage = (env: Record<string, unknown>): string => {
+  try {
+    validateEnv(env);
+    return '';
+  } catch (error) {
+    return (error as Error).message;
+  }
+};
 
+describe('validateEnv', () => {
+  it('uses the local development defaults when only the database is set', () => {
+    const env = validateEnv(base);
+
+    expect(env.MONGODB_URI).toBe(MONGODB_URI);
     expect(env.PORT).toBe(3001);
     expect(env.FRONTEND_URL).toBe('http://localhost:3000');
     expect(env.UPLOADS_DIR).toBe('uploads');
@@ -31,22 +48,25 @@ describe('validateEnv', () => {
   });
 
   it('turns the PORT string into a number', () => {
-    expect(validateEnv({ PORT: '4000' }).PORT).toBe(4000);
+    expect(validateEnv({ ...base, PORT: '4000' }).PORT).toBe(4000);
   });
 
   it('accepts the frontend URL it is given', () => {
-    const env = validateEnv({ FRONTEND_URL: 'https://app.example.com' });
+    const env = validateEnv({
+      ...base,
+      FRONTEND_URL: 'https://app.example.com',
+    });
     expect(env.FRONTEND_URL).toBe('https://app.example.com');
   });
 
   it('reads the uploads folder', () => {
-    expect(validateEnv({ UPLOADS_DIR: 'files/images' }).UPLOADS_DIR).toBe(
-      'files/images',
-    );
+    const env = validateEnv({ ...base, UPLOADS_DIR: 'files/images' });
+    expect(env.UPLOADS_DIR).toBe('files/images');
   });
 
   it('reads the session and cookie settings', () => {
     const env = validateEnv({
+      ...base,
       ACCESS_TOKEN_MINUTES: '5',
       SESSION_INACTIVITY_MINUTES: '45',
       COOKIE_SECURE: 'false',
@@ -60,16 +80,39 @@ describe('validateEnv', () => {
   });
 
   it('reads COOKIE_SECURE=true as true', () => {
-    expect(validateEnv({ COOKIE_SECURE: 'true' }).COOKIE_SECURE).toBe(true);
+    expect(validateEnv({ ...base, COOKIE_SECURE: 'true' }).COOKIE_SECURE).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    'mongodb://localhost:27017/travel-planning',
+    'mongodb+srv://user:p%40ss@cluster.example.mongodb.net/travel-planning?retryWrites=true&w=majority',
+  ])('accepts the connection string %s', (uri) => {
+    expect(validateEnv({ MONGODB_URI: uri }).MONGODB_URI).toBe(uri);
+  });
+
+  it('requires the connection string', () => {
+    expect(errorMessage({})).toMatch(/MONGODB_URI/);
+  });
+
+  it('never prints the connection string in the error', () => {
+    const message = errorMessage({
+      MONGODB_URI: 'http://user:secret-password@cluster.example.com',
+    });
+
+    expect(message).toMatch(/MONGODB_URI/);
+    expect(message).not.toContain('secret-password');
   });
 
   it('ignores variables it does not know', () => {
-    const env = { PATH: '/usr/bin', MONGODB_URI: '' };
-    expect(() => validateEnv(env)).not.toThrow();
+    expect(() => validateEnv({ ...base, PATH: '/usr/bin' })).not.toThrow();
   });
 
   it.each(invalidCases)('rejects %j and names the variable', (env, name) => {
-    expect(() => validateEnv(env)).toThrow(/Invalid environment variables/);
-    expect(() => validateEnv(env)).toThrow(name);
+    const message = errorMessage({ ...base, ...env });
+
+    expect(message).toMatch(/Invalid environment variables/);
+    expect(message).toMatch(name);
   });
 });

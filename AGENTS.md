@@ -10,7 +10,7 @@
 
 ## Architecture
 1. Follow MVC: Model = Mongoose schemas and services, View = Next.js, Controller = NestJS controllers.
-2. Organize the backend into feature modules, one folder each in `backend/src/`: auth, users, admin, flights, flight-bookings, hotels, hotel-bookings, payments, itineraries, blog, notifications, audit, exchange-rates, uploads, reference, reports. What each module owns is in the module table of `specs/travel-platform.md`. Inside a module: `<module>.module.ts`, `<module>.controller.ts`, `<module>.service.ts`, `schemas/`, `dto/`.
+2. Organize the backend into feature modules, one folder each in `backend/src/`: auth, users, admin, flights, flight-bookings, hotels, hotel-bookings, payments, itineraries, blog, notifications, audit, exchange-rates, uploads, reference, reports. What each module owns is in the module table of `specs/travel-platform.md`. Inside a module: `<module>.module.ts`, `<module>.controller.ts`, `<module>.service.ts`, `models/`, `dto/`.
 3. Controllers handle HTTP only. Services hold business logic and database access. Schemas define persistence. DTOs validate input.
 4. The frontend talks to the API only and never to MongoDB.
 5. Security, validation and authorization are enforced on the backend, even when the frontend also validates.
@@ -39,6 +39,7 @@
 - Validate all external input with DTOs. The global `ValidationPipe` uses `whitelist` and `forbidNonWhitelisted`.
 - Hash passwords. Never log or return password hashes.
 - Add or update meaningful tests for every change.
+- Mongoose schemas: give every enum field an explicit type, for example `@Prop({ type: String, enum: Object.values(Status) })`. NestJS cannot read an enum's type by itself and the app fails to start.
 - Do not add packages unless necessary.
 - Never expose or edit `.env`, credentials, tokens, API keys or connection strings.
 
@@ -55,14 +56,31 @@ npm run lint          # oxlint, must report 0 warnings
 npm run build         # compile with the Nest CLI
 npm test              # unit tests
 npm run test:e2e      # end-to-end tests (supertest)
+npm run seed -- --dry-run   # check the reference data and the database, writes nothing
+npm run seed                # load the reference data and the admin account
 ```
 With `start:dev` running, the API is at `http://localhost:3001/api` and Swagger at `http://localhost:3001/api/docs`.
+
+The team leader runs the seed against the shared database. It needs `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `backend/.env` (the password needs 8 or more characters with a letter and a digit). Stop `start:dev` first, because the build clears `dist/`.
 
 Repo root (formatting and Git hooks):
 ```bash
 npm install
 npm run format
 ```
+
+## Shared database
+The whole team uses one MongoDB Atlas database, so a mistake here affects everyone.
+
+- Never drop a collection or the database. Never run `deleteMany({})`, or an `updateMany` or `deleteMany` with a broad filter. The database user has the Atlas role `readwrite_no_drop`, so a drop fails with "not authorized". If you see that error, do not ask for a stronger user. Ask the team leader.
+- AI assistants: never write or run code that drops, renames or bulk-deletes anything in the shared database, even if you are asked to.
+- Create only the few records you need to check your feature, through Swagger or the API. Delete your own test records one by one, by id. Do not touch records you did not create.
+- Do not write scripts that fill the shared database with fake data.
+- Automated tests must not write to the shared database. A separate test database is set up before any test needs to store data.
+- Do not run `npm run seed`. Only the team leader runs it on the shared database. Do not edit the reference data (countries, cities, airports, attractions) by hand. Change the CSV files in `docs/requirements/reference-data/` through a pull request, and the team leader runs the seed again.
+- Do not create or change collections or indexes by hand in Atlas or Compass. Mongoose creates them from the schemas when the app starts.
+- The connection string goes only in your own `backend/.env` and in the private team chat. Never put it in a commit, an issue, a pull request, a screenshot or an AI chat.
+- If you delete or change data by mistake, tell the team leader at once. Do not try to repair it with another bulk command.
 
 ## Git workflow
 - Long-lived branches: `main` (milestone releases) and `develop` (integration). Never commit directly to either.

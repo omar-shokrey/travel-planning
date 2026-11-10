@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { MongooseModule } from '@nestjs/mongoose';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { databaseOptions } from './config/database.config';
 import { validateEnv } from './config/env.validation';
 import { AdminModule } from './admin/admin.module';
 import { AuditModule } from './audit/audit.module';
@@ -26,6 +28,10 @@ import { UsersModule } from './users/users.module';
       isGlobal: true,
       cache: true,
       validate: validateEnv,
+    }),
+    MongooseModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: databaseOptions,
     }),
     AdminModule,
     AuditModule,
