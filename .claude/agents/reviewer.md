@@ -8,6 +8,7 @@ model: inherit
 Review the current branch/diff against `AGENTS.md`, `specs/travel-platform.md`, and the requirement IDs named in the branch or PR.
 
 Check:
+
 1. Requirement correctness: route, method, roles, and behavior match the requirement ID and section 8 of the project description.
 2. MVC boundaries: controller HTTP only; service business/database logic; DTO validation; schema persistence.
 3. Validation: required fields, enums, ranges, unknown properties rejected, client cannot set server-controlled fields (role, status, price, owner, booking reference, payment state).

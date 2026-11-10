@@ -1,6 +1,7 @@
 # AGENTS.md — Travel Planning and Booking Platform
 
 ## Project
+
 - Backend: NestJS + Mongoose in `backend/` (Node 24, npm)
 - Frontend: Next.js App Router + TypeScript in `frontend/` (Milestone 2; placeholder until then)
 - Database: one shared MongoDB Atlas database
@@ -9,6 +10,7 @@
 - Working specification: `specs/travel-platform.md`
 
 ## Architecture
+
 1. Follow MVC: Model = Mongoose schemas and services, View = Next.js, Controller = NestJS controllers.
 2. Organize the backend into feature modules, one folder each in `backend/src/`: auth, users, admin, flights, flight-bookings, hotels, hotel-bookings, payments, itineraries, blog, notifications, audit, exchange-rates, uploads, reference, reports. What each module owns is in the module table of `specs/travel-platform.md`. Inside a module: `<module>.module.ts`, `<module>.controller.ts`, `<module>.service.ts`, `models/`, `dto/`.
 3. Controllers handle HTTP only. Services hold business logic and database access. Schemas define persistence. DTOs validate input.
@@ -17,6 +19,7 @@
 6. Do not add out-of-scope features without approval. Bonus features never replace mandatory ones.
 
 ## Contract
+
 - All routes are under `/api`. The endpoint list is section 8 of the project description.
 - Roles: guest, registered user, administrator, airline moderator, hotel moderator.
 - Role values are in the `Role` enum (`backend/src/common/enums/role.enum.ts`). Every route requires login unless it is marked `@Public()`. Restrict a route with `@Roles(...)`.
@@ -35,6 +38,7 @@
 - Every requirement has an ID (ACC-, FLT-, HTL-, PAY-, ITN-, BLG-, GEN-). Business rules and limits come from the workbook.
 
 ## Quality and security
+
 - No `any` unless unavoidable and justified.
 - Validate all external input with DTOs. The global `ValidationPipe` uses `whitelist` and `forbidNonWhitelisted`.
 - Hash passwords. Never log or return password hashes.
@@ -44,7 +48,9 @@
 - Never expose or edit `.env`, credentials, tokens, API keys or connection strings.
 
 ## Conventions
+
 Follow the names the code already uses. The rules for ids, money and dates are also in "Data model diagram, Conventions" in `specs/travel-platform.md`.
+
 - Files and folders: lowercase kebab-case with the role as a suffix, for example `flight-bookings.service.ts`, `create-flight.dto.ts`, `user.schema.ts`, `role.enum.ts`, `roles.guard.ts`. A unit test sits next to its file as `<name>.spec.ts`. End-to-end tests live in `backend/test/` as `<name>.e2e-spec.ts`.
 - Classes and enums: PascalCase (`FlightBookingsService`, `Role`). Enum members are PascalCase and their values are lowercase snake_case strings (`AirlineModerator = 'airline_moderator'`).
 - Properties, JSON fields and query parameters: camelCase (`countryCode`, `passwordHash`), unless the project description names a parameter differently. Constants and environment variables: UPPER_SNAKE_CASE (`PASSWORD_SALT_ROUNDS`).
@@ -56,9 +62,11 @@ Follow the names the code already uses. The rules for ids, money and dates are a
 - Money is a whole number of minor units (cents) plus a currency code, never a floating-point number.
 
 ## Commands
+
 First time on a machine, from the repo root: `cp .env.example backend/.env`, then edit `backend/.env`. `backend/.env` is git-ignored, so keys never go to GitHub. Environment variables are checked at startup by `backend/src/config/env.validation.ts`; add a variable there when code starts using it.
 
 Backend:
+
 ```bash
 cd backend
 npm ci                # first time, installs the exact versions from package-lock.json
@@ -71,17 +79,20 @@ npm run test:e2e      # end-to-end tests (supertest)
 npm run seed -- --dry-run   # check the reference data and the database, writes nothing
 npm run seed                # load the reference data and the admin account
 ```
+
 With `start:dev` running, the API is at `http://localhost:3001/api` and Swagger at `http://localhost:3001/api/docs`.
 
 The team leader runs the seed against the shared database. It needs `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `backend/.env` (the password needs 8 or more characters with a letter and a digit). Stop `start:dev` first, because the build clears `dist/`.
 
 Repo root (formatting and Git hooks):
+
 ```bash
 npm install
 npm run format
 ```
 
 ## Shared database
+
 The whole team uses one MongoDB Atlas database, so a mistake here affects everyone.
 
 - Never drop a collection or the database. Never run `deleteMany({})`, or an `updateMany` or `deleteMany` with a broad filter. The database user has the Atlas role `readwrite_no_drop`, so a drop fails with "not authorized". If you see that error, do not ask for a stronger user. Ask the team leader.
@@ -95,11 +106,13 @@ The whole team uses one MongoDB Atlas database, so a mistake here affects everyo
 - If you delete or change data by mistake, tell the team leader at once. Do not try to repair it with another bulk command.
 
 ## Ownership and the shared layer
+
 - A feature PR changes only the module its issue belongs to, with that module's tests and docs.
 - Changes to the shared layer go in their own PR with no feature code, and the description says why. The shared layer is `backend/src/common/`, `backend/src/config/`, `backend/src/app.setup.ts`, `backend/src/main.ts`, `.env.example`, `AGENTS.md`, `specs/` and `.github/`.
 - When you start a module, add a short `README.md` in its folder with the design decisions you made and why. Do not add empty ones in advance.
 
 ## Git workflow
+
 - Long-lived branches: `main` (milestone releases) and `develop` (integration). Never commit directly to either.
 - Create short-lived branches from the latest `develop`: `feature/<REQ-ID>-<description>`, `fix/<REQ-ID>-<description>`, `refactor/<description>`, `docs/<description>`.
 - Commit with Conventional Commits, for example `feat(flights): add round-trip search`. Avoid vague messages.
@@ -108,4 +121,5 @@ The whole team uses one MongoDB Atlas database, so a mistake here affects everyo
 - Record AI assistance in `AI_PROMPTS.txt`.
 
 ## Workflow
+
 Plan, implement in small steps, verify, read the diff, log AI usage, open a PR, review, CI, merge.

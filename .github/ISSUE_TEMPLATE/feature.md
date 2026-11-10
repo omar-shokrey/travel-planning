@@ -7,15 +7,18 @@ assignees: ""
 ---
 
 ## Requirement
+
 **ID:**
 **Module:**
 **Mandatory / Bonus:**
 **Text (from the workbook):**
 
 ## Acceptance criteria
+
 - [ ]
 
 ## Dependencies
+
 (requirement IDs that must be done first)
 
 ## Notes

@@ -5,9 +5,11 @@ Source of truth: the project description (`docs/requirements/`) and the official
 The project description was revised on 2 Nov 2026 (the changes are highlighted in yellow in the PDF in `docs/requirements/`). This file follows the revised version.
 
 ## Problem
+
 Travelers need one platform to search and book flights and hotels, plan day-by-day itineraries with budgets, and share travel content. Airlines and hotels need to manage their inventory and policies, and administrators need to supervise accounts, bookings and community content.
 
 ## Users
+
 - Guest: unauthenticated visitor. Searches flights and hotels, browses public blog posts and itineraries.
 - Registered user: books flights and hotels, manages bookings, creates itineraries and budgets, publishes or clones public itineraries, writes blog posts, comments, likes, reviews eligible hotel stays, reports content.
 - Administrator (seeded): manages accounts, creates moderators, suspends and reactivates users, inspects bookings, moderates reported content, reviews audit logs.
@@ -16,40 +18,43 @@ Travelers need one platform to search and book flights and hotels, plan day-by-d
 - System services: payment confirmation, inventory-hold expiry, notifications, exchange rates, booking-state updates, audit logging.
 
 ## Scope by module
+
 Requirement IDs are listed in the workbook. The mandatory/bonus split is also defined there.
 
-| Module | ID prefix | Covers |
-|---|---|---|
-| Accounts and administration | ACC | Registration, login with lockout, logout and session expiry, password change, profile, own-account deactivation, moderator accounts, account management, hotel and airline deactivation, admin booking list, admin seeding |
-| Flights | FLT | Airline profile, airports, flights, cabins, baggage and cancellation policies, search, filters, booking, seat hold, cancellation, passenger lists |
-| Hotels | HTL | Hotel profile, rooms, availability, policies, search, multi-room reservation, room hold, cancellation, reviews |
-| Payments and policies | PAY | Stripe payment (test mode), policy acceptance, refunds, single platform currency |
-| Itineraries | ITN | Itineraries, ordered days, city groups, activities, images, budgets, transport costs, currency conversion, visibility, search and clone |
-| Blog | BLG | Posts, comments, likes, tags, search, images, author pages |
-| Cross-cutting | GEN | Notifications, validation messages, pagination, time zones, audit log, image uploads, reporting and moderation, booking lifecycle, reference-data seeding, backend enforcement and password hashing |
+| Module                      | ID prefix | Covers                                                                                                                                                                                                                     |
+| --------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Accounts and administration | ACC       | Registration, login with lockout, logout and session expiry, password change, profile, own-account deactivation, moderator accounts, account management, hotel and airline deactivation, admin booking list, admin seeding |
+| Flights                     | FLT       | Airline profile, airports, flights, cabins, baggage and cancellation policies, search, filters, booking, seat hold, cancellation, passenger lists                                                                          |
+| Hotels                      | HTL       | Hotel profile, rooms, availability, policies, search, multi-room reservation, room hold, cancellation, reviews                                                                                                             |
+| Payments and policies       | PAY       | Stripe payment (test mode), policy acceptance, refunds, single platform currency                                                                                                                                           |
+| Itineraries                 | ITN       | Itineraries, ordered days, city groups, activities, images, budgets, transport costs, currency conversion, visibility, search and clone                                                                                    |
+| Blog                        | BLG       | Posts, comments, likes, tags, search, images, author pages                                                                                                                                                                 |
+| Cross-cutting               | GEN       | Notifications, validation messages, pagination, time zones, audit log, image uploads, reporting and moderation, booking lifecycle, reference-data seeding, backend enforcement and password hashing                        |
 
 Optional (bonus) features are marked Optional in the description: email verification and email password recovery (ACC-02, ACC-07), flight change and seat selection (FLT-27, FLT-28), hotel replies to reviews (HTL-26), attaching bookings to itineraries and PDF export (ITN-27, ITN-28), attaching itineraries to posts (BLG-13), email notifications, admin analytics and favourites.
 
 ## API contract
+
 Base path `/api`. The full endpoint table is section 8 of the project description. Route groups:
 
-| Group | Base routes |
-|---|---|
-| Authentication and accounts | `/api/auth/*`, `/api/users/me` |
-| Administration | `/api/admin/*` |
-| Airlines and flights | `/api/airlines`, `/api/airports`, `/api/flights` |
-| Flight bookings | `/api/flight-bookings` |
-| Hotels and rooms | `/api/hotels` |
-| Hotel bookings and reviews | `/api/hotel-bookings`, `/api/reviews` |
-| Payments and refunds | `/api/payments`, `/api/refunds`, `/api/bookings/:type/:id/policies` |
-| Itineraries | `/api/itineraries`, `/api/activities`, `/api/budgets`, `/api/transport-costs` |
-| Blog | `/api/posts`, `/api/comments`, `/api/tags`, `/api/authors` |
+| Group                       | Base routes                                                                   |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| Authentication and accounts | `/api/auth/*`, `/api/users/me`                                                |
+| Administration              | `/api/admin/*`                                                                |
+| Airlines and flights        | `/api/airlines`, `/api/airports`, `/api/flights`                              |
+| Flight bookings             | `/api/flight-bookings`                                                        |
+| Hotels and rooms            | `/api/hotels`                                                                 |
+| Hotel bookings and reviews  | `/api/hotel-bookings`, `/api/reviews`                                         |
+| Payments and refunds        | `/api/payments`, `/api/refunds`, `/api/bookings/:type/:id/policies`           |
+| Itineraries                 | `/api/itineraries`, `/api/activities`, `/api/budgets`, `/api/transport-costs` |
+| Blog                        | `/api/posts`, `/api/comments`, `/api/tags`, `/api/authors`                    |
 
 Provider status (ACC-15): `PATCH /api/admin/providers/:type/:id/deactivate` and `PATCH /api/admin/providers/:type/:id/reactivate`, where `:type` is `hotel` or `airline`. Deactivating a provider is separate from suspending its moderator account. A deactivated hotel or airline is hidden from search and cannot be booked, while its existing Confirmed bookings remain valid. Affected parties receive an in-app notification.
 
 Swagger UI is served at `/api/docs`. Log in with `POST /api/auth/login` in Swagger: the browser then keeps the `httpOnly` cookies and sends them with every later request, so no token is ever pasted.
 
 ### Response conventions
+
 - A successful response is the resource itself, with no wrapper object.
 - Lists are paginated with `?page=1&limit=10` (GEN-05): page size 10 by default, at most 50. A list response is `{ "items": [...], "meta": { "page", "limit", "total", "totalPages" } }`, and an empty result is `"items": []` (GEN-04).
 - Every error has the same body: `{ "statusCode", "error", "message", "errors"?, "path", "timestamp" }`. `errors` appears only when validation fails (400) and lists `{ "field", "messages" }` for each invalid field (GEN-02), for example:
@@ -69,6 +74,7 @@ Swagger UI is served at `/api/docs`. Log in with `POST /api/auth/login` in Swagg
 - Roles are `user`, `admin`, `airline_moderator` and `hotel_moderator`. A guest has no role. Every route requires login unless it is marked public.
 
 ## Validation and security
+
 - Required fields, types and enums are validated by DTOs. Unknown properties are rejected.
 - The client cannot set role, status, prices, booking reference, owner or payment state.
 - Authentication uses a secure `httpOnly` cookie, never localStorage or sessionStorage.
@@ -81,6 +87,7 @@ Swagger UI is served at `/api/docs`. Log in with `POST /api/auth/login` in Swagg
 - Policy acceptance is stored with a timestamp.
 
 ## MVC and module boundary
+
 - Controller: HTTP concerns only.
 - Service: business logic and database operations.
 - Mongoose schema/model: persistence.
@@ -89,30 +96,32 @@ Swagger UI is served at `/api/docs`. Log in with `POST /api/auth/login` in Swagg
 - One feature module per area, listed in the table below.
 
 ### Backend modules
+
 Each module lives in `backend/src/<module>/` and holds its own controller, service, `models/` and `dto/`. Modules start empty and are filled in by the feature that needs them.
 
-| Module | Responsibility | Base routes |
-|---|---|---|
-| `auth` | Registration, login with lockout, logout, cookie tokens, change password, current user | `/api/auth/*` |
-| `users` | Own profile and own-account deactivation | `/api/users/me` |
-| `admin` | Account management, moderator accounts, provider activation, admin booking list, report handling, audit log views | `/api/admin/*` |
-| `flights` | Airlines with their policies, flights, cabins, flight search, passenger list and CSV export | `/api/airlines`, `/api/flights` |
-| `flight-bookings` | Seat holds, flight bookings, cancellation, PDF e-ticket | `/api/flight-bookings` |
-| `hotels` | Hotels, rooms, availability, policies, hotel search | `/api/hotels` |
-| `hotel-bookings` | Room holds, reservations, cancellation, hotel reviews | `/api/hotel-bookings`, `/api/reviews` |
-| `payments` | Stripe payments and webhook, refunds, policy display and acceptance | `/api/payments`, `/api/refunds`, `/api/bookings/:type/:id/policies` |
-| `itineraries` | Itineraries, days, activities, budgets, transport costs, clone and public search | `/api/itineraries`, `/api/activities`, `/api/budgets`, `/api/transport-costs` |
-| `blog` | Posts, comments, likes, tags, author pages | `/api/posts`, `/api/comments`, `/api/tags`, `/api/authors` |
-| `notifications` | In-app notifications (GEN-01) | to be defined |
-| `audit` | Administrative audit records (GEN-07) | used by `admin` |
-| `exchange-rates` | FXRatesAPI client, daily cached rates, conversion, supported currencies (ITN-18) | to be defined |
-| `uploads` | Image upload validation, storage and serving (GEN-08) | used by other modules; serves `/api/uploads/<file>` |
-| `reference` | Seeded, read-only countries, cities, airports and attractions (GEN-12, FLT-02) | `/api/airports` |
-| `reports` | Content reports from users (GEN-09); admins handle them through `admin` (GEN-10) | to be defined |
+| Module            | Responsibility                                                                                                    | Base routes                                                                   |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `auth`            | Registration, login with lockout, logout, cookie tokens, change password, current user                            | `/api/auth/*`                                                                 |
+| `users`           | Own profile and own-account deactivation                                                                          | `/api/users/me`                                                               |
+| `admin`           | Account management, moderator accounts, provider activation, admin booking list, report handling, audit log views | `/api/admin/*`                                                                |
+| `flights`         | Airlines with their policies, flights, cabins, flight search, passenger list and CSV export                       | `/api/airlines`, `/api/flights`                                               |
+| `flight-bookings` | Seat holds, flight bookings, cancellation, PDF e-ticket                                                           | `/api/flight-bookings`                                                        |
+| `hotels`          | Hotels, rooms, availability, policies, hotel search                                                               | `/api/hotels`                                                                 |
+| `hotel-bookings`  | Room holds, reservations, cancellation, hotel reviews                                                             | `/api/hotel-bookings`, `/api/reviews`                                         |
+| `payments`        | Stripe payments and webhook, refunds, policy display and acceptance                                               | `/api/payments`, `/api/refunds`, `/api/bookings/:type/:id/policies`           |
+| `itineraries`     | Itineraries, days, activities, budgets, transport costs, clone and public search                                  | `/api/itineraries`, `/api/activities`, `/api/budgets`, `/api/transport-costs` |
+| `blog`            | Posts, comments, likes, tags, author pages                                                                        | `/api/posts`, `/api/comments`, `/api/tags`, `/api/authors`                    |
+| `notifications`   | In-app notifications (GEN-01)                                                                                     | to be defined                                                                 |
+| `audit`           | Administrative audit records (GEN-07)                                                                             | used by `admin`                                                               |
+| `exchange-rates`  | FXRatesAPI client, daily cached rates, conversion, supported currencies (ITN-18)                                  | to be defined                                                                 |
+| `uploads`         | Image upload validation, storage and serving (GEN-08)                                                             | used by other modules; serves `/api/uploads/<file>`                           |
+| `reference`       | Seeded, read-only countries, cities, airports and attractions (GEN-12, FLT-02)                                    | `/api/airports`                                                               |
+| `reports`         | Content reports from users (GEN-09); admins handle them through `admin` (GEN-10)                                  | to be defined                                                                 |
 
 Code shared by several modules (the role enum, guards, decorators, pipes, the exception filter and the pagination DTOs) lives in `backend/src/common/`, not in a feature module.
 
 ## Reference data
+
 Countries, cities, airports and attractions are seeded from the official reference datasets. Records and identifiers must match the datasets, because they are used in the final evaluation. The seed script is idempotent and creates the admin account from environment variables. It loads whatever rows the CSV files contain (8 each today) and does not hard-code any record.
 
 Run the seed from `backend/` with `npm run seed`. `npm run seed -- --dry-run` does every check and shows what would change, but writes nothing. The seed first checks the four files (unique ids, every city has a country, every airport has a city of the same country, every attraction has a city) and stops before writing anything if a row is wrong. It then adds missing records and updates changed ones, and never deletes. It creates the administrator from `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `backend/.env` only if no account with that email exists, so an existing administrator and their password stay unchanged. Only the team leader runs it against the shared database.
@@ -120,6 +129,7 @@ Run the seed from `backend/` with `npm run seed`. `npm run seed -- --dry-run` do
 Each airport has its IANA time zone (`time_zone` in `airports.csv`), used to show flight times in local time (GEN-06) and to read search dates as local dates (FLT-11). The supported currencies are the currency codes listed in `countries.csv` (GEN-12); these are the currencies a user can choose as preferred currency (ACC-09) and convert itinerary budgets into (ITN-18).
 
 ## Out of scope
+
 - Cloud deployment (optional bonus)
 - Optional features above, until all mandatory requirements are done and the team agrees
 
@@ -185,22 +195,22 @@ erDiagram
 
 ### Collections by module
 
-| Module | Collections |
-|---|---|
-| `auth` | `sessions` |
-| `users` | `users` |
-| `flights` | `airlines`, `flights` |
-| `flight-bookings` | `flight_bookings` |
-| `hotels` | `hotels`, `rooms`, `room_nights` |
-| `hotel-bookings` | `hotel_bookings`, `reviews` |
-| `payments` | `payments`, `refunds`, `stripe_events` |
-| `itineraries` | `itineraries` |
-| `exchange-rates` | `exchange_rates` |
-| `blog` | `posts`, `comments`, `likes` |
-| `notifications` | `notifications` |
-| `audit` | `audit_logs` |
-| `reports` | `reports` |
-| `reference` | `countries`, `cities`, `airports`, `attractions` |
+| Module            | Collections                                      |
+| ----------------- | ------------------------------------------------ |
+| `auth`            | `sessions`                                       |
+| `users`           | `users`                                          |
+| `flights`         | `airlines`, `flights`                            |
+| `flight-bookings` | `flight_bookings`                                |
+| `hotels`          | `hotels`, `rooms`, `room_nights`                 |
+| `hotel-bookings`  | `hotel_bookings`, `reviews`                      |
+| `payments`        | `payments`, `refunds`, `stripe_events`           |
+| `itineraries`     | `itineraries`                                    |
+| `exchange-rates`  | `exchange_rates`                                 |
+| `blog`            | `posts`, `comments`, `likes`                     |
+| `notifications`   | `notifications`                                  |
+| `audit`           | `audit_logs`                                     |
+| `reports`         | `reports`                                        |
+| `reference`       | `countries`, `cities`, `airports`, `attractions` |
 
 The `admin` and `uploads` modules have no collections of their own.
 
@@ -702,16 +712,19 @@ erDiagram
 Each of these can be added later without changing the collections above: favourites (BON-02, a new collection), hotel replies to reviews (HTL-26, a field on the review), seat selection (FLT-28, seat numbers on the cabin and the segment), email verification and password reset tokens (ACC-02, ACC-07, a new collection), bookings linked to itinerary days (ITN-27, a field on the day) and an itinerary attached to a post (BLG-13, a field on the post).
 
 ## Milestones
+
 - Milestone 1, backend and API: deadline 20/11. Evaluated through Swagger UI.
 - Milestone 2, frontend and integration: deadline 11/12.
 
 ## Work organization
+
 - Every member contributes to every part of the project.
 - One short-lived branch per requirement or issue: `feature/<REQ-ID>-<description>`, from the latest `develop`.
 - Pull requests go into `develop` and are approved by the team leader or the second reviewer.
 - Reference requirement IDs in issues, branches, commits, PRs and Swagger docs.
 
 ## Definition of Done
+
 - Follows this specification, `AGENTS.md` and the requirement's acceptance criteria.
 - Relevant tests and lint pass.
 - Swagger reflects API changes.
