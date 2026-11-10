@@ -69,6 +69,19 @@ npm install
 npm run format
 ```
 
+## Shared database
+The whole team uses one MongoDB Atlas database, so a mistake here affects everyone.
+
+- Never drop a collection or the database. Never run `deleteMany({})`, or an `updateMany` or `deleteMany` with a broad filter. The database user has the Atlas role `readwrite_no_drop`, so a drop fails with "not authorized". If you see that error, do not ask for a stronger user. Ask the team leader.
+- AI assistants: never write or run code that drops, renames or bulk-deletes anything in the shared database, even if you are asked to.
+- Create only the few records you need to check your feature, through Swagger or the API. Delete your own test records one by one, by id. Do not touch records you did not create.
+- Do not write scripts that fill the shared database with fake data.
+- Automated tests must not write to the shared database. A separate test database is set up before any test needs to store data.
+- Do not run `npm run seed`. Only the team leader runs it on the shared database. Do not edit the reference data (countries, cities, airports, attractions) by hand. Change the CSV files in `docs/requirements/reference-data/` through a pull request, and the team leader runs the seed again.
+- Do not create or change collections or indexes by hand in Atlas or Compass. Mongoose creates them from the schemas when the app starts.
+- The connection string goes only in your own `backend/.env` and in the private team chat. Never put it in a commit, an issue, a pull request, a screenshot or an AI chat.
+- If you delete or change data by mistake, tell the team leader at once. Do not try to repair it with another bulk command.
+
 ## Git workflow
 - Long-lived branches: `main` (milestone releases) and `develop` (integration). Never commit directly to either.
 - Create short-lived branches from the latest `develop`: `feature/<REQ-ID>-<description>`, `fix/<REQ-ID>-<description>`, `refactor/<description>`, `docs/<description>`.

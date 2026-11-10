@@ -20,3 +20,4 @@ Full setup instructions will be added here (prerequisites, environment variables
 - Never commit `.env` or secrets. Copy `.env.example` to your own `.env` and fill in the values.
 - Work on short-lived branches from `develop`, for example `feature/FLT-11-flight-search`.
 - Open pull requests into `develop`. The team leader or the second reviewer approves each one.
+- The database is shared by the whole team. Read the "Shared database" rules in `AGENTS.md` before you touch it.
