@@ -3,6 +3,8 @@ Closes #
 
 **Requirement ID(s):**
 
+## Design decisions I made (and why)
+
 ## Verification
 - [ ] Relevant tests pass
 - [ ] Lint passes
@@ -11,6 +13,9 @@ Closes #
 - [ ] I read every changed line
 
 ### Verification details
+
+## Screenshots (frontend)
+Only for frontend changes. Write "not applicable" for backend changes.
 
 ## AI usage
 - [ ] AI assistance used
