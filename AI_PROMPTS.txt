@@ -183,3 +183,43 @@ planned in the CI step.
 Rejected for now: paid Atlas backups (the seed can rebuild today's data; I will decide again before
 real user data exists).
 ================================================
+
+================================================
+Date: 2026-11-10
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: chore/dev-tooling / no issue (project setup)
+Related Requirement: None (setup); prepares every feature (ACC-04 uses the cookie path)
+Prompt:
+I asked Claude to guide me step by step through the development tooling part of the project
+(checklist items 39 to 41) and to take the design decisions itself: naming and date and time
+rules for AGENTS.md, the two PR template sections and the ownership rules from Lab 3, the
+editor and formatting setup (.editorconfig, Prettier, the Husky commit hook), and a health
+endpoint with tests. For each item I asked Claude for a short brief and its approach first, and
+I chose how to work (read the text or code in chat before it is saved, or run the steps and
+paste the output). I pasted the output of the format check, the commits, the unit tests, tsc,
+lint, the build and the end-to-end tests. I also chose the cookie path for the access token
+(decision 16) from Claude's recommendation.
+How the output was used:
+Claude checked the existing code and drafted the AGENTS.md sections (conventions, ownership),
+the PR template sections, .editorconfig, and the health endpoint with its unit tests and the
+end-to-end changes. It wrote the files into my folder after I approved them in chat, except the
+PR template: Claude's file tool cannot write under .github, so I pasted that file myself. I ran
+npm install at the repository root (this activated the Husky hook), ran Prettier on the
+repository, ran every check and made every commit. The result is: GET /api/health, which answers
+200 when the database connection is open and 503 otherwise (item 41); the conventions and
+ownership rules in AGENTS.md and two new PR template sections (item 39); .editorconfig, a root
+lockfile, the active commit hook and one formatting commit that changed only Markdown, JSON and
+template files (item 40); and the access_token cookie path changed from /api to / so the
+Next.js proxy.ts can read it. At the last full run 16 unit test suites (183 tests) passed, tsc
+was clean, lint reported 0 warnings and 0 errors, the build and the format check were clean, and
+21 of 21 end-to-end tests passed.
+Accepted, changed, or rejected:
+Accepted: the naming and date rules (UTC in the database, airport time zones for flights, money
+as whole minor units), ownership per issue and not per person, the health endpoint that checks
+only the connection state and never shows the database name, and Path=/ for the access cookie.
+Changed: the old Hello World route was removed and the three end-to-end tests that used it now
+use /api/health. The first end-to-end run after the health endpoint failed once on a network
+timeout while connecting to Atlas (the known problem) and passed on the re-run; the lasting fix
+is postponed. Rejected: commitlint and running oxlint in the commit hook (CI already lints).
+================================================
