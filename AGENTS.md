@@ -94,6 +94,11 @@ The whole team uses one MongoDB Atlas database, so a mistake here affects everyo
 - The connection string goes only in your own `backend/.env` and in the private team chat. Never put it in a commit, an issue, a pull request, a screenshot or an AI chat.
 - If you delete or change data by mistake, tell the team leader at once. Do not try to repair it with another bulk command.
 
+## Ownership and the shared layer
+- A feature PR changes only the module its issue belongs to, with that module's tests and docs.
+- Changes to the shared layer go in their own PR with no feature code, and the description says why. The shared layer is `backend/src/common/`, `backend/src/config/`, `backend/src/app.setup.ts`, `backend/src/main.ts`, `.env.example`, `AGENTS.md`, `specs/` and `.github/`.
+- When you start a module, add a short `README.md` in its folder with the design decisions you made and why. Do not add empty ones in advance.
+
 ## Git workflow
 - Long-lived branches: `main` (milestone releases) and `develop` (integration). Never commit directly to either.
 - Create short-lived branches from the latest `develop`: `feature/<REQ-ID>-<description>`, `fix/<REQ-ID>-<description>`, `refactor/<description>`, `docs/<description>`.
