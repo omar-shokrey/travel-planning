@@ -9,8 +9,11 @@ import type { EnvironmentVariables } from '../config/env.validation';
 
 const MINUTE_IN_MS = 60_000;
 
-/** The access cookie goes to every API route. */
-export const ACCESS_COOKIE_PATH = '/api';
+/**
+ * The access cookie goes to every path, so the frontend's proxy.ts can read
+ * it on page requests.
+ */
+export const ACCESS_COOKIE_PATH = '/';
 /** The refresh cookie goes only to the auth routes (refresh and logout). */
 export const REFRESH_COOKIE_PATH = '/api/auth';
 

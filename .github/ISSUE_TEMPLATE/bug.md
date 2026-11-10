@@ -7,6 +7,7 @@ assignees: ""
 ---
 
 ## Related requirement
+
 **ID:**
 
 ## What happens
@@ -14,6 +15,7 @@ assignees: ""
 ## What should happen
 
 ## Steps to reproduce
+
 1.
 
 ## Notes

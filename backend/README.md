@@ -8,14 +8,14 @@ Team rules, setup of environment variables and the Git workflow are in the [root
 
 Run these inside `backend/`.
 
-| Command | What it does |
-|---|---|
-| `npm ci` | Install the exact versions from `package-lock.json` |
-| `npm run start:dev` | Start the API with auto-reload |
-| `npm run build` | Compile to `dist/` |
-| `npm test` | Unit tests (Jest) |
-| `npm run test:e2e` | End-to-end tests |
-| `npm run lint` | Lint with oxlint |
+| Command             | What it does                                        |
+| ------------------- | --------------------------------------------------- |
+| `npm ci`            | Install the exact versions from `package-lock.json` |
+| `npm run start:dev` | Start the API with auto-reload                      |
+| `npm run build`     | Compile to `dist/`                                  |
+| `npm test`          | Unit tests (Jest)                                   |
+| `npm run test:e2e`  | End-to-end tests                                    |
+| `npm run lint`      | Lint with oxlint                                    |
 
 ## Notes
 
