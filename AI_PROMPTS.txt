@@ -132,3 +132,54 @@ check of the JWT secrets moved from the cookie step to ACC-04, where the secrets
 the final scan found the commands in AGENTS.md out of date and they were updated. Rejected:
 wrapping every response in an envelope, and writing the authentication guard before ACC-04.
 ================================================
+
+================================================
+Date: 2026-11-10
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: chore/database-seed / no issue (project setup)
+Related Requirement: None (setup); prepares ACC-01, ACC-04, ACC-09, FLT-02, GEN-12, ITN-18
+Prompt:
+I asked Claude to guide me step by step through the database part of the project (checklist items 33
+to 38) and to take the design decisions itself: connecting the backend to MongoDB Atlas, drawing the
+data model, the first Mongoose models, a seed program for the official reference data and the
+administrator account, running the seed on the shared database, and the rules that protect the
+shared database. For each item I asked Claude for a short brief and its approach first, and I chose
+how to work (read the code in chat before it is saved, or run the steps and paste the output). I
+asked about the parts I did not understand: what the seed does and when it runs, whether its data is
+fake test data, what an ERD is used for, why a test should fail on purpose, and whether the rules in
+AGENTS.md or checks in the API can stop someone from dropping a collection. I pasted the output of
+format, lint, build, the unit tests, tsc, the end-to-end tests, the seed and my own Atlas screens.
+How the output was used:
+Claude drafted the code, the ten Mermaid diagrams, the rules text and a short check script, and
+wrote the files into my folder after I approved them in chat. I read the code before it was saved,
+ran every command myself, made every commit, and did the work in Atlas myself. I put the
+administrator email and password only in my own backend/.env and did not share them with Claude. The
+result is: the Mongoose connection with a startup check of MONGODB_URI (item 33), tested by starting
+the app with wrong settings on purpose; a data model of 25 collections as ten diagrams in
+specs/travel-platform.md (item 34); the user model and the four reference models with offline tests
+(item 35); a seed that checks the CSV files and writes the reference data and one administrator
+account, with a dry-run option and offline tests (item 36); the seed run twice on Atlas, where the
+second run changed nothing (item 37); and a Shared database section in AGENTS.md plus a custom Atlas
+role without the drop permissions for the shared database user (item 38). I tested the role with the
+throwaway script (deleted afterwards): reading worked and dropping a collection was refused. At the
+last full run (item 36) 16 unit test suites (180 tests) passed, tsc was clean, lint reported 0
+warnings and the build was clean; the end-to-end tests passed 20 of 20 again after the Atlas change.
+Accepted, changed, or rejected:
+Accepted: the data model choices (prices as whole cents plus a currency code, the official CSV ids
+as _id, one diagram per area); the seed design (a separate program run by hand, a dry run,
+everything checked before the first write, it adds and updates but never deletes, the administrator
+is created once, and only I run it on the shared database); the Atlas role (read, insert, update and
+delete documents, create collections and indexes, no drop) as the technical protection, with written
+rules for people and AI tools.
+Changed after my runs found mistakes in Claude's code: enum fields need an explicit type: String
+(the models failed to load without it); the model tests used a generic type that tsc rejected and a
+deprecated Mongoose call; the seed wrote through the raw collection with a filter that tsc rejected,
+so it now writes through the models; Claude's first check script expected the plain MongoDB error
+code, but Atlas answers with its own code, so Claude changed it to print the server message. The
+end-to-end tests failed once on a network timeout while connecting to Atlas (after item 36 and again
+after the Atlas change) and passed on the re-run; the lasting fix, a separate test database, is
+planned in the CI step.
+Rejected for now: paid Atlas backups (the seed can rebuild today's data; I will decide again before
+real user data exists).
+================================================
