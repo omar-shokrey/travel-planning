@@ -10,6 +10,16 @@ jobs:
   backend:
     name: backend
     runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:8.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - name: Detect backend project
@@ -35,6 +45,10 @@ jobs:
         if: steps.detect.outputs.present == 'true'
         working-directory: backend
         run: npm run lint
+      - name: Typecheck
+        if: steps.detect.outputs.present == 'true'
+        working-directory: backend
+        run: npm run typecheck
       - name: Build
         if: steps.detect.outputs.present == 'true'
         working-directory: backend
@@ -43,6 +57,12 @@ jobs:
         if: steps.detect.outputs.present == 'true'
         working-directory: backend
         run: npm test -- --runInBand
+      - name: E2E tests
+        if: steps.detect.outputs.present == 'true'
+        working-directory: backend
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:27017/travel-planning
+        run: npm run test:e2e -- --runInBand
 
   frontend:
     name: frontend

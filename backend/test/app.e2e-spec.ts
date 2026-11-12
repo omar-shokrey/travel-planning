@@ -27,7 +27,7 @@ class ProbeController {
 describe('App setup (e2e)', () => {
   let app: NestExpressApplication;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
       controllers: [ProbeController],
@@ -39,7 +39,7 @@ describe('App setup (e2e)', () => {
     await app.init();
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     await app.close();
   });
 
