@@ -12,7 +12,7 @@
 ## Architecture
 
 1. Follow MVC: Model = Mongoose schemas and services, View = Next.js, Controller = NestJS controllers.
-2. Organize the backend into feature modules, one folder each in `backend/src/`: auth, users, admin, flights, flight-bookings, hotels, hotel-bookings, payments, itineraries, blog, notifications, audit, exchange-rates, uploads, reference, reports. What each module owns is in the module table of `specs/travel-platform.md`. Inside a module: `<module>.module.ts`, `<module>.controller.ts`, `<module>.service.ts`, `models/`, `dto/`.
+2. Organize the backend into feature modules, one folder each in `backend/src/`: auth, users, admin, flights, flight-bookings, hotels, hotel-bookings, payments, itineraries, blog, notifications, audit, exchange-rates, uploads, reference, reports. What each module owns is in the module table of `specs/travel-platform.md`. Inside a module: `<module>.module.ts`, `<module>.controller.ts`, `<module>.service.ts`, `models/`, `dto/`, `mappers/`.
 3. Controllers handle HTTP only. Services hold business logic and database access. Schemas define persistence. DTOs validate input.
 4. The frontend talks to the API only and never to MongoDB.
 5. Security, validation and authorization are enforced on the backend, even when the frontend also validates.
@@ -61,9 +61,24 @@ Follow the names the code already uses. The rules for ids, money and dates are a
 - A flight keeps its times in UTC. Use the airport's IANA time zone (`timeZone`, from `airports.csv`) with `luxon` to show a local time or to compute `departureDateLocal`. Never add or subtract hours by hand.
 - Money is a whole number of minor units (cents) plus a currency code, never a floating-point number.
 
+## Entities, DTOs and mappers
+
+Every module uses the same pattern, so every response looks the same.
+
+- Entity: the Mongoose schema in `models/`. It is how a record is stored. It never leaves the API.
+- Request DTO: in `dto/`. It is what the client may send, with the validation rules and `@ApiProperty()`. It never carries a field the caller must not set (role, owner id, status, price). The service sets those.
+- Response DTO: in `dto/`, named `<name>-response.dto.ts`. It is what the API returns: public fields only, with `@ApiProperty()` so Swagger shows them.
+- Mapper: plain functions in `mappers/<name>.mapper.ts`, for example `toPostResponse(post)`. A mapper turns an entity into a response DTO. It uses no database and no HTTP, and it has a unit test next to it (`<name>.mapper.spec.ts`).
+- The service calls the mapper just before it returns, and the controller returns what the service returns. Never return a Mongoose document from a controller.
+- In a response: `_id` becomes `id` (a string), references to other documents become string ids, moments are UTC ISO strings, date-only fields stay `YYYY-MM-DD`, and money is whole minor units plus a currency code.
+- Never let these leave the API: password hashes, session and refresh-token data, lockout counters, Stripe secrets, internal hold fields.
+- Lists: map each item, then return `paginate(items, total, query)` and document the route with `@ApiPaginatedResponse(<Name>ResponseDto)`.
+- Update DTO: `UpdateFlightDto extends PartialType(CreateFlightDto)`, with `PartialType` from `@nestjs/swagger`, so Swagger keeps the fields.
+- Other services need entities, not DTOs. Give them a separate method such as `findEntityOrThrow()`, and never expose it through a controller.
+
 ## Commands
 
-First time on a machine, from the repo root: `cp .env.example backend/.env`, then edit `backend/.env`. `backend/.env` is git-ignored, so keys never go to GitHub. Environment variables are checked at startup by `backend/src/config/env.validation.ts`; add a variable there when code starts using it.
+First time on a machine, from the repo root: `cp .env.example backend/.env` (on Windows PowerShell: `Copy-Item .env.example backend\.env`), then edit `backend/.env`. The full setup steps are in `README.md`. `backend/.env` is git-ignored, so keys never go to GitHub. Environment variables are checked at startup by `backend/src/config/env.validation.ts`; add a variable there when code starts using it.
 
 Backend:
 
@@ -81,7 +96,7 @@ npm run seed -- --dry-run   # check the reference data and the database, writes 
 npm run seed                # load the reference data and the admin account
 ```
 
-With `start:dev` running, the API is at `http://localhost:3001/api` and Swagger at `http://localhost:3001/api/docs`.
+With `start:dev` running, the API is at `http://localhost:3001/api` and Swagger at `http://localhost:3001/api/docs`. `GET /api/health` is public and tells you if the API and the database are up.
 
 The team leader runs the seed against the shared database. It needs `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `backend/.env` (the password needs 8 or more characters with a letter and a digit). Stop `start:dev` first, because the build clears `dist/`.
 
@@ -90,6 +105,7 @@ Repo root (formatting and Git hooks):
 ```bash
 npm install
 npm run format
+npm run format:check   # checks every file
 ```
 
 ## Shared database
@@ -119,8 +135,11 @@ The whole team uses one MongoDB Atlas database, so a mistake here affects everyo
 - Commit with Conventional Commits, for example `feat(flights): add round-trip search`. Avoid vague messages.
 - Open a pull request into `develop`. Title and description must be meaningful and reference the requirement IDs.
 - Every pull request is reviewed and approved by the team leader or the second reviewer before it is merged.
+- Merge with "Create a merge commit". Do not squash and do not rebase, so the history keeps every commit and its author. Delete the branch after the merge.
 - Record AI assistance in `AI_PROMPTS.txt`.
 
 ## Workflow
 
 Plan, implement in small steps, verify, read the diff, log AI usage, open a PR, review, CI, merge.
+
+To verify, run `format`, `lint`, `typecheck`, `test`, `test:e2e` and `build` in `backend/`. CI runs `lint`, `typecheck`, `build`, `test` and `test:e2e`. It does not check formatting; the Git hook formats your staged files when you commit.

@@ -95,7 +95,7 @@ npm run test:e2e      # end-to-end tests, on the test database
 npm run build         # compile the API
 ```
 
-Before you open a pull request, run `format`, `lint`, `typecheck`, `test`, `test:e2e` and `build`. CI runs the same checks on every pull request. At the repo root, `npm run format:check` checks the formatting of all files, and a Git hook formats staged files when you commit.
+Before you open a pull request, run `format`, `lint`, `typecheck`, `test`, `test:e2e` and `build`. CI runs `lint`, `typecheck`, `build`, `test` and `test:e2e` on every pull request. It does not check formatting: a Git hook formats your staged files when you commit, and `npm run format:check` at the repo root checks every file.
 
 ## Tests and databases
 
