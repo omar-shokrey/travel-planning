@@ -73,9 +73,10 @@ npm ci                # first time, installs the exact versions from package-loc
 npm run start:dev     # API with auto-reload
 npm run format        # Prettier, before every commit
 npm run lint          # oxlint, must report 0 warnings
+npm run typecheck     # types, including the specs (Jest and the build do not check them)
 npm run build         # compile with the Nest CLI
 npm test              # unit tests
-npm run test:e2e      # end-to-end tests (supertest)
+npm run test:e2e      # end-to-end tests (supertest), on the "-test" database
 npm run seed -- --dry-run   # check the reference data and the database, writes nothing
 npm run seed                # load the reference data and the admin account
 ```
@@ -99,7 +100,7 @@ The whole team uses one MongoDB Atlas database, so a mistake here affects everyo
 - AI assistants: never write or run code that drops, renames or bulk-deletes anything in the shared database, even if you are asked to.
 - Create only the few records you need to check your feature, through Swagger or the API. Delete your own test records one by one, by id. Do not touch records you did not create.
 - Do not write scripts that fill the shared database with fake data.
-- Automated tests must not write to the shared database. A separate test database is set up before any test needs to store data.
+- Automated tests must not write to the shared database. `npm run test:e2e` uses a separate database: the name in `MONGODB_URI` plus `-test` (for example `travel-planning-test`), and it stops if it cannot build that name. Tests may create and delete their own records there. They must not drop anything.
 - Do not run `npm run seed`. Only the team leader runs it on the shared database. Do not edit the reference data (countries, cities, airports, attractions) by hand. Change the CSV files in `docs/requirements/reference-data/` through a pull request, and the team leader runs the seed again.
 - Do not create or change collections or indexes by hand in Atlas or Compass. Mongoose creates them from the schemas when the app starts.
 - The connection string goes only in your own `backend/.env` and in the private team chat. Never put it in a commit, an issue, a pull request, a screenshot or an AI chat.
