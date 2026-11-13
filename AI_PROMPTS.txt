@@ -267,3 +267,43 @@ amended the commit before pushing; (4) Claude's first README said CI runs the sa
 but CI does not check formatting, so Claude corrected the sentence and AGENTS.md now says it. Not
 done: a format check step in CI (the Git hook formats staged files).
 ================================================
+
+================================================
+Date: 2026-11-12
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: docs/initiation-leftovers / no issue (project setup)
+Related Requirement: None (setup)
+Prompt:
+This entry covers AI help between 14 Oct and 10 Nov that was not logged before, because it changed
+no repository file or it came before the log existed. (1) Setup pull requests #1 to #8 (14 Oct to 1
+Nov): in a setup chat I asked Claude to plan and help me build the repository foundation: the folder
+structure, the root files, the shared AI layer taken from the course demo kit and adapted to our
+project, the project description and requirements files, the issue templates, and the first
+checklist of setup steps. (2) 6 Nov: I gave Claude the six lab documents and asked it to compare
+them with our repository, and to write an explainer document of the backend structure and the
+database for my team and the TA. (3) 7 Nov: I asked Claude to guide me through three things in my
+own accounts: the Atlas cluster and database user, a Stripe sandbox with its keys, and the exchange
+rates key. (4) 10 Nov: I asked Claude to write a development plan for the eight members (the split
+of the 98 issues, build order, sprint plan, Git and Swagger rules) and a documentation of the
+initiation pull requests. On 12 Nov I also asked Claude to draft the descriptions of the pull
+requests for this branch and for the release.
+How the output was used:
+(1) The files and the checklist from the setup chat became the repository foundation in PRs #1 to
+#8; the shared layer from the demo kit was adapted to our project in PR #5. (2) The lab review found
+nothing that contradicts the labs and listed our deliberate differences. It raised decisions that I
+answered later: the models/ folder name, the cookie path, the pull request template sections and the
+ownership rules. The explainer is a Claude document that I use to present; it is not in the
+repository. (3) Claude gave me the clicks, checked the limits in the Atlas and Stripe documentation
+and read my screenshots. I did every step in my own accounts, and Claude never saw a password, a key
+or the connection string. (4) The plan and the documentation are Claude documents outside the
+repository, for the team after initiation.
+Accepted, changed, or rejected:
+Accepted: the lab review result, the models/ folder name, one Stripe sandbox per member, and the
+foundation files. Changed: Claude first leaned towards one shared Stripe sandbox and then changed
+its advice, after noticing that a shared sandbox with the shared database would let two backends
+process the same payment event; I chose one sandbox per member. Rejected: Spec Kit files, which I
+closed as not needed for this project. Not reviewed yet: I have not read the development plan and
+the pull request documentation in detail; I will review them after initiation and correct what is
+wrong.
+================================================

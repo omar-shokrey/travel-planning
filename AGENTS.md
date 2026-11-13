@@ -35,6 +35,7 @@
 - Flight and hotel booking must be concurrency-safe. Inventory holds expire and release capacity.
 - Reference data (countries, cities, airports, attractions) is seeded from the official datasets, keeping their identifiers.
 - Exchange rates come from FXRatesAPI.
+- The platform currency is USD (PAY-04). All prices, payments and refunds use it. A user's preferred currency (ACC-09) only changes how prices are shown. Define `USD` once, as a constant in `backend/src/common/constants/`, when the first payment code needs it.
 - Every requirement has an ID (ACC-, FLT-, HTL-, PAY-, ITN-, BLG-, GEN-). Business rules and limits come from the workbook.
 
 ## Quality and security
@@ -135,7 +136,8 @@ The whole team uses one MongoDB Atlas database, so a mistake here affects everyo
 - Commit with Conventional Commits, for example `feat(flights): add round-trip search`. Avoid vague messages.
 - Open a pull request into `develop`. Title and description must be meaningful and reference the requirement IDs.
 - Every pull request is reviewed and approved by the team leader or the second reviewer before it is merged.
-- Merge with "Create a merge commit". Do not squash and do not rebase, so the history keeps every commit and its author. Delete the branch after the merge.
+- Merge with "Create a merge commit". Do not squash and do not rebase, so the history keeps every commit and its author. Delete a feature branch after its merge. Never delete `develop` or `main`.
+- A release is a pull request from `develop` into `main` at a milestone. Merge it the same way, and keep `develop` after the merge.
 - Record AI assistance in `AI_PROMPTS.txt`.
 
 ## Workflow
