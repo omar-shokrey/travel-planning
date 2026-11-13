@@ -1,0 +1,8 @@
+node_modules
+.next
+dist
+coverage
+backend/uploads
+docs/requirements
+frontend/lib/api-types.ts
+package-lock.json
