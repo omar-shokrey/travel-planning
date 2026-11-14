@@ -307,3 +307,18 @@ closed as not needed for this project. Not reviewed yet: I have not read the dev
 the pull request documentation in detail; I will review them after initiation and correct what is
 wrong.
 ================================================
+================================================
+Date: 2026-11-14
+Student: Maha Mohamed Gad
+Tool: ChatGPT
+Branch / Issue: feature/PAY-04-single-platform-currency
+Related Requirement: PAY-04
+Prompt:
+I asked ChatGPT to guide me step by step through implementing PAY-04 (One platform currency) according to the official project description, development plan, AGENTS.md and CLAUDE.md. I asked it to inspect the existing repository before making changes, identify how the project defines the platform currency, create the required shared constant and a test for it, and guide me through running the relevant checks.
+
+How the output was used:
+I followed the guidance to create `backend/src/common/constants/currency.ts` with the platform currency defined as USD, and added `backend/src/common/constants/currency.spec.ts` to verify that the platform currency is USD. I installed the backend dependencies because `node_modules` was missing, then ran the targeted Jest test successfully.
+
+Accepted, changed, or rejected:
+Accepted: the repository inspection, the decision to define USD once as the platform currency constant, the constant implementation, and the unit test. I also followed the suggested branch name `feature/PAY-04-single-platform-currency`.
+================================================ 
