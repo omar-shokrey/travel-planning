@@ -392,8 +392,9 @@ app.e2e-spec.ts (every route now needs a login), the unit and end-to-end tests a
 the auth and users READMEs. Claude could not install packages in its own workspace, so there it only
 formatted the files with Prettier and read them against the existing code; it committed the files
 and pushed the branch. I fetched the branch to my machine, ran format, lint, typecheck, the unit and
-end-to-end tests and the build, tried the login in Swagger, read the diff, and committed and pushed
-any fix through my IDE.
+end-to-end tests and the build, and read the diff. Claude then tried the login, /api/auth/me and the
+failed logins in the in-app browser against my running API, with one throwaway account it created
+through the register route. I committed and pushed any fix through my IDE.
 Accepted, changed, or rejected:
 Accepted: the design (JwtAuthGuard and RolesGuard are global guards registered in AuthModule, so no
 shared-layer pull request was needed; the tokens only in httpOnly cookies; the account is read from
