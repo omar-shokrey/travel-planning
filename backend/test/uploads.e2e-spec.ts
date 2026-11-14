@@ -1,4 +1,5 @@
 import './support/uploads-env';
+import { ConfigModule } from '@nestjs/config';
 import { Controller, Post, UploadedFile, UploadedFiles } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -6,7 +7,6 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import request from 'supertest';
-import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
 import { Public } from './../src/common/decorators/public.decorator';
 import { UploadImage } from './../src/uploads/decorators/upload-image.decorator';
@@ -25,6 +25,7 @@ const JPEG_SIGNATURE = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
 
 const png = (content = 'png data'): Buffer =>
   Buffer.concat([PNG_SIGNATURE, Buffer.from(content)]);
+
 const jpeg = (content = 'jpeg data'): Buffer =>
   Buffer.concat([JPEG_SIGNATURE, Buffer.from(content)]);
 
@@ -74,7 +75,13 @@ describe('Image uploads (e2e)', () => {
     rmSync(uploadsDir, { recursive: true, force: true });
 
     const moduleFixture = await Test.createTestingModule({
-      imports: [AppModule, UploadsModule],
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          ignoreEnvFile: true,
+        }),
+        UploadsModule,
+      ],
       controllers: [UploadProbeController],
     }).compile();
 
@@ -126,7 +133,10 @@ describe('Image uploads (e2e)', () => {
   it('stores several images at once, JPEG included', async () => {
     const upload = await request(app.getHttpServer())
       .post('/api/probe-uploads/images')
-      .attach('images', png(), { filename: 'a.png', contentType: 'image/png' })
+      .attach('images', png(), {
+        filename: 'a.png',
+        contentType: 'image/png',
+      })
       .attach('images', jpeg(), {
         filename: 'b.jpg',
         contentType: 'image/jpeg',
@@ -136,13 +146,17 @@ describe('Image uploads (e2e)', () => {
     expect(
       upload.body.map((image: { mimeType: string }) => image.mimeType),
     ).toEqual(['image/png', 'image/jpeg']);
+
     expect(storedFiles()).toHaveLength(2);
   });
 
   it('stores the logo of an airline', async () => {
     const upload = await request(app.getHttpServer())
       .post('/api/probe-uploads/logo')
-      .attach('logo', png(), { filename: 'logo.png', contentType: 'image/png' })
+      .attach('logo', png(), {
+        filename: 'logo.png',
+        contentType: 'image/png',
+      })
       .expect(201);
 
     expect(upload.body.filename).toMatch(/^[0-9a-f-]{36}\.png$/);
@@ -174,6 +188,7 @@ describe('Image uploads (e2e)', () => {
       message: `${filename} is not a JPG or PNG image`,
       path: '/api/probe-uploads/images',
     });
+
     expect(storedFiles()).toEqual([]);
   });
 
@@ -195,11 +210,13 @@ describe('Image uploads (e2e)', () => {
       statusCode: 413,
       error: 'Payload Too Large',
     });
+
     expect(storedFiles()).toEqual([]);
   });
 
   it('rejects more images than a post can have', async () => {
     let upload = request(app.getHttpServer()).post('/api/probe-uploads/images');
+
     for (let index = 0; index < 6; index++) {
       upload = upload.attach('images', png(`image ${index}`), {
         filename: `${index}.png`,
@@ -210,6 +227,7 @@ describe('Image uploads (e2e)', () => {
     const response = await upload.expect(400);
 
     expect(response.body.message).toBe('A post can have at most 5 images.');
+
     expect(storedFiles()).toEqual([]);
   });
 
@@ -235,6 +253,7 @@ describe('Image uploads (e2e)', () => {
 
   it('does not serve files outside the uploads folder', async () => {
     const secret = join(dirname(uploadsDir), `secret-${randomUUID()}.txt`);
+
     writeFileSync(secret, 'do not serve');
 
     try {
@@ -255,8 +274,10 @@ describe('Image uploads (e2e)', () => {
       .expect(200);
 
     const paths = response.body.paths as Record<string, SwaggerUploadRoute>;
+
     const schemaOf = (route: string, field: string): unknown => {
       const path = Object.keys(paths).find((key) => key.endsWith(route));
+
       return paths[path as string].post.requestBody.content[
         'multipart/form-data'
       ].schema.properties[field];
@@ -266,6 +287,7 @@ describe('Image uploads (e2e)', () => {
       type: 'array',
       items: { type: 'string', format: 'binary' },
     });
+
     expect(schemaOf('/probe-uploads/logo', 'logo')).toMatchObject({
       type: 'string',
       format: 'binary',
