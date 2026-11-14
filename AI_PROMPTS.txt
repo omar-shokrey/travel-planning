@@ -310,6 +310,44 @@ wrong.
 
 ================================================
 Date: 2026-11-14
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/ACC-01-guest-registration / #9
+Related Requirement: ACC-01 (also planning and the reviews of pull requests #115 and #116)
+Prompt:
+This entry covers 13 and 14 Nov. (1) Team work, 13 Nov: I gave Claude the team split (M1 to M8) and
+asked how to divide the 98 Milestone 1 issues and the modules between us, for a description each
+member and their AI can develop from, for a kickoff message, and for a table of the branches each
+member creates. (2) Reviews, 14 Nov: I asked Claude to review Salma's pull request #115 (FLT-02) and
+Maha's pull request #116 (PAY-04) against their issues, AGENTS.md and the specification, including
+the pull request description and the AI log, and to write a follow-up prompt each of them can give
+to her own AI to fix the comments. I also asked for a team message about the checks to run before
+every push, and I asked which layers a pull request must contain, where guards and CORS are set up,
+and whether every entity needs a DTO. (3) ACC-01, 14 Nov: I asked Claude to explain the issue and
+its approach first, and then to develop it: "develop my first issue acc-01".
+How the output was used:
+(1) The split, the member briefs and the branch table are a Claude document outside the repository;
+I sent the tables to the team. (2) I used the two reviews to decide on the pull requests and gave
+Salma and Maha the follow-up prompts. (3) Claude wrote the ACC-01 files into my project folder: the
+register DTO, the user response DTO and its mapper, UsersService, AuthService, AuthController, the
+changes to the two modules and to the User class, the unit and end-to-end tests and the two module
+READMEs. Claude could not install packages in its own workspace, so there it only formatted the
+files with Prettier and read them against the existing code. I ran format, lint, typecheck, the unit
+and end-to-end tests and the build on my machine, read the diff, and committed and pushed through my
+IDE.
+Accepted, changed, or rejected:
+Accepted: the split and the branch names; the review findings; the ACC-01 design (registering does
+not log the user in, UsersService owns the users collection and hashes the password, 409 for an
+email that is already registered, consent stored as a date). Changed: Claude first gave ACC-01 as
+copy-and-paste steps and I then asked it to write the whole issue; its first prompt for Salma was
+too long for a chat she had already started, so I asked for a short follow-up prompt. Rejected:
+changing my Claude network settings so that its workspace could install packages. Two limits are not
+in the workbook and were added by Claude: a name of at most 100 characters and a password of at most
+72.
+================================================
+
+================================================
+Date: 2026-11-14
 Student: Maha Mohamed Gad
 Tool: ChatGPT
 Branch / Issue: feature/PAY-04-single-platform-currency / #103
