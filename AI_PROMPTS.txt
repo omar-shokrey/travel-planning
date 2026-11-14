@@ -408,3 +408,46 @@ registration. Left out on purpose: the lockout after 5 failures (ACC-05), logout
 request. Changed: nothing in the code. Rejected: Claude's push of the branch to GitHub, which a stop
 hook had asked for; I had it taken back and committed the changes myself.
 ================================================
+
+================================================
+Date: 2026-11-14
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: docs/ai-log-gen-12-acc-18 / #104
+Related Requirement: GEN-12
+Prompt:
+I asked Claude to develop and finish GEN-12 (seed reference data), because work of my teammates
+depends on it.
+How the output was used:
+Claude read the issue, the specification and the seed code on develop, and found that GEN-12 was
+already complete (commit 9c23cb2): the seed loads countries, cities, airports and attractions from
+the official CSV files, keeps their ids, and the supported currencies are the currency codes in
+countries.csv. Claude wrote no code. It gave me the steps to verify the seed and wrote the closing
+comment for the issue. I ran the dry run and then the seed twice on the shared database myself;
+Claude did not run the seed.
+Accepted, changed, or rejected:
+Accepted: Claude's finding that no new code was needed, the verification steps and the closing
+comment. My runs showed 8 records in each of the four collections, with 0 added and 0 updated on
+every run, so the data was already loaded and nothing was duplicated. Changed: nothing. Rejected:
+nothing.
+================================================
+
+================================================
+Date: 2026-11-14
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: docs/ai-log-gen-12-acc-18 / #102
+Related Requirement: ACC-18
+Prompt:
+While I verified GEN-12, Claude suggested that I also check ACC-18 (seeded admin accounts), because
+the same seed command creates the administrator account. I asked Claude whether ACC-18 was done.
+How the output was used:
+Claude wrote no code. It told me to log in as the seeded administrator in Swagger and wrote the
+closing comment for the issue. I did the login myself: POST /api/auth/login answered 200 with the
+role "admin" and the status "active", and the seed reported that the administrator account already
+exists and was left unchanged.
+Accepted, changed, or rejected:
+Accepted: the check and the closing comment. Claude also pointed out that I had pasted the admin
+password into the chat, which the project rules do not allow; I will change it when the
+change-password feature exists. Changed: nothing. Rejected: nothing.
+================================================
