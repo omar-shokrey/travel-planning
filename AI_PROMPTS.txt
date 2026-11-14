@@ -368,3 +368,40 @@ Accepted: the repository inspection, the decision to define USD once as the plat
 After Omar's review, I accepted the requested formatting fixes, AI log corrections, and PR description changes. The implementation approach and platform currency code were not changed.
 
 ================================================
+
+================================================
+Date: 2026-11-14
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/ACC-04-login-with-email-and-password / #10
+Related Requirement: ACC-04 (also the review of pull request #117 and a prompt for Salma)
+Prompt:
+This entry covers the evening of 14 Nov. (1) Review: I asked Claude to review Salma's pull request
+#117 (FLT-02, airport list) against its issue, AGENTS.md and the specification, and to write a
+short follow-up prompt for her AI that fixes the problems and leaves her AI log entry and pull
+request description to me. Claude found, among other things, that her change added a second
+`setupFiles` key to `test/jest-e2e.json`, which would replace the setup that points the end-to-end
+tests at the "-test" database. (2) ACC-04: I asked Claude to develop my second issue, "develop my
+second issue acc-04", and first to check whether any issue it depends on is missing. Claude found
+only ACC-01, which is merged, so it went on.
+How the output was used:
+(1) I used the review to decide on the pull request and gave Salma the follow-up prompt. (2) Claude
+wrote the ACC-04 files on the branch: the login DTO, AuthTokensService, JwtAuthGuard, the changes to
+AuthService, AuthController, AuthModule and UsersService, @Public() on the probe controller of
+app.e2e-spec.ts (every route now needs a login), the unit and end-to-end tests and the changes to
+the auth and users READMEs. Claude could not install packages in its own workspace, so there it only
+formatted the files with Prettier and read them against the existing code; it committed the files
+and pushed the branch. I fetched the branch to my machine, ran format, lint, typecheck, the unit and
+end-to-end tests and the build, tried the login in Swagger, read the diff, and committed and pushed
+any fix through my IDE.
+Accepted, changed, or rejected:
+Accepted: the design (JwtAuthGuard and RolesGuard are global guards registered in AuthModule, so no
+shared-layer pull request was needed; the tokens only in httpOnly cookies; the account is read from
+the database on every request, so a suspension applies at once; one generic message for an unknown
+email, a wrong password and a deactivated account; 403 for a suspended account only after the
+password is right). Added by Claude and not in the issue: GET /api/auth/me, as the smallest
+protected route to prove the cookie works, and a limit of 72 characters on the login password, as in
+registration. Left out on purpose: the lockout after 5 failures (ACC-05), logout and refresh
+(ACC-06), and the startup check of the JWT secrets, which is a change in config/ for its own pull
+request. Changed: nothing. Rejected: nothing.
+================================================

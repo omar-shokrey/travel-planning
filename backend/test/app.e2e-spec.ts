@@ -5,12 +5,15 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
+import { Public } from './../src/common/decorators/public.decorator';
 import { PaginationQueryDto } from './../src/common/dto/pagination-query.dto';
 
 /**
  * Throwaway routes that exercise the global setup. No real route has a query
- * DTO or reads cookies yet.
+ * DTO or reads cookies yet. They are public, because every route needs a
+ * logged-in user unless it says otherwise (ACC-04).
  */
+@Public()
 @Controller('probe')
 class ProbeController {
   @Get()

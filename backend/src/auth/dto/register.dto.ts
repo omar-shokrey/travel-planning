@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Transform, type TransformFnParams } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import {
   Equals,
   IsEmail,
@@ -17,12 +17,7 @@ import {
   CONSENT_REQUIRED_MESSAGE,
   PASSWORD_MAX_LENGTH,
 } from '../auth.constants';
-
-const trim = ({ value }: TransformFnParams): unknown =>
-  typeof value === 'string' ? value.trim() : value;
-
-const trimAndLowercase = ({ value }: TransformFnParams): unknown =>
-  typeof value === 'string' ? value.trim().toLowerCase() : value;
+import { trim, trimAndLowercase } from './transforms';
 
 /**
  * What a guest sends to create an account (ACC-01). It has no role and no

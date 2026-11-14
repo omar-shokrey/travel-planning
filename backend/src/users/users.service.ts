@@ -1,7 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { hash } from 'bcrypt';
-import type { Model } from 'mongoose';
+import { isValidObjectId, type Model } from 'mongoose';
 import { PASSWORD_SALT_ROUNDS } from '../common/constants/password';
 import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
@@ -50,5 +50,27 @@ export class UsersService {
       status: UserStatus.Active,
       consentAcceptedAt: input.consentAcceptedAt,
     });
+  }
+
+  /**
+   * Finds an account by email for the login check (ACC-04). It is the only
+   * lookup that reads `passwordHash`, which the schema hides by default. The
+   * entity is for the auth service: it never leaves the API.
+   */
+  findEntityByEmailWithPasswordHash(
+    email: string,
+  ): Promise<UserDocument | null> {
+    return this.users
+      .findOne({ email: email.trim().toLowerCase() })
+      .select('+passwordHash')
+      .exec();
+  }
+
+  /** Finds an account by id, without the password hash. `null` when there is none. */
+  findEntityById(id: string): Promise<UserDocument | null> {
+    if (!isValidObjectId(id)) {
+      return Promise.resolve(null);
+    }
+    return this.users.findById(id).exec();
   }
 }
