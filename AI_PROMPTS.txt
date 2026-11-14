@@ -183,3 +183,18 @@ planned in the CI step.
 Rejected for now: paid Atlas backups (the seed can rebuild today's data; I will decide again before
 real user data exists).
 ================================================
+================================================
+Date: 2026-11-15
+Student: Salma Sabry
+Tool: ChatGPT
+Branch / Issue: feature/GEN-08
+Related Requirement: GEN-08
+Prompt:
+I asked ChatGPT to review and complete GEN-08 (Image upload rules), verify the existing uploads implementation against the project requirements, inspect the upload service, decorators, constants, module, and E2E tests, and guide me through fixing any issues without changing unrelated project code. I also asked ChatGPT to verify the testing setup and confirm whether DTOs/mappers or a production upload endpoint were required for this shared upload infrastructure.
+
+How the output was used:
+I used ChatGPT to review the existing GEN-08 implementation and identify the required verification changes. The upload E2E tests were isolated from AppModule so they do not depend on the shared Atlas database, while keeping the production uploads module unchanged. I ran the targeted upload E2E tests and then the full unit tests, full E2E tests, lint, and build.
+
+Accepted, changed, or rejected:
+Accepted: the verification of the existing image format checks, 5 MB file-size limit, image limits, safe storage, static image serving, Swagger upload decorators, and E2E coverage. Accepted: isolating the uploads E2E test from the shared database by importing ConfigModule and UploadsModule directly. Changed: the upload test request limit remained at 10 files so the UploadsService can enforce the feature-specific limit and return the expected error message. Rejected: adding DTOs/mappers or a production POST upload endpoint specifically for GEN-08 because this requirement is shared upload infrastructure and the existing project structure does not require them for this module.
+================================================
