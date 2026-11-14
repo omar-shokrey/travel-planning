@@ -20,16 +20,24 @@ const input: CreateUserInput = {
 /** What the service hands to the model. */
 type StoredFields = Record<string, unknown>;
 
-function setup(existing: { _id: string } | null = null) {
+function setup(
+  existing: { _id: string } | null = null,
+  found: object | null = null,
+) {
+  // The query that `findOne` and `findById` give back, ended with exec().
+  const exec = jest.fn().mockResolvedValue(found);
+  const select = jest.fn(() => ({ exec }));
   const model = {
     exists: jest.fn().mockResolvedValue(existing),
     // Answers with what it was given, as a saved document would.
     create: jest.fn((fields: StoredFields) => Promise.resolve(fields)),
+    findOne: jest.fn(() => ({ select })),
+    findById: jest.fn(() => ({ exec })),
   };
   const service = new UsersService(model as unknown as Model<User>);
   const storedFields = (): StoredFields => model.create.mock.calls[0][0];
 
-  return { model, service, storedFields };
+  return { model, select, service, storedFields };
 }
 
 describe('UsersService', () => {
@@ -102,6 +110,65 @@ describe('UsersService', () => {
       await expect(service.createRegisteredUser(input)).rejects.toBe(
         duplicateKey,
       );
+    });
+  });
+
+  describe('findEntityByEmailWithPasswordHash (ACC-04)', () => {
+    it('finds the account by its trimmed, lowercased email', async () => {
+      const { model, service } = setup();
+
+      await service.findEntityByEmailWithPasswordHash('  Sara@Example.COM ');
+
+      expect(model.findOne).toHaveBeenCalledWith({ email: 'sara@example.com' });
+    });
+
+    it('asks for the password hash, which the schema hides by default', async () => {
+      const { select, service } = setup();
+
+      await service.findEntityByEmailWithPasswordHash(input.email);
+
+      expect(select).toHaveBeenCalledWith('+passwordHash');
+    });
+
+    it('returns the account, or null when there is none', async () => {
+      const account = { email: input.email };
+
+      expect(
+        await setup(null, account).service.findEntityByEmailWithPasswordHash(
+          input.email,
+        ),
+      ).toBe(account);
+      expect(
+        await setup(null, null).service.findEntityByEmailWithPasswordHash(
+          input.email,
+        ),
+      ).toBeNull();
+    });
+  });
+
+  describe('findEntityById (ACC-04)', () => {
+    const id = '6740f1c2a4b5c6d7e8f90123';
+
+    it('finds the account by id, without asking for the password hash', async () => {
+      const account = { email: input.email };
+      const { model, select, service } = setup(null, account);
+
+      expect(await service.findEntityById(id)).toBe(account);
+      expect(model.findById).toHaveBeenCalledWith(id);
+      expect(select).not.toHaveBeenCalled();
+    });
+
+    it('returns null when there is no such account', async () => {
+      const { service } = setup(null, null);
+
+      expect(await service.findEntityById(id)).toBeNull();
+    });
+
+    it('returns null for an id that cannot be one, without asking the database', async () => {
+      const { model, service } = setup();
+
+      expect(await service.findEntityById('not-an-id')).toBeNull();
+      expect(model.findById).not.toHaveBeenCalled();
     });
   });
 });
