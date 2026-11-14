@@ -307,18 +307,26 @@ closed as not needed for this project. Not reviewed yet: I have not read the dev
 the pull request documentation in detail; I will review them after initiation and correct what is
 wrong.
 ================================================
+
 ================================================
 Date: 2026-11-14
 Student: Maha Mohamed Gad
 Tool: ChatGPT
-Branch / Issue: feature/PAY-04-single-platform-currency
+Branch / Issue: feature/PAY-04-single-platform-currency / #103
 Related Requirement: PAY-04
 Prompt:
 I asked ChatGPT to guide me step by step through implementing PAY-04 (One platform currency) according to the official project description, development plan, AGENTS.md and CLAUDE.md. I asked it to inspect the existing repository before making changes, identify how the project defines the platform currency, create the required shared constant and a test for it, and guide me through running the relevant checks.
 
+After Omar's review of pull request #116, I asked ChatGPT to help me fix the review comments, including formatting of the two currency files, the layout and content of this AI_PROMPTS.txt entry, and the PR description.
+
 How the output was used:
 I followed the guidance to create `backend/src/common/constants/currency.ts` with the platform currency defined as USD, and added `backend/src/common/constants/currency.spec.ts` to verify that the platform currency is USD. I installed the backend dependencies because `node_modules` was missing, then ran the targeted Jest test successfully.
 
+After Omar's review, I used the guidance to install the repository dependencies, format the two currency files with Prettier, verify the repository formatting, and update this AI log entry to match the required template and include the review follow-up. I also used the guidance to prepare the corrected PR description.
+
 Accepted, changed, or rejected:
-Accepted: the repository inspection, the decision to define USD once as the platform currency constant, the constant implementation, and the unit test. I also followed the suggested branch name `feature/PAY-04-single-platform-currency`.
-================================================ 
+Accepted: the repository inspection, the decision to define USD once as the platform currency constant, the constant implementation, the unit test, and the verification steps. I also followed the suggested branch name `feature/PAY-04-single-platform-currency`.
+
+After Omar's review, I accepted the requested formatting fixes, AI log corrections, and PR description changes. The implementation approach and platform currency code were not changed.
+
+================================================
