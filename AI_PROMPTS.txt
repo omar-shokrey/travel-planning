@@ -451,3 +451,29 @@ Accepted: the check and the closing comment. Claude also pointed out that I had 
 password into the chat, which the project rules do not allow; I will change it when the
 change-password feature exists. Changed: nothing. Rejected: nothing.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/GEN-02-field-level-validation-messages / #93
+Related Requirement: GEN-02
+Prompt:
+I asked Claude to develop GEN-02 (field-level validation messages on all forms).
+How the output was used:
+Claude read the issue, the specification and the shared code and found that the behaviour already
+exists: the global ValidationPipe and the exception filter return a list of fields with their
+messages for every 400, and registration already had tests for it. Login had none that checked the
+fields. Claude wrote one file, test/validation-errors.e2e-spec.ts (9 tests), and no production
+code. The tests send bad bodies to the register and login routes and check that every invalid field
+is reported at once with its own messages, that a name of only spaces and a password that is too
+long are reported on their own fields, that a field that is not allowed is named, and that a body
+that is not valid JSON gets a 400 in the standard error shape. They create nothing in the
+database. Claude could not install packages or run the tests in its own workspace, so it only
+formatted the file with Prettier and checked its syntax; Claude put the file into my project folder
+and I created the branch, ran the checks and committed it myself. I ran format, lint, typecheck,
+the unit tests (300 passed), the end-to-end tests (69 passed) and the build.
+Accepted, changed, or rejected:
+Accepted: the finding that no production code was needed, and the test file as written. Changed:
+nothing. Rejected: nothing.
+================================================
