@@ -66,6 +66,10 @@ export class User {
 
   @Prop({ type: ModeratorAssignmentSchema })
   assignment?: ModeratorAssignment;
+
+  /** Written by Mongoose (`timestamps: true`). Declared here only for the types. */
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export type UserDocument = HydratedDocument<User>;

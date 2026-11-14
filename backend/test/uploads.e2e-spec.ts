@@ -71,9 +71,7 @@ class UploadProbeController {
 describe('Image uploads (e2e)', () => {
   let app: NestExpressApplication;
 
-  beforeEach(async () => {
-    rmSync(uploadsDir, { recursive: true, force: true });
-
+  beforeAll(async () => {
     const moduleFixture = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
@@ -91,11 +89,12 @@ describe('Image uploads (e2e)', () => {
     await app.init();
   });
 
-  afterEach(async () => {
-    await app.close();
+  beforeEach(() => {
+    rmSync(uploadsDir, { recursive: true, force: true });
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await app.close();
     rmSync(uploadsDir, { recursive: true, force: true });
   });
 

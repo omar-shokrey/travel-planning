@@ -5,12 +5,15 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
+import { Public } from './../src/common/decorators/public.decorator';
 import { PaginationQueryDto } from './../src/common/dto/pagination-query.dto';
 
 /**
  * Throwaway routes that exercise the global setup. No real route has a query
- * DTO or reads cookies yet.
+ * DTO or reads cookies yet. They are public, because every route needs a
+ * logged-in user unless it says otherwise (ACC-04).
  */
+@Public()
 @Controller('probe')
 class ProbeController {
   @Get()
@@ -27,7 +30,7 @@ class ProbeController {
 describe('App setup (e2e)', () => {
   let app: NestExpressApplication;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
       controllers: [ProbeController],
@@ -39,16 +42,22 @@ describe('App setup (e2e)', () => {
     await app.init();
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     await app.close();
   });
 
   it('serves routes under the /api prefix only', async () => {
-    await request(app.getHttpServer())
-      .get('/api')
-      .expect(200)
-      .expect('Hello World!');
+    await request(app.getHttpServer()).get('/api/health').expect(200);
+    await request(app.getHttpServer()).get('/health').expect(404);
     await request(app.getHttpServer()).get('/').expect(404);
+  });
+
+  it('reports that the API and the database are up', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/health')
+      .expect(200);
+
+    expect(response.body).toEqual({ status: 'ok', database: 'up' });
   });
 
   it('answers an unknown route with the standard error body', async () => {
@@ -103,7 +112,9 @@ describe('App setup (e2e)', () => {
   });
 
   it('sends security headers', async () => {
-    const response = await request(app.getHttpServer()).get('/api').expect(200);
+    const response = await request(app.getHttpServer())
+      .get('/api/health')
+      .expect(200);
 
     expect(response.headers['x-content-type-options']).toBe('nosniff');
     expect(response.headers['cross-origin-resource-policy']).toBe(
@@ -116,7 +127,7 @@ describe('App setup (e2e)', () => {
     const frontendUrl = app.get(ConfigService).get<string>('FRONTEND_URL');
 
     const response = await request(app.getHttpServer())
-      .options('/api')
+      .options('/api/health')
       .set('Origin', frontendUrl as string)
       .set('Access-Control-Request-Method', 'GET')
       .expect(204);
