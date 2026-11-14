@@ -390,11 +390,12 @@ wrote the ACC-04 files on the branch: the login DTO, AuthTokensService, JwtAuthG
 AuthService, AuthController, AuthModule and UsersService, @Public() on the probe controller of
 app.e2e-spec.ts (every route now needs a login), the unit and end-to-end tests and the changes to
 the auth and users READMEs. Claude could not install packages in its own workspace, so there it only
-formatted the files with Prettier and read them against the existing code; it committed the files
-and pushed the branch. I fetched the branch to my machine, ran format, lint, typecheck, the unit and
+formatted the files with Prettier and read them against the existing code. Because of a stop hook,
+Claude also pushed the branch to GitHub; I did not want that, so I had the work taken back, deleted
+the remote branch and committed the changes myself. I ran format, lint, typecheck, the unit and
 end-to-end tests and the build, and read the diff. Claude then tried the login, /api/auth/me and the
 failed logins in the in-app browser against my running API, with one throwaway account it created
-through the register route. I committed and pushed any fix through my IDE.
+through the register route. I committed and pushed through my IDE.
 Accepted, changed, or rejected:
 Accepted: the design (JwtAuthGuard and RolesGuard are global guards registered in AuthModule, so no
 shared-layer pull request was needed; the tokens only in httpOnly cookies; the account is read from
@@ -404,5 +405,6 @@ password is right). Added by Claude and not in the issue: GET /api/auth/me, as t
 protected route to prove the cookie works, and a limit of 72 characters on the login password, as in
 registration. Left out on purpose: the lockout after 5 failures (ACC-05), logout and refresh
 (ACC-06), and the startup check of the JWT secrets, which is a change in config/ for its own pull
-request. Changed: nothing. Rejected: nothing.
+request. Changed: nothing in the code. Rejected: Claude's push of the branch to GitHub, which a stop
+hook had asked for; I had it taken back and committed the changes myself.
 ================================================
