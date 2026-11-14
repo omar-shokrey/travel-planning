@@ -184,17 +184,21 @@ Rejected for now: paid Atlas backups (the seed can rebuild today's data; I will 
 real user data exists).
 ================================================
 ===============================================
+===============================================
 Date: 2026-11-14
 Student: Salma Sabry
 Tool: ChatGPT
 Branch / Issue: feature/FLT-02-airport-list
 Related Requirement: FLT-02
 Prompt:
-I asked ChatGPT to guide me through implementing FLT-02, the read-only airport list endpoint. I asked it to review the existing airport schema, shared pagination DTO, reference module structure, and project requirements, then guide me through creating the airport service, controller, pagination response, and unit tests. I also pasted the relevant code and terminal output for review.
+I asked ChatGPT to guide me through implementing FLT-02, the read-only airport list endpoint. I asked it to review the existing airport schema, shared pagination DTO, reference module structure, and project requirements, then guide me through creating the airport service, controller, paginated response, response DTO, mapper, unit tests, and end-to-end tests. I also pasted the relevant code and terminal output for review.
 
 How the output was used:
-I used ChatGPT's guidance to implement the airport service and controller, register them in the reference module, and add unit tests for the airport list and pagination behavior. I ran the build, full unit test suite, and lint locally to verify the implementation.
+I used ChatGPT's guidance to implement the airport service and controller, register the required City and Country models in the reference module, add a public paginated airport response, map internal airport/city/country data to the public response DTO, add mapper and service tests, and add an end-to-end test using the separate local test database. I also added a short reference-module README documenting the design decisions. I ran the verification commands locally and reviewed the resulting code myself.
 
 Accepted, changed, or rejected:
-Accepted: the service/controller structure, use of the existing pagination DTO, paginated { items, meta } response, sorting by airport _id, and unit test approach. I reviewed and ran the implementation myself and kept the code after the build, 182 unit tests, and lint all passed.
+Accepted: the service/controller structure, use of the existing pagination DTO, paginated { items, meta } response, public read-only route, batched City/Country lookups, response mapping, deterministic airport sorting, and the unit/e2e test approach.
+Changed: the initial airport service implementation was revised to resolve city and country names through batched $in queries and to return only the required public response fields. The E2E setup was changed to use the separate local test database specified by the project instead of the shared database.
+Rejected: exposing internal cityId/countryCode fields in the public response and using the shared database for E2E tests.
+Verification: format passed, lint passed with 0 warnings and 0 errors, TypeScript passed, all unit tests passed, 22/22 end-to-end tests passed, and the production build passed.
 ===============================================
