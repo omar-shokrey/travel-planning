@@ -731,3 +731,33 @@ suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger, PAT
 /api/itineraries/{id} with visibility public answered 200 and the itinerary showed as public. I
 changed nothing and rejected nothing.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Ahmed Rashad (Mado)
+Tool: Claude Code (VS Code extension)
+Branch / Issue: feature/BLG-05-post-comments / #85
+Related Requirement: BLG-05
+Prompt:
+I gave Claude Code the development plan, my list of 14 issues with their branch names, and the
+rules of the repository (AGENTS.md, README, the PR template and this log's template). I asked it
+to scan the repository, ask me for the decisions it needed, give me a checklist of my issues, and
+then implement them one branch per issue, running the checks before every pull request and never
+opening or committing the .env file. For this entry I asked it to start my work; BLG-05 was the
+first issue whose dependency (BLG-01) existed.
+How the output was used:
+Claude Code branched from Maha's BLG-01 branch, merged the latest develop into it, and wrote the
+comment feature in the blog module: the Comment schema, the request and response DTOs, the mapper,
+CommentsService, CommentsController (POST and GET /api/posts/:id/comments), the unit tests, an
+end-to-end test file and the Comments section of the module README. It ran format, lint,
+typecheck, build and the unit tests on my laptop: 44 suites and 510 tests passed, lint reported 0
+warnings, and the type check and the build were clean.
+Accepted, changed, or rejected:
+Design choices by Claude Code: comments live in their own collection; a draft answers 404 like a
+missing post; a public, paginated GET route was added for reading comments oldest first, because
+the endpoint table has none; the post keeps a commentCount raised with one $inc update, as in the
+spec's data model, without changing PostResponseDto. Changed by Claude Code after its own checks:
+the first unit test run crashed four suites with "Jest worker ran out of memory" on my laptop, and
+the run passed with two workers; no code changed. Not run yet: the end-to-end tests, because my
+backend/.env was not in place. The branch is pushed only after I have read the diff.
+================================================
