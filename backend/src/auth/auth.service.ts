@@ -275,8 +275,20 @@ export class AuthService {
    */
   async changePassword(
     userId: string,
+    accessToken: string | undefined,
     dto: ChangePasswordDto,
   ): Promise<UserResponseDto> {
+    // The session that makes the change, read as logout reads it. It is the
+    // one that stays logged in. The guard has already checked this cookie, so
+    // claims that cannot be read, or that name another user, mean the request
+    // is not what it seems: nothing is changed.
+    const current = accessToken
+      ? await this.tokens.readClaims(accessToken, 'access')
+      : null;
+    if (!current || current.userId !== userId) {
+      throw new UnauthorizedException(LOGIN_REQUIRED_MESSAGE);
+    }
+
     const user = await this.usersService.findEntityByIdWithPasswordHash(userId);
     if (!user) {
       throw new UnauthorizedException(LOGIN_REQUIRED_MESSAGE);
@@ -295,6 +307,9 @@ export class AuthService {
     if (!updated) {
       throw new UnauthorizedException(LOGIN_REQUIRED_MESSAGE);
     }
+    // After the password, so a failure here never leaves the old password in
+    // place. Someone who stole another session of this account loses it.
+    await this.sessions.revokeAllOfUser(userId, new Date(), current.sessionId);
     return toUserResponse(updated);
   }
 

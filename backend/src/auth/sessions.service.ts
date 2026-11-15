@@ -103,6 +103,32 @@ export class SessionsService {
       .exec();
   }
 
+  /**
+   * Revokes every session of one user that is not revoked yet, except
+   * `exceptSessionId` when it is given (ACC-08 keeps the session that changed
+   * the password; ACC-07a keeps none). The filter always names the user, so
+   * it never reaches the sessions of anyone else. A user with no live session
+   * changes nothing.
+   */
+  async revokeAllOfUser(
+    userId: string,
+    now: Date,
+    exceptSessionId?: string,
+  ): Promise<void> {
+    await this.sessions
+      .updateMany(
+        {
+          userId,
+          revokedAt: null,
+          ...(exceptSessionId !== undefined && {
+            _id: { $ne: exceptSessionId },
+          }),
+        },
+        { $set: { revokedAt: now } },
+      )
+      .exec();
+  }
+
   /** A session of this user that is not revoked and has not run out. */
   private liveSession(sessionId: string, userId: string, now: Date) {
     return {
