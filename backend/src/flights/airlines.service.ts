@@ -109,8 +109,10 @@ export class AirlinesService {
       storedLogo = await this.uploadsService.saveImage(logo);
     }
 
+    let updatedAirline: AirlineDocument | null;
+
     try {
-      const updatedAirline = await this.airlineModel
+      updatedAirline = await this.airlineModel
         .findByIdAndUpdate(
           id,
           {
@@ -121,16 +123,6 @@ export class AirlinesService {
           { new: true, runValidators: true },
         )
         .exec();
-
-      if (!updatedAirline) {
-        throw new NotFoundException('Airline not found');
-      }
-
-      if (storedLogo) {
-        await this.uploadsService.deleteImage(airline.logo);
-      }
-
-      return updatedAirline;
     } catch (error) {
       if (storedLogo) {
         await this.uploadsService.deleteImage(storedLogo.filename);
@@ -142,5 +134,19 @@ export class AirlinesService {
 
       throw error;
     }
+
+    if (!updatedAirline) {
+      if (storedLogo) {
+        await this.uploadsService.deleteImage(storedLogo.filename);
+      }
+
+      throw new NotFoundException('Airline not found');
+    }
+
+    if (storedLogo) {
+      await this.uploadsService.deleteImage(airline.logo);
+    }
+
+    return updatedAirline;
   }
 }
