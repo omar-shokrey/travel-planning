@@ -195,6 +195,78 @@ describe('UsersService', () => {
     });
   });
 
+  describe('updateProfile (ACC-09)', () => {
+    function setupProfile(updated: object | null = { _id: userObjectId }) {
+      const exec = jest.fn().mockResolvedValue(updated);
+      const model = {
+        findByIdAndUpdate: jest.fn(() => ({ exec })),
+        findById: jest.fn(() => ({ exec })),
+      };
+      const service = new UsersService(model as unknown as Model<User>);
+      const update = () =>
+        (model.findByIdAndUpdate.mock.calls[0] as unknown[])[1] as Record<
+          string,
+          Record<string, unknown>
+        >;
+      return { model, service, update };
+    }
+
+    it('sets the fields that were given, in one update, and returns the account', async () => {
+      const updated = { _id: userObjectId, name: 'Sara A.' };
+      const { model, service, update } = setupProfile(updated);
+
+      const result = await service.updateProfile(userObjectId.toString(), {
+        name: 'Sara A.',
+        phone: '+20 10 1234 5678',
+        preferredCurrency: 'EGP',
+      });
+
+      expect(result).toBe(updated);
+      expect(model.findByIdAndUpdate).toHaveBeenCalledTimes(1);
+      expect(model.findByIdAndUpdate).toHaveBeenCalledWith(
+        userObjectId.toString(),
+        expect.anything(),
+        { returnDocument: 'after', runValidators: true },
+      );
+      expect(update()).toEqual({
+        $set: {
+          name: 'Sara A.',
+          phone: '+20 10 1234 5678',
+          preferredCurrency: 'EGP',
+        },
+      });
+    });
+
+    it('removes the phone or the currency given as null, and leaves out the others', async () => {
+      const { service, update } = setupProfile();
+
+      await service.updateProfile(userObjectId.toString(), {
+        phone: null,
+        preferredCurrency: null,
+      });
+
+      expect(update()).toEqual({ $unset: { phone: 1, preferredCurrency: 1 } });
+    });
+
+    it('only reads the account when nothing is to change', async () => {
+      const found = { _id: userObjectId };
+      const { model, service } = setupProfile(found);
+
+      expect(await service.updateProfile(userObjectId.toString(), {})).toBe(
+        found,
+      );
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+      expect(model.findById).toHaveBeenCalledWith(userObjectId.toString());
+    });
+
+    it('returns null for an id that cannot be one, without asking the database', async () => {
+      const { model, service } = setupProfile();
+
+      expect(await service.updateProfile('nope', { name: 'Sara' })).toBeNull();
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+  });
+
   describe('recordFailedLogin (ACC-05)', () => {
     it('adds one failed login with a single atomic increment', async () => {
       const { model, countSelect, service } = setupLockout({

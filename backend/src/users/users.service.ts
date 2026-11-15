@@ -28,6 +28,16 @@ export interface LockoutPolicy {
 }
 
 /**
+ * The profile fields of ACC-09. `undefined` keeps a field, `null` removes the
+ * phone or the preferred currency. The name can be changed, never removed.
+ */
+export interface ProfileChanges {
+  name?: string;
+  phone?: string | null;
+  preferredCurrency?: string | null;
+}
+
+/**
  * Owns the `users` collection. Other modules go through this service and never
  * write to the collection themselves.
  */
@@ -80,6 +90,42 @@ export class UsersService {
       return Promise.resolve(null);
     }
     return this.users.findById(id).exec();
+  }
+
+  /**
+   * Saves the profile fields of an account in one update (ACC-09), so either
+   * every change is saved or none is. A field given as `null` is removed. It
+   * returns the account after the change, or `null` when there is none.
+   */
+  updateProfile(
+    id: string,
+    changes: ProfileChanges,
+  ): Promise<UserDocument | null> {
+    if (!isValidObjectId(id)) {
+      return Promise.resolve(null);
+    }
+    const $set: Record<string, string> = {};
+    const $unset: Record<string, 1> = {};
+    for (const [field, value] of Object.entries(changes)) {
+      if (value === null) {
+        $unset[field] = 1;
+      } else if (value !== undefined) {
+        $set[field] = value as string;
+      }
+    }
+    if (Object.keys($set).length === 0 && Object.keys($unset).length === 0) {
+      return this.users.findById(id).exec();
+    }
+    return this.users
+      .findByIdAndUpdate(
+        id,
+        {
+          ...(Object.keys($set).length > 0 && { $set }),
+          ...(Object.keys($unset).length > 0 && { $unset }),
+        },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
   }
 
   /**
