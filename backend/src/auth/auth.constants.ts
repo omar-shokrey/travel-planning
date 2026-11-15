@@ -17,6 +17,14 @@ export const INVALID_CREDENTIALS_MESSAGE = 'Invalid email or password';
 /** Shown to a suspended account that logs in with the right password (ACC-04). */
 export const ACCOUNT_SUSPENDED_MESSAGE = 'Your account is suspended';
 
+/** The answer of a password change whose current password is wrong (ACC-08). */
+export const CURRENT_PASSWORD_INCORRECT_MESSAGE =
+  'The current password is incorrect';
+
+/** The answer of a password change that keeps the same password (ACC-08). */
+export const SAME_PASSWORD_MESSAGE =
+  'The new password must be different from the current password';
+
 /** The answer of any route that needs a logged-in user. It matches the one of RolesGuard. */
 export const LOGIN_REQUIRED_MESSAGE = 'You must log in to do this';
 

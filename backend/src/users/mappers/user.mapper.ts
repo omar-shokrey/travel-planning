@@ -5,7 +5,7 @@ import type { User } from '../models/user.schema';
 /** The fields the mapper reads. A user document and a lean user both fit. */
 export type UserSource = Pick<
   User,
-  'name' | 'email' | 'role' | 'status' | 'createdAt'
+  'name' | 'email' | 'role' | 'status' | 'mustChangePassword' | 'createdAt'
 > & { _id: Types.ObjectId };
 
 /** Turns a stored user into what the API returns. Anything not listed here stays private. */
@@ -16,6 +16,7 @@ export function toUserResponse(user: UserSource): UserResponseDto {
     email: user.email,
     role: user.role,
     status: user.status,
+    mustChangePassword: user.mustChangePassword,
     createdAt: user.createdAt.toISOString(),
   };
 }
