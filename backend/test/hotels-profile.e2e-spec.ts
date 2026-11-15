@@ -186,6 +186,17 @@ describe('Hotel profile: create and edit (e2e, HTL-01)', () => {
       expect(response.body.createdAt).toMatch(/Z$/);
     });
 
+    it('stores each amenity once, trimmed', async () => {
+      const response = await call('post', '/api/hotels', 'admin', {
+        ...validHotel(),
+        amenities: ['wifi', ' pool ', 'wifi', 'pool'],
+      });
+
+      expect(response.status).toBe(201);
+      createdHotelIds.push(response.body.id as string);
+      expect(response.body.amenities).toEqual(['wifi', 'pool']);
+    });
+
     it('refuses a city that is not in the reference data', async () => {
       const response = await call('post', '/api/hotels', 'admin', {
         ...validHotel(),
