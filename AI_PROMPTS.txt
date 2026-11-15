@@ -811,6 +811,7 @@ because that is moderation (GEN-10); the update DTO requires the text instead of
 because a comment has no other field; delete answers 204 and lowers the post's commentCount with
 one guarded update. Changed by Claude Code after its own checks: one unit test run crashed an
 unrelated suite with "JavaScript heap out of memory" on my laptop, and the run passed when the
-Jest workers were recycled earlier; no code changed. Not run yet: the end-to-end tests, because my
-backend/.env was not in place. The branch is pushed only after I have read the diff.
+Jest workers were recycled earlier; no code changed. Run afterwards by Claude Code, once my backend/.env was in place: the end-to-end tests on the test
+database, from my BLG-07 branch, which contains this one: 14 suites and 233 tests passed, 13 of
+them in blog-edit-delete-comments.e2e-spec.ts. The branch is pushed only after I have read the diff.
 ================================================
