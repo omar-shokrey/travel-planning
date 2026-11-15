@@ -18,6 +18,7 @@ import { UserStatus } from './../src/common/enums/user-status.enum';
 import { Airline } from './../src/flights/models/airline.schema';
 import { UploadsService } from './../src/uploads/uploads.service';
 import { User } from './../src/users/models/user.schema';
+import { deleteSessionsOf } from './support/delete-sessions';
 
 const PASSWORD = 'Passw0rdOK';
 const PNG_SIGNATURE = Buffer.from([
@@ -165,6 +166,14 @@ describe('Airline profiles (e2e, FLT-01)', () => {
       if (airlineModel) {
         for (const id of createdAirlineIds) {
           await attemptCleanup(() => airlineModel.findByIdAndDelete(id));
+        }
+      }
+
+      // Each login creates a session (ACC-06): delete them before the accounts.
+      const testApp = app;
+      if (testApp) {
+        for (const id of createdUserIds) {
+          await attemptCleanup(() => deleteSessionsOf(testApp, id));
         }
       }
 
