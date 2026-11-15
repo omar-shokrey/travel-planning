@@ -726,6 +726,8 @@ Design choices by Claude: visibility is part of PATCH /api/itineraries/:id as th
 says, not a new route; only the update DTO has the field, so a new itinerary is always private.
 Changed by Claude after its own checks: the first version broke the type check of an existing DTO
 test, and Claude fixed the test helper's type.
-TO COMPLETE BY ME BEFORE THE PULL REQUEST: what I checked myself in Swagger and with the end-to-end
-tests on the test database, and what I changed or rejected after reading every line.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger, PATCH
+/api/itineraries/{id} with visibility public answered 200 and the itinerary showed as public. I
+changed nothing and rejected nothing.
 ================================================
