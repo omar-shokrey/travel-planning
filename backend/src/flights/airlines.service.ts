@@ -1,4 +1,3 @@
-
 import {
   ConflictException,
   ForbiddenException,
@@ -34,9 +33,7 @@ export class AirlinesService {
     const existing = await this.airlineModel.exists({ code });
 
     if (existing) {
-      throw new ConflictException(
-        'An airline with this code already exists',
-      );
+      throw new ConflictException('An airline with this code already exists');
     }
 
     this.uploadsService.assertWithinLimit('airline', 0, 1);
@@ -52,14 +49,8 @@ export class AirlinesService {
     } catch (error) {
       await this.uploadsService.deleteImage(storedLogo.filename);
 
-      if (
-        error instanceof Error &&
-        'code' in error &&
-        error.code === 11000
-      ) {
-        throw new ConflictException(
-          'An airline with this code already exists',
-        );
+      if (error instanceof Error && 'code' in error && error.code === 11000) {
+        throw new ConflictException('An airline with this code already exists');
       }
 
       throw error;
@@ -94,9 +85,7 @@ export class AirlinesService {
       user.assignment?.providerType !== ProviderType.Airline ||
       user.assignment?.providerId.toString() !== airline._id.toString()
     ) {
-      throw new ForbiddenException(
-        'You can only edit your assigned airline',
-      );
+      throw new ForbiddenException('You can only edit your assigned airline');
     }
 
     const code = dto.code?.trim().toUpperCase();
@@ -108,15 +97,12 @@ export class AirlinesService {
       });
 
       if (existing) {
-        throw new ConflictException(
-          'An airline with this code already exists',
-        );
+        throw new ConflictException('An airline with this code already exists');
       }
     }
 
-    let storedLogo: Awaited<
-      ReturnType<UploadsService['saveImage']>
-    > | undefined;
+    let storedLogo:
+      Awaited<ReturnType<UploadsService['saveImage']>> | undefined;
 
     if (logo) {
       this.uploadsService.assertWithinLimit('airline', 0, 1);
@@ -150,14 +136,8 @@ export class AirlinesService {
         await this.uploadsService.deleteImage(storedLogo.filename);
       }
 
-      if (
-        error instanceof Error &&
-        'code' in error &&
-        error.code === 11000
-      ) {
-        throw new ConflictException(
-          'An airline with this code already exists',
-        );
+      if (error instanceof Error && 'code' in error && error.code === 11000) {
+        throw new ConflictException('An airline with this code already exists');
       }
 
       throw error;

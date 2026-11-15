@@ -1,4 +1,3 @@
-
 import {
   Body,
   Controller,
@@ -40,10 +39,7 @@ export class AirlinesController {
   @ApiCreatedResponse({
     description: 'Airline profile created successfully',
   })
-  create(
-    @Body() dto: CreateAirlineDto,
-    @UploadedFile() logo: ImageFile,
-  ) {
+  create(@Body() dto: CreateAirlineDto, @UploadedFile() logo: ImageFile) {
     return this.airlinesService.create(dto, logo);
   }
 

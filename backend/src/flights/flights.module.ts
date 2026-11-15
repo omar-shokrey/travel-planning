@@ -1,4 +1,3 @@
-
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { UsersModule } from '../users/users.module';
@@ -9,9 +8,7 @@ import { AirlinesController } from './airlines.controller';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([
-      { name: Airline.name, schema: AirlineSchema },
-    ]),
+    MongooseModule.forFeature([{ name: Airline.name, schema: AirlineSchema }]),
     UsersModule,
     UploadsModule,
   ],

@@ -6,7 +6,6 @@ export class Airline {
   @Prop({ required: true, trim: true })
   name: string;
 
- 
   @Prop({ required: true, uppercase: true, trim: true })
   code: string;
 
