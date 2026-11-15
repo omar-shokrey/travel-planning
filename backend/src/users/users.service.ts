@@ -83,6 +83,35 @@ export class UsersService {
   }
 
   /**
+   * Gives an account a temporary password chosen by an admin (ACC-07a). The
+   * plain password is hashed here and never stored. `mustChangePassword` is
+   * set so the owner must choose a new one at the next login, and the login
+   * lockout (ACC-05) is cleared so the temporary password works at once. One
+   * update, so no other write can slip in between. It returns the updated
+   * account, or `null` when it is gone.
+   */
+  async setTemporaryPassword(
+    id: Types.ObjectId,
+    password: string,
+  ): Promise<UserDocument | null> {
+    const passwordHash = await hash(password, PASSWORD_SALT_ROUNDS);
+    return this.users
+      .findByIdAndUpdate(
+        id,
+        {
+          $set: {
+            passwordHash,
+            mustChangePassword: true,
+            failedLoginAttempts: 0,
+          },
+          $unset: { lockedUntil: 1 },
+        },
+        { returnDocument: 'after' },
+      )
+      .exec();
+  }
+
+  /**
    * Counts one failed login of the account (ACC-05). It returns the time the
    * account is locked until when this failure reached the limit, and `null`
    * while the account is still open.
