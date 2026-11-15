@@ -9,6 +9,7 @@ const source: UserSource = {
   email: 'sara@example.com',
   role: Role.User,
   status: UserStatus.Active,
+  mustChangePassword: false,
   createdAt: new Date('2026-11-05T13:00:00.000+02:00'),
 };
 
@@ -20,8 +21,15 @@ describe('toUserResponse', () => {
       email: 'sara@example.com',
       role: 'user',
       status: 'active',
+      mustChangePassword: false,
       createdAt: '2026-11-05T11:00:00.000Z',
     });
+  });
+
+  it('tells when the account must set a new password (ACC-07a, ACC-13)', () => {
+    expect(
+      toUserResponse({ ...source, mustChangePassword: true }),
+    ).toMatchObject({ mustChangePassword: true });
   });
 
   it('leaves out the password hash and every other private field', () => {
@@ -30,7 +38,6 @@ describe('toUserResponse', () => {
       passwordHash: 'a-bcrypt-hash',
       failedLoginAttempts: 3,
       lockedUntil: new Date(),
-      mustChangePassword: true,
       consentAcceptedAt: new Date(),
       updatedAt: new Date(),
     };
@@ -39,6 +46,7 @@ describe('toUserResponse', () => {
       'createdAt',
       'email',
       'id',
+      'mustChangePassword',
       'name',
       'role',
       'status',

@@ -1,5 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import type { EnvironmentVariables } from '../config/env.validation';
 import { AuthCookiesService } from './auth-cookies.service';
 
@@ -102,6 +102,50 @@ describe('AuthCookiesService', () => {
       secure: true,
       sameSite: 'lax',
       path: '/api/auth',
+    });
+  });
+
+  describe('reading the tokens of a request', () => {
+    const requestWith = (cookies: unknown) =>
+      ({ cookies }) as unknown as Request;
+
+    it('reads the access cookie and the refresh cookie', () => {
+      const { service } = setup();
+      const request = requestWith({
+        access_token: 'access.jwt',
+        refresh_token: 'refresh.jwt',
+      });
+
+      expect(service.readAccessToken(request)).toBe('access.jwt');
+      expect(service.readRefreshToken(request)).toBe('refresh.jwt');
+    });
+
+    it('does not mix the two up', () => {
+      const { service } = setup();
+
+      expect(
+        service.readAccessToken(requestWith({ refresh_token: 'refresh.jwt' })),
+      ).toBeUndefined();
+      expect(
+        service.readRefreshToken(requestWith({ access_token: 'access.jwt' })),
+      ).toBeUndefined();
+    });
+
+    it.each([
+      ['no cookie parser', undefined],
+      ['no cookies', {}],
+      ['a cookie parser that gave null', null],
+      ['an empty cookie', { access_token: '', refresh_token: '' }],
+      [
+        'a cookie that is not a text',
+        { access_token: { a: 1 }, refresh_token: ['x'] },
+      ],
+    ])('answers undefined for %s', (_name, cookies) => {
+      const { service } = setup();
+      const request = requestWith(cookies);
+
+      expect(service.readAccessToken(request)).toBeUndefined();
+      expect(service.readRefreshToken(request)).toBeUndefined();
     });
   });
 });

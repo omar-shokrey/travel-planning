@@ -307,4 +307,149 @@ describe('UsersService', () => {
       );
     });
   });
+
+  describe('findEntityByIdWithPasswordHash (ACC-08)', () => {
+    function setupById(found: object | null) {
+      const exec = jest.fn().mockResolvedValue(found);
+      const select = jest.fn(() => ({ exec }));
+      const model = { findById: jest.fn(() => ({ select })) };
+      const service = new UsersService(model as unknown as Model<User>);
+      return { model, select, service };
+    }
+
+    it('finds the account by id and asks for the password hash', async () => {
+      const found = { _id: userObjectId, passwordHash: 'a-bcrypt-hash' };
+      const { model, select, service } = setupById(found);
+
+      const user = await service.findEntityByIdWithPasswordHash(
+        userObjectId.toString(),
+      );
+
+      expect(model.findById).toHaveBeenCalledWith(userObjectId.toString());
+      expect(select).toHaveBeenCalledWith('+passwordHash');
+      expect(user).toBe(found);
+    });
+
+    it('returns null for an id that cannot be one, without asking the database', async () => {
+      const { model, service } = setupById(null);
+
+      expect(await service.findEntityByIdWithPasswordHash('nope')).toBeNull();
+      expect(model.findById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updatePassword (ACC-08)', () => {
+    function setupUpdate(updated: object | null) {
+      const exec = jest.fn().mockResolvedValue(updated);
+      const model = { findByIdAndUpdate: jest.fn(() => ({ exec })) };
+      const service = new UsersService(model as unknown as Model<User>);
+      const update = (): { $set: Record<string, unknown> } =>
+        (model.findByIdAndUpdate.mock.calls[0] as unknown[])[1] as {
+          $set: Record<string, unknown>;
+        };
+      return { model, service, update };
+    }
+
+    it('stores a bcrypt hash of the new password and never the plain one', async () => {
+      const { service, update } = setupUpdate({ _id: userObjectId });
+
+      await service.updatePassword(userObjectId, 'N3wPassword');
+
+      const { passwordHash } = update().$set;
+      expect(passwordHash).not.toBe('N3wPassword');
+      expect(await compare('N3wPassword', passwordHash as string)).toBe(true);
+    });
+
+    it('clears the flag that asks for a new password at the next login', async () => {
+      const { model, service, update } = setupUpdate({ _id: userObjectId });
+
+      await service.updatePassword(userObjectId, 'N3wPassword');
+
+      expect(model.findByIdAndUpdate).toHaveBeenCalledWith(
+        userObjectId,
+        expect.anything(),
+        { returnDocument: 'after' },
+      );
+      expect(update().$set.mustChangePassword).toBe(false);
+      expect(Object.keys(update().$set).sort()).toEqual([
+        'mustChangePassword',
+        'passwordHash',
+      ]);
+    });
+
+    it('returns the updated account, or null when it is gone', async () => {
+      const updated = { _id: userObjectId, mustChangePassword: false };
+
+      expect(
+        await setupUpdate(updated).service.updatePassword(
+          userObjectId,
+          'N3wPassword',
+        ),
+      ).toBe(updated);
+      expect(
+        await setupUpdate(null).service.updatePassword(
+          userObjectId,
+          'N3wPassword',
+        ),
+      ).toBeNull();
+    });
+  });
+
+  describe('setTemporaryPassword (ACC-07a)', () => {
+    function setupReset(updated: object | null) {
+      const exec = jest.fn().mockResolvedValue(updated);
+      const model = { findByIdAndUpdate: jest.fn(() => ({ exec })) };
+      const service = new UsersService(model as unknown as Model<User>);
+      const update = () =>
+        (model.findByIdAndUpdate.mock.calls[0] as unknown[])[1] as {
+          $set: Record<string, unknown>;
+          $unset: Record<string, unknown>;
+        };
+      return { model, service, update };
+    }
+
+    it('stores a bcrypt hash of the temporary password and never the plain one', async () => {
+      const { service, update } = setupReset({ _id: userObjectId });
+
+      await service.setTemporaryPassword(userObjectId, 'Temp0rary1');
+
+      const { passwordHash } = update().$set;
+      expect(passwordHash).not.toBe('Temp0rary1');
+      expect(await compare('Temp0rary1', passwordHash as string)).toBe(true);
+    });
+
+    it('asks for a new password at the next login and clears the lockout', async () => {
+      const { model, service, update } = setupReset({ _id: userObjectId });
+
+      await service.setTemporaryPassword(userObjectId, 'Temp0rary1');
+
+      expect(model.findByIdAndUpdate).toHaveBeenCalledWith(
+        userObjectId,
+        expect.anything(),
+        { returnDocument: 'after' },
+      );
+      expect(update().$set).toMatchObject({
+        mustChangePassword: true,
+        failedLoginAttempts: 0,
+      });
+      expect(update().$unset).toEqual({ lockedUntil: 1 });
+    });
+
+    it('returns the updated account, or null when it is gone', async () => {
+      const updated = { _id: userObjectId, mustChangePassword: true };
+
+      expect(
+        await setupReset(updated).service.setTemporaryPassword(
+          userObjectId,
+          'Temp0rary1',
+        ),
+      ).toBe(updated);
+      expect(
+        await setupReset(null).service.setTemporaryPassword(
+          userObjectId,
+          'Temp0rary1',
+        ),
+      ).toBeNull();
+    });
+  });
 });
