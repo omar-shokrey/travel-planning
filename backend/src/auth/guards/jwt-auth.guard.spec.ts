@@ -11,6 +11,7 @@ import { UserStatus } from '../../common/enums/user-status.enum';
 import type { AuthenticatedRequest } from '../../common/interfaces/authenticated-user.interface';
 import type { UsersService } from '../../users/users.service';
 import type { AuthTokensService } from '../auth-tokens.service';
+import type { SessionsService } from '../sessions.service';
 import {
   ACCOUNT_SUSPENDED_MESSAGE,
   LOGIN_REQUIRED_MESSAGE,
@@ -36,6 +37,7 @@ class OpenController {
 }
 
 const USER_ID = '6740f1c2a4b5c6d7e8f90123';
+const SESSION_ID = '6740f1c2a4b5c6d7e8f90abc';
 
 function storedUser(fields: { role?: Role; status?: UserStatus } = {}) {
   return {
@@ -46,14 +48,21 @@ function storedUser(fields: { role?: Role; status?: UserStatus } = {}) {
 }
 
 function setup() {
-  const tokens = { verifyAccessToken: jest.fn().mockResolvedValue(USER_ID) };
+  const tokens = {
+    verifyAccessToken: jest
+      .fn()
+      .mockResolvedValue({ userId: USER_ID, sessionId: SESSION_ID }),
+  };
   const usersService = {
     findEntityById: jest.fn().mockResolvedValue(storedUser()),
   };
+  // By default the session is live (ACC-06).
+  const sessions = { touch: jest.fn().mockResolvedValue(true) };
   const guard = new JwtAuthGuard(
     new Reflector(),
     tokens as unknown as AuthTokensService,
     usersService as unknown as UsersService,
+    sessions as unknown as SessionsService,
   );
 
   /** Runs the guard on a request. By default the request carries an access cookie. */
@@ -79,13 +88,13 @@ function setup() {
       request,
     );
 
-  return { tokens, usersService, run, runPrivate };
+  return { tokens, usersService, sessions, run, runPrivate };
 }
 
 describe('JwtAuthGuard', () => {
   describe('routes marked @Public()', () => {
     it('lets a guest through a public route, without looking at any token', async () => {
-      const { tokens, usersService, run } = setup();
+      const { tokens, usersService, sessions, run } = setup();
 
       const { result } = run(
         ProtectedController,
@@ -95,6 +104,7 @@ describe('JwtAuthGuard', () => {
 
       await expect(result).resolves.toBe(true);
       expect(tokens.verifyAccessToken).not.toHaveBeenCalled();
+      expect(sessions.touch).not.toHaveBeenCalled();
       expect(usersService.findEntityById).not.toHaveBeenCalled();
     });
 
@@ -156,20 +166,21 @@ describe('JwtAuthGuard', () => {
     it.each(requestsWithoutAToken)(
       'answers 401 for %s, without looking anything up',
       async (_name, requestFields) => {
-        const { tokens, usersService, runPrivate } = setup();
+        const { tokens, usersService, sessions, runPrivate } = setup();
 
         const { request, result } = runPrivate(requestFields);
 
         await expect(result).rejects.toBeInstanceOf(UnauthorizedException);
         await expect(result).rejects.toThrow(LOGIN_REQUIRED_MESSAGE);
         expect(tokens.verifyAccessToken).not.toHaveBeenCalled();
+        expect(sessions.touch).not.toHaveBeenCalled();
         expect(usersService.findEntityById).not.toHaveBeenCalled();
         expect(request.user).toBeUndefined();
       },
     );
 
     it('answers 401 with the same message when the token is not valid', async () => {
-      const { tokens, usersService, runPrivate } = setup();
+      const { tokens, usersService, sessions, runPrivate } = setup();
       tokens.verifyAccessToken.mockRejectedValue(new Error('jwt expired'));
 
       const { request, result } = runPrivate();
@@ -177,6 +188,7 @@ describe('JwtAuthGuard', () => {
       await expect(result).rejects.toBeInstanceOf(UnauthorizedException);
       // The reason (expired, tampered, wrong secret) is not told to the caller.
       await expect(result).rejects.toThrow(LOGIN_REQUIRED_MESSAGE);
+      expect(sessions.touch).not.toHaveBeenCalled();
       expect(usersService.findEntityById).not.toHaveBeenCalled();
       expect(request.user).toBeUndefined();
     });
@@ -216,6 +228,47 @@ describe('JwtAuthGuard', () => {
       expect(request.user).toBeUndefined();
     });
 
+    it('counts the request as activity in the session the token names (ACC-06)', async () => {
+      const { sessions, runPrivate } = setup();
+
+      const before = Date.now();
+      await runPrivate().result;
+      const after = Date.now();
+
+      expect(sessions.touch).toHaveBeenCalledTimes(1);
+      const [sessionId, userId, moment] = sessions.touch.mock.calls[0] as [
+        string,
+        string,
+        Date,
+      ];
+      expect([sessionId, userId]).toEqual([SESSION_ID, USER_ID]);
+      expect(moment.getTime()).toBeGreaterThanOrEqual(before);
+      expect(moment.getTime()).toBeLessThanOrEqual(after);
+    });
+
+    it('answers 401 when the session is revoked, has run out or does not exist (ACC-06)', async () => {
+      const { usersService, sessions, runPrivate } = setup();
+      // One answer for all three: the session is not live.
+      sessions.touch.mockResolvedValue(false);
+
+      const { request, result } = runPrivate();
+
+      await expect(result).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(result).rejects.toThrow(LOGIN_REQUIRED_MESSAGE);
+      expect(usersService.findEntityById).not.toHaveBeenCalled();
+      expect(request.user).toBeUndefined();
+    });
+
+    it('asks the session before it reads the account', async () => {
+      const { usersService, sessions, runPrivate } = setup();
+
+      await runPrivate().result;
+
+      const [touched] = sessions.touch.mock.invocationCallOrder;
+      const [read] = usersService.findEntityById.mock.invocationCallOrder;
+      expect(touched).toBeLessThan(read);
+    });
+
     it('takes the role from the account, not from the token', async () => {
       const { usersService, runPrivate } = setup();
       usersService.findEntityById.mockResolvedValue(
@@ -225,7 +278,7 @@ describe('JwtAuthGuard', () => {
       const { request, result } = runPrivate();
 
       await result;
-      // The token carries only the user id, so a role can only come from the database.
+      // The token carries only the user id and the session id, so a role can only come from the database.
       expect(request.user).toEqual({ id: USER_ID, role: Role.Admin });
     });
   });
