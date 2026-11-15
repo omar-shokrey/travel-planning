@@ -39,7 +39,7 @@ interface SwaggerOperation {
   responses: Record<string, unknown>;
 }
 
-describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05)', () => {
+describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
   let app: NestExpressApplication;
   let users: Model<User>;
   let countries: Model<Country>;
@@ -408,7 +408,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05)', () => {
           .send(body);
 
       expect((await patch({ title: '' })).status).toBe(400);
-      expect((await patch({ visibility: 'public' })).status).toBe(400);
+      expect((await patch({ ownerId: otherUser.id })).status).toBe(400);
       const unknown = await patch({ countries: ['QQ'] });
       expect(unknown.status).toBe(400);
       expect(unknown.body.message).toBe('Unknown country code: QQ');
@@ -440,6 +440,122 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05)', () => {
 
       expect(missing.status).toBe(404);
       expect(badId.status).toBe(400);
+    });
+  });
+
+  describe('PATCH /api/itineraries/:id, visibility (ITN-20)', () => {
+    const setVisibility = (
+      id: string,
+      visibility: unknown,
+      cookie = owner.cookie,
+    ) =>
+      http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', cookie)
+        .send({ visibility });
+
+    it('makes my itinerary public and private again, and stores it', async () => {
+      const id = await existing();
+
+      const published = await setVisibility(id, 'public');
+      expect(published.status).toBe(200);
+      expect(published.body.visibility).toBe('public');
+      expect((await itineraries.findById(id).lean())?.visibility).toBe(
+        'public',
+      );
+
+      const hidden = await setVisibility(id, 'private');
+      expect(hidden.status).toBe(200);
+      expect(hidden.body.visibility).toBe('private');
+      expect((await itineraries.findById(id).lean())?.visibility).toBe(
+        'private',
+      );
+    });
+
+    it('changes nothing else, and shows the visibility in my list', async () => {
+      const user = await createUser();
+      const created = await create(user.cookie, validBody());
+      const id = created.body.id as string;
+
+      const published = await setVisibility(id, 'public', user.cookie);
+      const list = await http()
+        .get('/api/itineraries')
+        .set('Cookie', user.cookie)
+        .expect(200);
+
+      expect(published.body).toEqual({ ...created.body, visibility: 'public' });
+      expect(list.body.items).toEqual([
+        { ...created.body, visibility: 'public' },
+      ]);
+    });
+
+    it('keeps the visibility when another field is edited', async () => {
+      const id = await existing();
+      await setVisibility(id, 'public').expect(200);
+
+      const response = await http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', owner.cookie)
+        .send({ title: 'Renamed while public' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.visibility).toBe('public');
+    });
+
+    it.each(['shared', 'PUBLIC', '', 1])(
+      'rejects %p as the visibility',
+      async (visibility) => {
+        const id = await existing();
+
+        const response = await setVisibility(id, visibility);
+
+        expect(response.status).toBe(400);
+        expect(response.body.errors).toEqual([
+          {
+            field: 'visibility',
+            messages: ['visibility must be public or private'],
+          },
+        ]);
+      },
+    );
+
+    it('is read-only to other users: they cannot edit, hide or delete a public itinerary', async () => {
+      const id = await existing();
+      await setVisibility(id, 'public').expect(200);
+
+      const edit = await http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', otherUser.cookie)
+        .send({ title: 'Mine now' });
+      const hide = await setVisibility(id, 'private', otherUser.cookie);
+      const addDay = await http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', otherUser.cookie)
+        .send({ cityId: CITY_A });
+      const remove = await http()
+        .delete(`/api/itineraries/${id}`)
+        .set('Cookie', otherUser.cookie);
+
+      expect([edit.status, hide.status, addDay.status, remove.status]).toEqual([
+        403, 403, 403, 403,
+      ]);
+      const stored = await itineraries.findById(id).lean();
+      expect(stored).toMatchObject({
+        title: 'Ten days in Egypt',
+        visibility: 'public',
+        dayCount: 0,
+      });
+    });
+
+    it('does not let another user publish my private itinerary', async () => {
+      const id = await existing();
+
+      const response = await setVisibility(id, 'public', otherUser.cookie);
+
+      expect(response.status).toBe(403);
+      expect((await itineraries.findById(id).lean())?.visibility).toBe(
+        'private',
+      );
     });
   });
 
@@ -772,6 +888,29 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05)', () => {
     );
   });
 
+  it('documents the visibility field in Swagger (ITN-20)', async () => {
+    const response = await http().get('/api/docs-json').expect(200);
+    const schemas = response.body.components.schemas as Record<
+      string,
+      { properties: Record<string, { enum?: string[] }> }
+    >;
+    const paths = response.body.paths as Record<
+      string,
+      Record<string, SwaggerOperation>
+    >;
+
+    expect(schemas.UpdateItineraryDto.properties.visibility.enum).toEqual([
+      'private',
+      'public',
+    ]);
+    expect(schemas.CreateItineraryDto.properties).not.toHaveProperty(
+      'visibility',
+    );
+    expect(paths['/api/itineraries/{id}'].patch.description).toMatch(
+      /^ITN-01, ITN-20\. /,
+    );
+  });
+
   it('documents the ITN-01 routes in Swagger', async () => {
     const response = await http().get('/api/docs-json').expect(200);
     const paths = response.body.paths as Record<
@@ -786,7 +925,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05)', () => {
 
     for (const operation of [post, patch, remove]) {
       expect(operation.tags).toEqual(['Itineraries']);
-      expect(operation.description).toMatch(/^ITN-01\. /);
+      expect(operation.description).toMatch(/^ITN-01[.,] /);
     }
     expect(responsesOf(post)).toEqual(
       expect.arrayContaining(['201', '400', '401']),
