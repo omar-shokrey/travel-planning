@@ -16,6 +16,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiTags,
+  ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -61,7 +62,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Log in with email and password (ACC-04)',
     description:
-      'Open to guests. On success the response sets two httpOnly cookies, `access_token` and `refresh_token`, and returns the account; the `role` tells the frontend which home page to open. The browser sends the cookies on every later request, so Swagger UI needs no further step. An unknown email, a wrong password and a deactivated account all get the same 401 message.',
+      'Open to guests. On success the response sets two httpOnly cookies, `access_token` and `refresh_token`, and returns the account; the `role` tells the frontend which home page to open. The browser sends the cookies on every later request, so Swagger UI needs no further step. An unknown email, a wrong password and a deactivated account all get the same 401 message. After 5 wrong passwords in a row the account is locked for 15 minutes (ACC-05): the 5th wrong password and every login during the lock get 429 with the time left, even with the right password. When the lock ends the count starts again, and a successful login resets it.',
   })
   @ApiOkResponse({
     description: 'Logged in. The authentication cookies are set.',
@@ -78,6 +79,10 @@ export class AuthController {
   })
   @ApiUnauthorizedResponse({ description: 'Invalid email or password' })
   @ApiForbiddenResponse({ description: 'Your account is suspended' })
+  @ApiTooManyRequestsResponse({
+    description:
+      'The account is locked for 15 minutes after 5 failed logins in a row (ACC-05). The message says how many minutes are left. The right password is refused too until the lock ends.',
+  })
   async login(
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) response: Response,

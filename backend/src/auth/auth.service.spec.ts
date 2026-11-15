@@ -1,6 +1,8 @@
 import {
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   UnauthorizedException,
 } from '@nestjs/common';
 import { hash } from 'bcrypt';
@@ -17,7 +19,10 @@ import { AuthService } from './auth.service';
 import {
   ACCOUNT_SUSPENDED_MESSAGE,
   INVALID_CREDENTIALS_MESSAGE,
+  LOCKOUT_MINUTES,
   LOGIN_REQUIRED_MESSAGE,
+  MAX_FAILED_LOGIN_ATTEMPTS,
+  accountLockedMessage,
 } from './auth.constants';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
@@ -34,6 +39,13 @@ const loginDto: LoginDto = {
   password: 'Passw0rdOK',
 };
 
+const MINUTE = 60_000;
+
+/** The id of the stored user below, as the object the users service is given. */
+const userObjectId = new Types.ObjectId('6740f1c2a4b5c6d7e8f90123');
+
+const wrongLogin: LoginDto = { ...loginDto, password: 'Wr0ngPassword' };
+
 const issuedTokens = {
   accessToken: 'an-access-token',
   refreshToken: 'a-refresh-token',
@@ -45,22 +57,27 @@ beforeAll(async () => {
   passwordHash = await hash(loginDto.password, 4);
 });
 
-function setup(changes: { status?: UserStatus } = {}) {
+function setup(changes: { status?: UserStatus; lockedUntil?: Date } = {}) {
   // A stored user, with the private fields a real document carries.
   const stored = {
-    _id: new Types.ObjectId('6740f1c2a4b5c6d7e8f90123'),
+    _id: userObjectId,
     name: 'Sara Ahmed',
     email: 'sara@example.com',
     passwordHash,
     role: Role.User,
     status: changes.status ?? UserStatus.Active,
     failedLoginAttempts: 0,
+    lockedUntil: changes.lockedUntil,
     createdAt: new Date('2026-11-14T10:00:00.000Z'),
   };
   const usersService = {
     createRegisteredUser: jest.fn().mockResolvedValue(stored),
     findEntityByEmailWithPasswordHash: jest.fn().mockResolvedValue(stored),
     findEntityById: jest.fn().mockResolvedValue(stored),
+    // The lockout (ACC-05): by default no failure reaches the limit.
+    recordFailedLogin: jest.fn().mockResolvedValue(null),
+    clearExpiredLock: jest.fn().mockResolvedValue(undefined),
+    resetFailedLogins: jest.fn().mockResolvedValue(undefined),
   };
   const tokens = { issueTokens: jest.fn().mockResolvedValue(issuedTokens) };
   const service = new AuthService(
@@ -223,6 +240,227 @@ describe('AuthService', () => {
 
       await expect(attempt).rejects.toBeInstanceOf(UnauthorizedException);
       await expect(attempt).rejects.toThrow(INVALID_CREDENTIALS_MESSAGE);
+    });
+  });
+
+  describe('lockout (ACC-05)', () => {
+    /** What the login rejects with, so a test can look at its status and message. */
+    const failureOf = (attempt: Promise<unknown>): Promise<unknown> =>
+      attempt.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    it('counts a wrong password against that account, with the limit of the requirement', async () => {
+      const { usersService, service } = setup();
+
+      await failureOf(service.login(wrongLogin));
+
+      expect(MAX_FAILED_LOGIN_ATTEMPTS).toBe(5);
+      expect(LOCKOUT_MINUTES).toBe(15);
+      expect(usersService.recordFailedLogin).toHaveBeenCalledTimes(1);
+      expect(usersService.recordFailedLogin).toHaveBeenCalledWith(
+        userObjectId,
+        { maxAttempts: 5, lockMs: 15 * MINUTE },
+        expect.any(Date),
+      );
+    });
+
+    it('answers the usual 401 while the limit is not reached', async () => {
+      const { service } = setup();
+
+      const error = await failureOf(service.login(wrongLogin));
+
+      expect(error).toBeInstanceOf(UnauthorizedException);
+      expect((error as UnauthorizedException).message).toBe(
+        INVALID_CREDENTIALS_MESSAGE,
+      );
+    });
+
+    it('answers 429 with the lockout message on the failure that locks the account', async () => {
+      const { usersService, tokens, service } = setup();
+      usersService.recordFailedLogin.mockResolvedValueOnce(
+        new Date(Date.now() + 15 * MINUTE),
+      );
+
+      const error = await failureOf(service.login(wrongLogin));
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+      expect((error as HttpException).message).toBe(accountLockedMessage(15));
+      expect(tokens.issueTokens).not.toHaveBeenCalled();
+    });
+
+    it('refuses a locked account even with the right password, and does not look at the password', async () => {
+      const { usersService, tokens, service } = setup({
+        lockedUntil: new Date(Date.now() + 3 * MINUTE),
+      });
+
+      const error = await failureOf(service.login(loginDto));
+
+      expect((error as HttpException).getStatus()).toBe(
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+      expect((error as HttpException).message).toBe(accountLockedMessage(3));
+      expect(tokens.issueTokens).not.toHaveBeenCalled();
+      expect(usersService.recordFailedLogin).not.toHaveBeenCalled();
+      expect(usersService.resetFailedLogins).not.toHaveBeenCalled();
+      expect(usersService.clearExpiredLock).not.toHaveBeenCalled();
+    });
+
+    it('gives a locked account the same answer for a wrong password, and does not count it', async () => {
+      const { usersService, service } = setup({
+        lockedUntil: new Date(Date.now() + 3 * MINUTE),
+      });
+
+      const error = await failureOf(service.login(wrongLogin));
+
+      expect((error as HttpException).getStatus()).toBe(
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+      expect(usersService.recordFailedLogin).not.toHaveBeenCalled();
+    });
+
+    it('rounds the time that is left up to whole minutes', async () => {
+      const cases: [number, number][] = [
+        [30_000, 1],
+        [90_000, 2],
+        [14 * MINUTE + 1_000, 15],
+      ];
+
+      for (const [msLeft, minutes] of cases) {
+        const { service } = setup({
+          lockedUntil: new Date(Date.now() + msLeft),
+        });
+
+        const error = await failureOf(service.login(loginDto));
+
+        expect((error as HttpException).message).toBe(
+          accountLockedMessage(minutes),
+        );
+      }
+    });
+
+    it('writes the message in the singular for one minute', () => {
+      expect(accountLockedMessage(1)).toBe(
+        'Too many failed login attempts. Your account is locked. Try again in 1 minute.',
+      );
+      expect(accountLockedMessage(15)).toBe(
+        'Too many failed login attempts. Your account is locked. Try again in 15 minutes.',
+      );
+    });
+
+    it('lets the user in again when the lock has run out, and clears the lock first', async () => {
+      const { usersService, tokens, service } = setup({
+        lockedUntil: new Date(Date.now() - 1_000),
+      });
+
+      const result = await service.login(loginDto);
+
+      expect(result.tokens).toBe(issuedTokens);
+      expect(usersService.clearExpiredLock).toHaveBeenCalledWith(
+        userObjectId,
+        expect.any(Date),
+      );
+      expect(tokens.issueTokens).toHaveBeenCalledTimes(1);
+    });
+
+    it('starts the count again after a lock has run out: the lock is cleared before the failure is counted', async () => {
+      const { usersService, service } = setup({
+        lockedUntil: new Date(Date.now() - 1_000),
+      });
+
+      const error = await failureOf(service.login(wrongLogin));
+
+      expect(error).toBeInstanceOf(UnauthorizedException);
+      const [cleared] = usersService.clearExpiredLock.mock.invocationCallOrder;
+      const [counted] = usersService.recordFailedLogin.mock.invocationCallOrder;
+      expect(cleared).toBeLessThan(counted);
+    });
+
+    it('does not touch the lock of an account that was never locked', async () => {
+      const { usersService, service } = setup();
+
+      await service.login(loginDto);
+
+      expect(usersService.clearExpiredLock).not.toHaveBeenCalled();
+    });
+
+    it('resets the count after a successful login', async () => {
+      const { usersService, service } = setup();
+
+      await service.login(loginDto);
+
+      expect(usersService.resetFailedLogins).toHaveBeenCalledWith(userObjectId);
+      expect(usersService.recordFailedLogin).not.toHaveBeenCalled();
+    });
+
+    it('does not reset the count after a wrong password', async () => {
+      const { usersService, service } = setup();
+
+      await failureOf(service.login(wrongLogin));
+
+      expect(usersService.resetFailedLogins).not.toHaveBeenCalled();
+    });
+
+    it('never counts or locks an unknown email', async () => {
+      const { usersService, service } = setup();
+      usersService.findEntityByEmailWithPasswordHash.mockResolvedValue(null);
+
+      const error = await failureOf(service.login(wrongLogin));
+
+      expect(error).toBeInstanceOf(UnauthorizedException);
+      expect(usersService.recordFailedLogin).not.toHaveBeenCalled();
+      expect(usersService.clearExpiredLock).not.toHaveBeenCalled();
+      expect(usersService.resetFailedLogins).not.toHaveBeenCalled();
+    });
+
+    it('never counts or locks a deactivated account, which answers 401 even if it was locked (ACC-12)', async () => {
+      const { usersService, service } = setup({
+        status: UserStatus.Deactivated,
+        lockedUntil: new Date(Date.now() + 3 * MINUTE),
+      });
+
+      const error = await failureOf(service.login(wrongLogin));
+
+      expect(error).toBeInstanceOf(UnauthorizedException);
+      expect((error as UnauthorizedException).message).toBe(
+        INVALID_CREDENTIALS_MESSAGE,
+      );
+      expect(usersService.recordFailedLogin).not.toHaveBeenCalled();
+    });
+
+    it('counts the wrong passwords of a suspended account', async () => {
+      const { usersService, service } = setup({ status: UserStatus.Suspended });
+
+      await failureOf(service.login(wrongLogin));
+
+      expect(usersService.recordFailedLogin).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not count the right password of a suspended account, and does not reset the count either', async () => {
+      const { usersService, service } = setup({ status: UserStatus.Suspended });
+
+      const error = await failureOf(service.login(loginDto));
+
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect(usersService.recordFailedLogin).not.toHaveBeenCalled();
+      expect(usersService.resetFailedLogins).not.toHaveBeenCalled();
+    });
+
+    it('tells a locked account that it is locked before it tells that it is suspended', async () => {
+      const { service } = setup({
+        status: UserStatus.Suspended,
+        lockedUntil: new Date(Date.now() + 3 * MINUTE),
+      });
+
+      const error = await failureOf(service.login(loginDto));
+
+      expect((error as HttpException).getStatus()).toBe(
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     });
   });
 

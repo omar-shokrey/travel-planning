@@ -563,6 +563,41 @@ without digits and the next run passed. Rejected: nothing.
 ================================================
 ================================================
 Date: 2026-11-15
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/ACC-05-account-lockout-after-failed-logins / #11
+Related Requirement: ACC-05
+Prompt:
+I asked Claude to develop ACC-05 (after 5 consecutive failed login attempts the system locks the
+account for 15 minutes and shows a lockout message; a successful login resets the counter), after
+checking that it does not depend on anything that is not finished yet.
+How the output was used:
+Claude checked the dependencies first: ACC-05 depends only on ACC-04, which is merged, and no other
+requirement depends on ACC-05. It then read the issue, the specification, the user schema (which
+already has failedLoginAttempts and lockedUntil) and the login code and tests, told me its design
+decisions, and wrote the code into my project folder. The constants (5 attempts, 15 minutes, the
+lockout message) are in auth.constants.ts. The three database operations are in UsersService:
+recordFailedLogin (one atomic $inc, and the lock is set only on an account that has no active lock),
+clearExpiredLock and resetFailedLogins. The rule is in AuthService.login: a locked account is refused
+with 429 before its password is looked at, the 5th wrong password already gets the 429 answer with
+the minutes left, an expired lock is cleared so the user gets 5 new attempts, a successful login
+resets the count, and unknown emails and deactivated accounts (ACC-12) are never counted or locked.
+Claude also documented the 429 answer in Swagger, added a lockout section to the auth README (with
+the known trade-off that the message shows an email has an account), added 28 unit tests and wrote
+test/auth-lockout.e2e-spec.ts (18 tests, including ten wrong passwords sent at the same moment and
+the end of a lock). Claude could not install packages or run the tests in its own workspace, so it
+only formatted the files with Prettier and checked their syntax, then put them into my project
+folder. I created the branch and ran format, lint, typecheck, the unit tests (328 passed), the
+end-to-end tests (117 passed, 18 of them new) and the build myself.
+Accepted, changed, or rejected:
+Accepted: the design (429 for a locked account, the lock checked before the password, the count
+starting again after the lock, no counting of unknown or deactivated accounts), the code and the
+tests. Changed: my first end-to-end run printed a Mongoose deprecation warning for every failed
+login, because Claude had used the option { new: true } in recordFailedLogin; Claude changed it to
+{ returnDocument: 'after' } and I ran the checks again. Rejected: nothing.
+
+================================================
+Date: 2026-11-15
 Student: Khadija Hamdy
 Tool: ChatGPT
 Branch / Issue: feature/FLT-01-airline-profile / #24
