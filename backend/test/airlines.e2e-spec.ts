@@ -488,4 +488,22 @@ describe('Airline profiles (e2e, FLT-01)', () => {
       expect(operation.description).toMatch(/^FLT-01\. /);
     }
   });
+
+  it('shows the name, code and logo fields in the Swagger forms', async () => {
+    const response = await request(getHttpServer())
+      .get('/api/docs-json')
+      .expect(200);
+    const formOf = (path: string, method: 'post' | 'patch') =>
+      response.body.paths[path][method].requestBody.content[
+        'multipart/form-data'
+      ].schema as { required?: string[]; properties: Record<string, unknown> };
+
+    const create = formOf('/api/airlines', 'post');
+    const update = formOf('/api/airlines/{id}', 'patch');
+
+    expect(Object.keys(create.properties)).toEqual(['name', 'code', 'logo']);
+    expect(create.required).toEqual(['name', 'code', 'logo']);
+    expect(Object.keys(update.properties)).toEqual(['name', 'code', 'logo']);
+    expect(update.required ?? []).toEqual([]);
+  });
 });

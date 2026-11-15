@@ -44,6 +44,7 @@ export class AirlinesController {
 
   @Post()
   @Roles(Role.Admin)
+  @UploadImage('logo')
   @ApiBody({
     required: true,
     schema: {
@@ -60,7 +61,6 @@ export class AirlinesController {
       },
     },
   })
-  @UploadImage('logo')
   @ApiOperation({
     summary: 'Create an airline profile',
     description:
@@ -115,6 +115,7 @@ export class AirlinesController {
 
   @Patch(':id')
   @Roles(Role.AirlineModerator)
+  @UploadImage('logo')
   @ApiBody({
     required: true,
     schema: {
@@ -130,7 +131,6 @@ export class AirlinesController {
       },
     },
   })
-  @UploadImage('logo')
   @ApiOperation({
     summary: 'Update an assigned airline profile',
     description:
