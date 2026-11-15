@@ -5,9 +5,9 @@ import {
   IsArray,
   IsEnum,
   IsNotEmpty,
-  IsOptional,
   IsString,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import { PostStatus } from '../models/post-status.enum';
 
@@ -18,6 +18,13 @@ import { PostStatus } from '../models/post-status.enum';
  */
 export const POST_TITLE_MAX_LENGTH = 200;
 export const POST_BODY_MAX_LENGTH = 20_000;
+
+/**
+ * Validates a field only when it was sent. Unlike @IsOptional(), it does not
+ * let `null` through, so `"status": null` or `"tags": null` answers 400
+ * instead of storing a post with no status or no tags.
+ */
+const IfSent = () => ValidateIf((_dto, value) => value !== undefined);
 
 /**
  * What a registered user sends to create a post (BLG-01). The author, the
@@ -53,7 +60,7 @@ export class CreatePostDto {
     description:
       '`draft` (the default) keeps the post private to its author; `published` makes it public and sets `publishedAt`.',
   })
-  @IsOptional()
+  @IfSent()
   @IsEnum(PostStatus)
   status?: PostStatus;
 
@@ -79,7 +86,7 @@ export class CreatePostDto {
       ),
     ];
   })
-  @IsOptional()
+  @IfSent()
   @IsArray()
   @ArrayMaxSize(5)
   @IsString({ each: true })

@@ -415,4 +415,20 @@ describe('POST /api/posts (e2e, BLG-01)', () => {
       },
     );
   });
+
+  it.each([
+    ['status', { title: 'Null status', body: 'Body', status: null }],
+    ['tags', { title: 'Null tags', body: 'Body', tags: null }],
+  ])('rejects %s sent as null and stores no post', async (field, body) => {
+    const user = await createUser();
+    const cookie = await loginAs(user);
+
+    const response = await createPost(body, cookie);
+
+    expect(response.status).toBe(400);
+    expect(
+      (response.body.errors as { field: string }[]).map((error) => error.field),
+    ).toEqual([field]);
+    expect(await posts.countDocuments({ authorId: user.id })).toBe(0);
+  });
 });

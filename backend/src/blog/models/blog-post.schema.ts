@@ -22,8 +22,10 @@ export class BlogPost {
   @Prop({ required: true, trim: true, maxlength: POST_BODY_MAX_LENGTH })
   body: string;
 
+  // Required as well as defaulted: an explicit null is refused here too.
   @Prop({
     type: String,
+    required: true,
     enum: Object.values(PostStatus),
     default: PostStatus.Draft,
   })

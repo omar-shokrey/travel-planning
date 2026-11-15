@@ -4,7 +4,7 @@ import { PostStatus } from './models/post-status.enum';
 describe('PostsService', () => {
   it('creates a draft post for the authenticated user', async () => {
     const createdPost = {
-      id: 'post-1',
+      _id: { toString: () => 'post-1' },
       authorId: {
         toString: () => '507f1f77bcf86cd799439011',
       },
@@ -59,7 +59,7 @@ describe('PostsService', () => {
     const updatedAt = new Date('2026-11-15T10:00:00.000Z');
 
     const createdPost = {
-      id: 'post-2',
+      _id: { toString: () => 'post-2' },
       authorId: {
         toString: () => '507f1f77bcf86cd799439011',
       },

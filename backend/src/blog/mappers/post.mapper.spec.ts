@@ -4,7 +4,7 @@ import { toPostResponse } from './post.mapper';
 describe('toPostResponse', () => {
   it('maps a blog post document to a response DTO', () => {
     const post = {
-      id: 'post-1',
+      _id: { toString: () => 'post-1' },
       authorId: {
         toString: () => '507f1f77bcf86cd799439011',
       },
@@ -34,7 +34,7 @@ describe('toPostResponse', () => {
 
   it('maps a draft post without publishedAt', () => {
     const post = {
-      id: 'post-2',
+      _id: { toString: () => 'post-2' },
       authorId: {
         toString: () => '507f1f77bcf86cd799439011',
       },
@@ -64,7 +64,7 @@ describe('toPostResponse', () => {
 
   it('returns every moment as a UTC ISO string, whatever the offset it was stored with', () => {
     const post = {
-      id: 'post-3',
+      _id: { toString: () => 'post-3' },
       authorId: { toString: () => '507f1f77bcf86cd799439011' },
       title: 'Offsets',
       body: 'Body',
@@ -81,5 +81,21 @@ describe('toPostResponse', () => {
     expect(response.publishedAt).toBe('2026-11-15T10:00:00.000Z');
     expect(response.createdAt).toBe('2026-11-15T10:00:00.000Z');
     expect(response.updatedAt).toBe('2026-11-15T10:00:00.000Z');
+  });
+
+  it('reads the id from _id, so a lean post maps too', () => {
+    const lean = {
+      _id: { toString: () => '6740f1c2a4b5c6d7e8f90abc' },
+      authorId: { toString: () => '507f1f77bcf86cd799439011' },
+      title: 'Lean',
+      body: 'Body',
+      status: PostStatus.Draft,
+      tags: [],
+      images: [],
+      createdAt: new Date('2026-11-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-11-15T10:00:00.000Z'),
+    };
+
+    expect(toPostResponse(lean as never).id).toBe('6740f1c2a4b5c6d7e8f90abc');
   });
 });

@@ -203,4 +203,23 @@ describe('CreatePostDto (BLG-01)', () => {
       expect(await invalidFields({ ...valid, [field]: 'x' })).toEqual([field]);
     },
   );
+
+  it.each([
+    ['status', null],
+    ['tags', null],
+  ])(
+    'rejects %s sent as null, so no post is stored without a status or tags',
+    async (field, value) => {
+      expect(await invalidFields({ ...valid, [field]: value })).toEqual([
+        field,
+      ]);
+    },
+  );
+
+  it('still lets status and tags be left out', async () => {
+    const dto = await parse({ title: valid.title, body: valid.body });
+
+    expect(dto.status).toBeUndefined();
+    expect(dto.tags).toBeUndefined();
+  });
 });
