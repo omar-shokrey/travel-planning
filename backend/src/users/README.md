@@ -1,6 +1,6 @@
 # users
 
-Owns the `users` collection: the `User` schema, `UsersService`, the public shape of an account (`UserResponseDto`) and its mapper. The profile routes (`/api/users/me`) come with ACC-09 and ACC-12.
+Owns the `users` collection: the `User` schema, `UsersService`, the public shape of an account (`UserResponseDto`) and its mapper. It also has the own-profile route `PATCH /api/users/me` (ACC-09, in `UsersController` and `ProfileService`); own-account deactivation (ACC-12) comes later.
 
 ## Design decisions
 
@@ -11,7 +11,19 @@ Owns the `users` collection: the `User` schema, `UsersService`, the public shape
 - **`createRegisteredUser` takes no role and no status.** It always creates an active account with the `user` role. Moderator accounts (ACC-13) need their own method.
 - **`setTemporaryPassword` is the admin reset (ACC-07a).** In one update it stores the hash of the temporary password, sets `mustChangePassword` and clears the login lockout. `AdminService` calls it; no controller exposes it.
 - **A duplicate email is checked twice.** The service looks the email up first and answers 409. If two requests arrive together, the unique index on `email` rejects the second one, and the exception filter turns that error into 409 as well.
-- **`UserResponseDto` has `id`, `name`, `email`, `role`, `status`, `mustChangePassword` and `createdAt`.** `mustChangePassword` (ACC-08) tells the frontend that the account has a temporary password and must set a new one. The mapper lists these fields one by one, so the password hash, the login counters and the lock time can never be returned by accident. Add `phone` and `preferredCurrency` when the profile is built (ACC-09).
+- **`UserResponseDto` has `id`, `name`, `email`, `role`, `status`, `mustChangePassword` and `createdAt`.** `mustChangePassword` (ACC-08) tells the frontend that the account has a temporary password and must set a new one. The mapper lists these fields one by one, so the password hash, the login counters and the lock time can never be returned by accident. `phone` and `preferredCurrency` (ACC-09) are added only when the account has them.
 - **`createdAt` and `updatedAt` are declared on the `User` class without `@Prop()`.** Mongoose writes them (`timestamps: true`). The declarations only give them a type.
 - **`updatePassword` hashes the new password and clears `mustChangePassword` in one update** (ACC-08). `findEntityByIdWithPasswordHash` is the lookup by id that reads the hash, for the check of the current password.
 - **Names are limited to 100 characters** (`USER_NAME_MAX_LENGTH`). The workbook sets no limit. Reuse the constant in every DTO that accepts a name.
+
+## Edit my profile (ACC-09)
+
+`PATCH /api/users/me` changes the `name`, `phone` and `preferredCurrency` of the logged-in user and returns the account (200). Any role may use it.
+
+- **Only the fields that are sent change.** `null` removes the phone or the preferred currency. The name can be changed but not removed (`null` or an empty name is 400). An empty body changes nothing and returns the profile.
+- **Nothing is saved unless every field is valid.** The DTO checks all three fields first and reports every invalid one in `errors`. The currency is then checked against the countries list. Only then is the profile saved, in one `findByIdAndUpdate` with `$set` and `$unset`, so a request never saves half of its changes.
+- **Email, role, status and password are not in the DTO**, so the global `ValidationPipe` rejects them with 400. Changing the password is ACC-08.
+- **The phone must be international** (`+` and the country code, checked with `IsPhoneNumber` from class-validator, which uses libphonenumber). Users of a travel site come from many countries, so a number without a country code would be ambiguous. The workbook sets no format; spaces are allowed and kept as typed.
+- **The preferred currency must be a currency of the countries list** (the supported currencies of GEN-12: the distinct `currency` values of `countries`). The code is uppercased first, so `eur` is `EUR`. An unknown code answers 400 with `preferredCurrency` in `errors`. It only changes how prices are shown: prices, payments and refunds stay in USD (PAY-04).
+- **`ProfileService` does the checks, `UsersService.updateProfile` writes.** `ProfileService` reads `countries` through `ReferenceModule`, as the itineraries module does. Keeping that out of `UsersService` leaves its constructor and its many callers unchanged, and `UsersService` stays the only writer of `users`.
+- **The answer is `UserResponseDto`.** `phone` and `preferredCurrency` are left out when the account has none, so the existing responses keep their shape.
