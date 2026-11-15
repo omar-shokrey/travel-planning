@@ -15,6 +15,8 @@ describe('ItinerariesController', () => {
     create: jest.fn(),
     findMine: jest.fn(),
     findOne: jest.fn(),
+    addDay: jest.fn(),
+    updateDay: jest.fn(),
     update: jest.fn(),
     remove: jest.fn(),
   };
@@ -53,5 +55,23 @@ describe('ItinerariesController', () => {
 
     expect(service.findMine).toHaveBeenCalledWith(query, userId);
     expect(service.findOne).toHaveBeenCalledWith(id, userId);
+  });
+
+  it('passes the day, the ids and the logged-in user to the service', async () => {
+    const dayId = '6741c0ffee0ddba11ad0d0d0';
+    const day = { cityId: 'cairo', notes: 'Pyramids' };
+    service.addDay.mockResolvedValue({ id, days: [{ id: dayId }] });
+    service.updateDay.mockResolvedValue({ id, days: [{ id: dayId }] });
+
+    await controller.addDay(id, day, userId);
+    await controller.updateDay(id, dayId, { notes: 'Museum' }, userId);
+
+    expect(service.addDay).toHaveBeenCalledWith(id, day, userId);
+    expect(service.updateDay).toHaveBeenCalledWith(
+      id,
+      dayId,
+      { notes: 'Museum' },
+      userId,
+    );
   });
 });
