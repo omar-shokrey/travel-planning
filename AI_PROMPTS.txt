@@ -623,3 +623,32 @@ Checked by me: I applied the commits on my laptop and ran npm run test:e2e on th
 suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. I also started the API against the
 shared database and it connected. I changed nothing and rejected nothing.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-01-itinerary-crud / #66
+Related Requirement: ITN-01
+Prompt:
+In the same chat as the schema branch, I asked Claude to implement ITN-01 (create, edit and delete
+an itinerary) on top of the schemas.
+How the output was used:
+Claude wrote the mapper, the service (create, update, remove, findEntityOrThrow), the controller with
+its Swagger documentation, the module wiring, the unit tests and test/itineraries.e2e-spec.ts (19
+tests). It ran format, lint, typecheck, build and the unit tests in its own workspace. It has no
+connection string, so it ran the end-to-end file only against a local MongoDB-compatible stand-in
+(FerretDB), where the 19 tests passed. It did not run them on real MongoDB or try the routes in
+Swagger.
+Accepted, changed, or rejected:
+Changed by Claude after its own checks: (1) a PATCH that sent a field as null would have failed at
+save, so absent and null fields are now both left unchanged; (2) the first version was written
+before ACC-04 was merged and had a temporary 401 check in the controller and no logged-in
+end-to-end tests. After the authentication guard reached develop, Claude removed the check and
+rewrote the end-to-end tests to use a logged-in user.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger, POST /api/itineraries
+answered 401 before I logged in. After logging in it created an itinerary (201, private, owned by my
+account), PATCH with an empty title answered 400, DELETE answered 204 and opening the itinerary
+afterwards answered 404. I changed nothing and rejected nothing.
+================================================
