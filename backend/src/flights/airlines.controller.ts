@@ -26,6 +26,7 @@ import {
 import type { ImageFile } from '../uploads/uploads.types';
 import { UploadImage } from '../uploads/decorators/upload-image.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
 import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
@@ -37,13 +38,13 @@ import { CreateAirlineDto } from './dto/create-airline.dto';
 import { UpdateAirlineDto } from './dto/update-airline.dto';
 
 @ApiTags('Airlines')
-@ApiCookieAuth()
 @Controller('airlines')
 export class AirlinesController {
   constructor(private readonly airlinesService: AirlinesService) {}
 
   @Post()
   @Roles(Role.Admin)
+  @ApiCookieAuth()
   @UploadImage('logo')
   @ApiBody({
     required: true,
@@ -94,18 +95,18 @@ export class AirlinesController {
     return this.airlinesService.create(dto, logo);
   }
 
+  @Public()
   @Get(':id')
   @ApiOperation({
     summary: 'Get an airline profile by ID',
     description:
-      'FLT-01. Returns the profile of one airline: name, code, logo and whether it is active.',
+      'FLT-01. Returns the profile of one airline: name, code, logo and whether it is active. Open to guests: no login is needed.',
   })
   @ApiOkResponse({
     type: AirlineResponseDto,
     description: 'Airline profile retrieved successfully',
   })
   @ApiBadRequestResponse({ description: 'The airline ID is invalid' })
-  @ApiUnauthorizedResponse({ description: 'Authentication is required' })
   @ApiNotFoundResponse({ description: 'Airline not found' })
   findById(
     @Param('id', ParseObjectIdPipe) id: string,
@@ -115,6 +116,7 @@ export class AirlinesController {
 
   @Patch(':id')
   @Roles(Role.AirlineModerator)
+  @ApiCookieAuth()
   @UploadImage('logo')
   @ApiBody({
     required: true,

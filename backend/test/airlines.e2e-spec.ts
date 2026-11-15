@@ -332,6 +332,32 @@ describe('Airline profiles (e2e, FLT-01)', () => {
       expect(response.body).not.toHaveProperty('_id');
     });
 
+    it('returns the same profile to a guest without a login cookie', async () => {
+      const admin = await createUser(Role.Admin);
+      const cookie = await loginAs(admin);
+      const airline = await createAirline(cookie);
+
+      const loggedIn = await request(getHttpServer())
+        .get(`/api/airlines/${airline.id}`)
+        .set('Cookie', cookie)
+        .expect(200);
+      const guest = await request(getHttpServer())
+        .get(`/api/airlines/${airline.id}`)
+        .expect(200);
+
+      expect(guest.body).toEqual(loggedIn.body);
+      expect(Object.keys(guest.body as object).sort()).toEqual([
+        'active',
+        'code',
+        'createdAt',
+        'id',
+        'logo',
+        'logoUrl',
+        'name',
+        'updatedAt',
+      ]);
+    });
+
     it('returns 400 for a malformed airline ID', async () => {
       const user = await createUser(Role.User);
       const cookie = await loginAs(user);
@@ -487,6 +513,27 @@ describe('Airline profiles (e2e, FLT-01)', () => {
       expect(operation.tags).toEqual(['Airlines']);
       expect(operation.description).toMatch(/^FLT-01\. /);
     }
+  });
+
+  it('shows the lock in Swagger on POST and PATCH only: GET is open to guests', async () => {
+    const response = await request(getHttpServer())
+      .get('/api/docs-json')
+      .expect(200);
+    const paths = response.body.paths as Record<
+      string,
+      Record<
+        string,
+        { security?: unknown[]; responses: Record<string, unknown> }
+      >
+    >;
+    const get = paths['/api/airlines/{id}'].get;
+
+    expect(get.security).toBeUndefined();
+    expect(Object.keys(get.responses)).not.toContain('401');
+    expect(paths['/api/airlines'].post.security).toEqual([{ cookie: [] }]);
+    expect(paths['/api/airlines/{id}'].patch.security).toEqual([
+      { cookie: [] },
+    ]);
   });
 
   it('shows the name, code and logo fields in the Swagger forms', async () => {
