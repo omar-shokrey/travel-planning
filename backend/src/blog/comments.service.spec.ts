@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { CommentsService } from './comments.service';
@@ -6,6 +6,8 @@ import { PostStatus } from './models/post-status.enum';
 
 const POST_ID = '6740a1b2c3d4e5f601234560';
 const USER_ID = '6740a1b2c3d4e5f601234561';
+const OTHER_USER_ID = '6740a1b2c3d4e5f601234562';
+const COMMENT_ID = '6740a1b2c3d4e5f601234563';
 
 /** A stored comment, as much of it as the mapper reads. */
 const storedComment = (body: string, createdAt: string) => {
@@ -50,6 +52,8 @@ const setup = (options: { postIsPublished?: boolean } = {}) => {
     create: jest.fn(),
     find: jest.fn(),
     countDocuments: jest.fn(),
+    findById: jest.fn(),
+    deleteOne: jest.fn().mockReturnValue(query({ deletedCount: 1 })),
   };
   const service = new CommentsService(comments as never, posts as never);
 
@@ -178,6 +182,107 @@ describe('CommentsService', () => {
       ).rejects.toThrow(new NotFoundException('Post not found'));
 
       expect(comments.find).not.toHaveBeenCalled();
+    });
+  });
+
+  /** A comment by USER_ID as `findById` returns it, with a working `save`. */
+  const ownComment = () => ({
+    ...storedComment('Great tips!', '2026-11-15T10:00:00.000Z'),
+    save: jest.fn().mockResolvedValue(undefined),
+  });
+
+  describe('update (BLG-07)', () => {
+    it('changes the text of my own comment and returns it', async () => {
+      const { service, comments } = setup();
+      const comment = ownComment();
+      comments.findById.mockReturnValue(query(comment));
+
+      const result = await service.update(
+        COMMENT_ID,
+        { body: 'Even better tips!' },
+        USER_ID,
+      );
+
+      expect(comments.findById).toHaveBeenCalledWith(COMMENT_ID);
+      expect(comment.save).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        id: comment.id,
+        authorId: USER_ID,
+        body: 'Even better tips!',
+      });
+    });
+
+    it('answers 403 and changes nothing for a comment of another user', async () => {
+      const { service, comments } = setup();
+      const comment = ownComment();
+      comments.findById.mockReturnValue(query(comment));
+
+      await expect(
+        service.update(COMMENT_ID, { body: 'Hijacked' }, OTHER_USER_ID),
+      ).rejects.toThrow(
+        new ForbiddenException('You can only edit your own comments'),
+      );
+
+      expect(comment.save).not.toHaveBeenCalled();
+      expect(comment.body).toBe('Great tips!');
+    });
+
+    it('answers 404 for a comment that does not exist', async () => {
+      const { service, comments } = setup();
+      comments.findById.mockReturnValue(query(null));
+
+      await expect(
+        service.update(COMMENT_ID, { body: 'Hello' }, USER_ID),
+      ).rejects.toThrow(new NotFoundException('Comment not found'));
+    });
+  });
+
+  describe('remove (BLG-07)', () => {
+    it('deletes my own comment by its id and lowers the comment count of the post', async () => {
+      const { service, posts, comments } = setup();
+      const comment = ownComment();
+      comments.findById.mockReturnValue(query(comment));
+
+      await service.remove(COMMENT_ID, USER_ID);
+
+      expect(comments.deleteOne).toHaveBeenCalledWith({ _id: comment._id });
+      expect(posts.updateOne).toHaveBeenCalledWith(
+        { _id: comment.postId, commentCount: { $gt: 0 } },
+        { $inc: { commentCount: -1 } },
+      );
+    });
+
+    it('answers 403 and deletes nothing for a comment of another user', async () => {
+      const { service, posts, comments } = setup();
+      comments.findById.mockReturnValue(query(ownComment()));
+
+      await expect(service.remove(COMMENT_ID, OTHER_USER_ID)).rejects.toThrow(
+        new ForbiddenException('You can only delete your own comments'),
+      );
+
+      expect(comments.deleteOne).not.toHaveBeenCalled();
+      expect(posts.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for a comment that does not exist', async () => {
+      const { service, comments } = setup();
+      comments.findById.mockReturnValue(query(null));
+
+      await expect(service.remove(COMMENT_ID, USER_ID)).rejects.toThrow(
+        new NotFoundException('Comment not found'),
+      );
+
+      expect(comments.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it('does not lower the count when another request deleted the comment first', async () => {
+      const { service, posts, comments } = setup();
+      comments.findById.mockReturnValue(query(ownComment()));
+      comments.deleteOne.mockReturnValue(query({ deletedCount: 0 }));
+
+      await service.remove(COMMENT_ID, USER_ID);
+
+      expect(posts.updateOne).not.toHaveBeenCalled();
     });
   });
 });
