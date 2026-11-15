@@ -781,7 +781,7 @@ one; the details controller is separate and registered last, so a fixed path suc
 Left to other issues, and written in the README: the policy fields (HTL-09, HTL-10), the reviews
 (HTL-24) and the rooms free for chosen dates (HTL-15). Changed by Claude Code after its own checks:
 the unit test run crashed four unrelated suites with "JavaScript heap out of memory" on my laptop
-and passed with one Jest worker; no code changed. Not run yet: the end-to-end tests, because my
-laptop had no internet connection to the database at that time. The branch is pushed only after I
-have read the diff.
+and passed with one Jest worker; no code changed. Run afterwards by Claude Code, when the connection was back: the two hotel end-to-end files on the
+test database, 14 tests passed, 6 of them in hotel-details.e2e-spec.ts. The branch is pushed only
+after I have read the diff.
 ================================================
