@@ -11,8 +11,7 @@ const valid = {
 
 const invalidFields = async (
   body: Record<string, unknown>,
-  dto:
-    typeof CreateItineraryDto | typeof UpdateItineraryDto = CreateItineraryDto,
+  dto: new () => object = CreateItineraryDto,
 ): Promise<string[]> =>
   (await validate(plainToInstance(dto, body)))
     .map((error) => error.property)
@@ -92,4 +91,22 @@ describe('UpdateItineraryDto', () => {
       ),
     ).toEqual(['countries', 'startDate', 'title']);
   });
+
+  it('accepts public and private as the visibility (ITN-20)', async () => {
+    expect(
+      await invalidFields({ visibility: 'public' }, UpdateItineraryDto),
+    ).toEqual([]);
+    expect(
+      await invalidFields({ visibility: 'private' }, UpdateItineraryDto),
+    ).toEqual([]);
+  });
+
+  it.each(['shared', 'PUBLIC', '', 1, true])(
+    'rejects %p as the visibility',
+    async (visibility) => {
+      expect(await invalidFields({ visibility }, UpdateItineraryDto)).toEqual([
+        'visibility',
+      ]);
+    },
+  );
 });

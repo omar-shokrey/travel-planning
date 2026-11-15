@@ -101,7 +101,7 @@ export class ItinerariesController {
   @ApiOperation({
     summary: 'Edit an itinerary',
     description:
-      'ITN-01. Edit the title, the countries or the start date of your own itinerary. Send only the fields that change.',
+      'ITN-01, ITN-20. Edit the title, the countries or the start date of your own itinerary, or set its visibility. A public itinerary appears in the shared search and is read-only to other users. Setting it private removes it from the search at once. Send only the fields that change.',
   })
   @ApiParam({ name: 'id', description: 'Itinerary id' })
   @ApiOkResponse({ type: ItineraryResponseDto })

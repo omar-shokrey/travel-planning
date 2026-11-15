@@ -706,3 +706,28 @@ cairo (201 each, the second with notes), and edited the notes of day 1 with PATC
 after 10 minutes during this check and the route answered 401 until I logged in again. I changed
 nothing and rejected nothing.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-20-itinerary-visibility / #77
+Related Requirement: ITN-20
+Prompt:
+Continuing my wave 2 issues in the same chat, Claude implemented ITN-20 (set an itinerary's
+visibility to public or private).
+How the output was used:
+Claude added the visibility field to UpdateItineraryDto, applied it in the service's update method,
+updated the Swagger text of the PATCH route, and wrote the unit and end-to-end tests. It ran format,
+lint, typecheck, build and the unit tests in its own workspace, and the end-to-end file against a
+local MongoDB-compatible stand-in (FerretDB), not real MongoDB.
+Accepted, changed, or rejected:
+Design choices by Claude: visibility is part of PATCH /api/itineraries/:id as the endpoint table
+says, not a new route; only the update DTO has the field, so a new itinerary is always private.
+Changed by Claude after its own checks: the first version broke the type check of an existing DTO
+test, and Claude fixed the test helper's type.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger, PATCH
+/api/itineraries/{id} with visibility public answered 200 and the itinerary showed as public. I
+changed nothing and rejected nothing.
+================================================

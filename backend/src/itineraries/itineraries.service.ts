@@ -82,7 +82,10 @@ export class ItinerariesService {
     return toItineraryDetailResponse(itinerary);
   }
 
-  /** ITN-01: edit the title, the countries or the start date of your own itinerary. */
+  /**
+   * ITN-01: edit the title, the countries or the start date of your own itinerary.
+   * ITN-20: make it public or private.
+   */
   async update(
     id: string,
     dto: UpdateItineraryDto,
@@ -100,6 +103,10 @@ export class ItinerariesService {
     }
     if (dto.startDate != null) {
       itinerary.startDate = dto.startDate;
+    }
+    // ITN-20: public search reads this field, so a change applies at once.
+    if (dto.visibility != null) {
+      itinerary.visibility = dto.visibility;
     }
 
     await itinerary.save();

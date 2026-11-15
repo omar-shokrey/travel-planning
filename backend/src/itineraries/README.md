@@ -38,3 +38,10 @@ Owner: Ali Ghayesh (M8). Requirements: ITN-01 to ITN-26. Routes: `/api/itinerari
 - **The day routes return the whole itinerary with its days**, because one change can affect the numbers and dates of other days.
 - **Editing a day changes only the fields that are sent.** Empty notes clear the notes. A day always keeps a city (ITN-09), so the city can be replaced but not removed.
 - **A day id that is not in this itinerary gives 404** "Day not found".
+
+## ITN-20: public or private
+
+- **Visibility is a field of `PATCH /api/itineraries/:id`**, as in section 8 of the project description (that route serves ITN-01 and ITN-20). There is no separate publish route.
+- **Only `UpdateItineraryDto` has `visibility`.** `CreateItineraryDto` does not, so a new itinerary is always private (ITN-01) and becomes public only by an explicit edit.
+- **"Read-only to other users" is the ownership check.** Every route that changes an itinerary goes through `findOwnedOrThrow()`, so another user gets 403 on a public itinerary exactly as on a private one.
+- **"Setting Private removes it immediately" needs no extra work.** Nothing is copied when an itinerary is published: public search (ITN-21) will filter on the `visibility` field, so the next search after the change no longer returns it.
