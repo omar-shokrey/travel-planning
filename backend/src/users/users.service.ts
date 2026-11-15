@@ -83,6 +83,37 @@ export class UsersService {
   }
 
   /**
+   * Finds an account by id with its password hash, for the password change
+   * (ACC-08). The entity is for the auth service: it never leaves the API.
+   */
+  findEntityByIdWithPasswordHash(id: string): Promise<UserDocument | null> {
+    if (!isValidObjectId(id)) {
+      return Promise.resolve(null);
+    }
+    return this.users.findById(id).select('+passwordHash').exec();
+  }
+
+  /**
+   * Replaces the password of an account and clears `mustChangePassword`, so
+   * an account that had a temporary password (ACC-07a, ACC-13) is done with
+   * it (ACC-08). The plain password is hashed here and never stored. It
+   * returns the updated account, or `null` when it is gone.
+   */
+  async updatePassword(
+    id: Types.ObjectId,
+    password: string,
+  ): Promise<UserDocument | null> {
+    const passwordHash = await hash(password, PASSWORD_SALT_ROUNDS);
+    return this.users
+      .findByIdAndUpdate(
+        id,
+        { $set: { passwordHash, mustChangePassword: false } },
+        { returnDocument: 'after' },
+      )
+      .exec();
+  }
+
+  /**
    * Gives an account a temporary password chosen by an admin (ACC-07a). The
    * plain password is hashed here and never stored. `mustChangePassword` is
    * set so the owner must choose a new one at the next login, and the login
