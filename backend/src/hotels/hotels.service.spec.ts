@@ -263,7 +263,7 @@ describe('HotelsService (HTL-01)', () => {
       expect(hotelsModel.findOneAndUpdate).toHaveBeenCalledWith(
         { _id: hotel._id, photos: { $size: 1 } },
         { $push: { photos: { $each: ['new-photo.png'] } } },
-        { new: true },
+        { returnDocument: 'after' },
       );
       expect(updateExec).toHaveBeenCalledTimes(1);
     });
@@ -306,7 +306,7 @@ describe('HotelsService (HTL-01)', () => {
       expect(hotelsModel.findOneAndUpdate).toHaveBeenCalledWith(
         { _id: hotel._id, photos: 'old-photo.jpg' },
         { $pull: { photos: 'old-photo.jpg' } },
-        { new: true },
+        { returnDocument: 'after' },
       );
       expect(updateExec.mock.invocationCallOrder[0]).toBeLessThan(
         uploads.deleteImage.mock.invocationCallOrder[0],

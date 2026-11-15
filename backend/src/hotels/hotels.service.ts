@@ -111,7 +111,7 @@ export class HotelsService {
               photos: { $each: storedImages.map(({ filename }) => filename) },
             },
           },
-          { new: true },
+          { returnDocument: 'after' },
         )
         .exec();
       if (!updated) {
@@ -138,7 +138,7 @@ export class HotelsService {
       .findOneAndUpdate(
         { _id: hotel._id, photos: filename },
         { $pull: { photos: filename } },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
     if (!updated) {
