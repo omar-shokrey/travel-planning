@@ -459,4 +459,24 @@ describe('Airline profiles (e2e, FLT-01)', () => {
       expect(existsSync(join(uploads.directory, updated.logo))).toBe(true);
     });
   });
+
+  it('documents the FLT-01 routes in Swagger with the requirement ID', async () => {
+    const response = await request(getHttpServer())
+      .get('/api/docs-json')
+      .expect(200);
+    const paths = response.body.paths as Record<
+      string,
+      Record<string, { tags: string[]; description?: string }>
+    >;
+    const operations = [
+      paths['/api/airlines'].post,
+      paths['/api/airlines/{id}'].get,
+      paths['/api/airlines/{id}'].patch,
+    ];
+
+    for (const operation of operations) {
+      expect(operation.tags).toEqual(['Airlines']);
+      expect(operation.description).toMatch(/^FLT-01\. /);
+    }
+  });
 });

@@ -61,7 +61,11 @@ export class AirlinesController {
     },
   })
   @UploadImage('logo')
-  @ApiOperation({ summary: 'Create an airline profile' })
+  @ApiOperation({
+    summary: 'Create an airline profile',
+    description:
+      'FLT-01. An admin creates an airline profile with a name, a unique code and a logo (one JPG or PNG image, at most 5 MB).',
+  })
   @ApiCreatedResponse({
     type: AirlineResponseDto,
     description: 'Airline profile created successfully',
@@ -91,7 +95,11 @@ export class AirlinesController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get an airline profile by ID' })
+  @ApiOperation({
+    summary: 'Get an airline profile by ID',
+    description:
+      'FLT-01. Returns the profile of one airline: name, code, logo and whether it is active.',
+  })
   @ApiOkResponse({
     type: AirlineResponseDto,
     description: 'Airline profile retrieved successfully',
@@ -123,7 +131,11 @@ export class AirlinesController {
     },
   })
   @UploadImage('logo')
-  @ApiOperation({ summary: 'Update an assigned airline profile' })
+  @ApiOperation({
+    summary: 'Update an assigned airline profile',
+    description:
+      'FLT-01. The airline moderator assigned to this airline edits its name, code or logo. Send only the fields that change. A new logo replaces the old one.',
+  })
   @ApiOkResponse({
     type: AirlineResponseDto,
     description: 'Airline profile updated successfully',
