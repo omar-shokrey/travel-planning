@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { CookieOptions, Response } from 'express';
+import type { CookieOptions, Request, Response } from 'express';
 import {
   ACCESS_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
@@ -28,6 +28,7 @@ export interface AuthTokens {
  *
  * The refresh cookie lasts SESSION_INACTIVITY_MINUTES and is replaced every time
  * tokens are issued, so a session that stays idle that long expires (ACC-06).
+ * Logout clears both cookies.
  */
 @Injectable()
 export class AuthCookiesService {
@@ -46,6 +47,16 @@ export class AuthCookiesService {
     });
   }
 
+  /** The access token the request carries, or `undefined`. */
+  readAccessToken(request: Request): string | undefined {
+    return this.readCookie(request, ACCESS_TOKEN_COOKIE);
+  }
+
+  /** The refresh token the request carries, or `undefined`. The browser sends it only to `/api/auth`. */
+  readRefreshToken(request: Request): string | undefined {
+    return this.readCookie(request, REFRESH_TOKEN_COOKIE);
+  }
+
   /** The options must match the ones used to set the cookies, or the browser keeps them. */
   clearAuthCookies(response: Response): void {
     response.clearCookie(ACCESS_TOKEN_COOKIE, this.options(ACCESS_COOKIE_PATH));
@@ -53,6 +64,16 @@ export class AuthCookiesService {
       REFRESH_TOKEN_COOKIE,
       this.options(REFRESH_COOKIE_PATH),
     );
+  }
+
+  /** A cookie is a text. Anything else, or an empty one, counts as no cookie. */
+  private readCookie(request: Request, name: string): string | undefined {
+    const cookies: unknown = request.cookies;
+    if (typeof cookies !== 'object' || cookies === null) {
+      return undefined;
+    }
+    const value = (cookies as Record<string, unknown>)[name];
+    return typeof value === 'string' && value !== '' ? value : undefined;
   }
 
   private options(path: string): CookieOptions {
