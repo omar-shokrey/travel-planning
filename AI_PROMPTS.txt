@@ -183,3 +183,47 @@ planned in the CI step.
 Rejected for now: paid Atlas backups (the seed can rebuild today's data; I will decide again before
 real user data exists).
 ================================================
+Date: 2026-11-15
+Student: Salma Sabry
+Tool: ChatGPT
+Branch / Issue: feature/FLT-02-airport-list-v2 / FLT-02
+Related Requirement: FLT-02 (Airport list, read-only)
+Prompt:
+I asked ChatGPT to guide me through implementing FLT-02, the read-only airport list
+endpoint. I asked it to follow the project's existing NestJS architecture and conventions
+and to help me implement the controller, service, response DTO, mapper, pagination, and
+the required tests. I also asked for help understanding how the airport data should be
+returned with the related city and country names and how the endpoint should use the
+existing shared pagination utilities and public-route decorator. I pasted the relevant
+existing project files and code into the chat so the implementation could follow the
+project's existing structure.
+
+How the output was used:
+ChatGPT helped draft the FLT-02 implementation, including the airport controller,
+airport service, response DTO, mapper, unit tests, and end-to-end tests. The service
+retrieves the paginated airports and resolves the related city and country reference
+data before returning the required response format. The controller exposes the
+GET /api/airports endpoint, marks it as public, documents it in Swagger, and uses the
+existing pagination response format. I reviewed the generated code, saved the files
+into my local project, and ran the required verification commands myself.
+
+Accepted, changed, or rejected:
+Accepted: the overall FLT-02 structure using the existing pagination DTO and paginated
+response utility; the controller/service separation; the airport response DTO; the
+mapper for converting airport, city, and country data into the required response;
+public access to the read-only endpoint; and the unit and E2E testing approach.
+
+Changed after testing: the E2E test setup was adjusted to use the project's separate
+test database configuration. A TypeScript type issue in the E2E test was fixed by using
+NestExpressApplication instead of INestApplication. The service implementation was
+also refined while testing to match the project's existing Mongoose models and
+reference-data structure.
+
+Rejected for now: no additional airport features, filtering, creation, updating, or
+deletion were added because FLT-02 is a read-only airport list requirement.
+
+Verification:
+The FLT-02 unit tests passed. The FLT-02 E2E tests passed, including the airport list
+response, pagination, invalid pagination validation, and public accessibility.
+The full unit test suite passed, TypeScript compilation passed, the backend build
+passed, and lint completed with 0 warnings and 0 errors.
