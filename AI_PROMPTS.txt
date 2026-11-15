@@ -477,3 +477,87 @@ Accepted, changed, or rejected:
 Accepted: the finding that no production code was needed, and the test file as written. Changed:
 nothing. Rejected: nothing.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Salma Sabry
+Tool: ChatGPT
+Branch / Issue: feature/GEN-08 / #97
+Related Requirement: GEN-08
+Prompt:
+I asked ChatGPT to review and complete GEN-08 (Image upload rules), verify the existing uploads
+implementation against the project requirements, inspect the upload service, decorators, constants,
+module, and E2E tests, and guide me through fixing any issues without changing unrelated project
+code. I also asked ChatGPT to verify the testing setup and confirm whether DTOs/mappers or a
+production upload endpoint were required for this shared upload infrastructure.
+How the output was used:
+I used ChatGPT to review the existing GEN-08 implementation and identify the required verification
+changes. The upload E2E tests were isolated from AppModule so they do not depend on the shared Atlas
+database, while keeping the production uploads module unchanged. I ran the targeted upload E2E tests
+and then the full unit tests, full E2E tests, lint, and build.
+Accepted, changed, or rejected:
+Accepted: the verification of the existing image format checks, 5 MB file-size limit, image limits,
+safe storage, static image serving, Swagger upload decorators, and E2E coverage. Accepted: isolating
+the uploads E2E test from the shared database by importing ConfigModule and UploadsModule directly.
+Changed: the upload test request limit remained at 10 files so the UploadsService can enforce the
+feature-specific limit and return the expected error message. Rejected: adding DTOs/mappers or a
+production POST upload endpoint specifically for GEN-08 because this requirement is shared upload
+infrastructure and the existing project structure does not require them for this module.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/GEN-05-pagination / #94
+Related Requirement: GEN-05
+Prompt:
+I asked Claude to develop GEN-05 (every list longer than 10 rows is paginated, page size 10).
+How the output was used:
+Claude read the issue, the specification and the shared code and found that the behaviour already
+exists in the shared layer: PaginationQueryDto (page 1, 10 per page, at most 50), paginate() and
+the Swagger decorator ApiPaginatedResponse, with unit tests, and the existing end-to-end test only
+checked how the query is read. Claude wrote one file, test/pagination.e2e-spec.ts (18 tests), and no
+production code. It uses a throwaway list route built the way every real list will be and checks
+the default page of 10 rows, later pages, a page after the last one, the boundary of 0, 1, 10 and
+11 rows, the page size limit of 50, the 400 answers with the field named for an invalid page, limit
+or unknown parameter, and the Swagger description of the page parameters and the items and meta
+body. Claude could not install packages or run the tests in its own workspace, so it only
+formatted the file with Prettier and checked its syntax, then put the file into my project folder.
+I created the branch and ran format, lint, typecheck, the unit tests (300 passed), the end-to-end
+tests (87 passed, 18 of them new) and the build myself.
+Accepted, changed, or rejected:
+Accepted: the finding that no production code was needed, and the test file as written. Changed:
+nothing. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/GEN-13-backend-enforced-rules / #105
+Related Requirement: GEN-13
+Prompt:
+I asked Claude to develop GEN-13 (the backend enforces all validation, business rules and
+authorisation regardless of the frontend, and passwords are stored only as salted hashes).
+How the output was used:
+Claude read the issue, the specification and the code and found that the behaviour already exists:
+passwords are hashed with bcrypt (cost 12) in registration and in the admin seed, the hash is hidden
+from queries and never returned, the global pipe rejects unknown fields, and the global login and
+role guards are tested end to end in the login tests. Claude wrote one file,
+test/backend-enforcement.e2e-spec.ts (12 tests), and no production code. It registers accounts
+through the API in the -test database and checks that the stored hash is bcrypt with the project
+cost and that no plain password is stored, that two accounts with the same password get different
+hashes (salted), that the password and the hash are never sent back or repeated in an error, and
+that registration rejects every field the server controls (role, status, passwordHash,
+failedLoginAttempts, consentAcceptedAt, createdAt, id, _id) without creating an account. The tests
+delete their own accounts one by one by id. Claude could not install packages or run the tests in
+its own workspace, so it only formatted the file with Prettier and checked its syntax, then put the
+file into my project folder. I created the branch and ran format, lint, typecheck, the unit tests
+(300 passed), the end-to-end tests (99 passed, 12 of them new) and the build myself.
+Accepted, changed, or rejected:
+Accepted: the finding that no production code was needed, and the test file. Changed: my first
+end-to-end run failed on one test, because Claude had built the "rejected" password from a random
+UUID that contains digits, so the password rule accepted it; Claude replaced it with a fixed text
+without digits and the next run passed. Rejected: nothing.
+================================================
