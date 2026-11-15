@@ -18,9 +18,16 @@ import { Hotel } from './../src/hotels/models/hotel.schema';
 import { User } from './../src/users/models/user.schema';
 
 const PASSWORD = 'Passw0rdOK';
-const TIMES = { checkInTime: '14:00', checkOutTime: '12:00' };
+const TIMES = {
+  checkInTime: '14:00',
+  checkOutTime: '12:00',
+  cancellationTiers: [
+    { daysBefore: 30, refundPercent: 100 },
+    { daysBefore: 7, refundPercent: 50 },
+  ],
+};
 
-describe('PUT /api/hotels/:id/policies (e2e, HTL-09)', () => {
+describe('PUT /api/hotels/:id/policies (e2e, HTL-09, HTL-10)', () => {
   let app: NestExpressApplication;
   let users: Model<User>;
   let hotels: Model<Hotel>;
@@ -140,7 +147,7 @@ describe('PUT /api/hotels/:id/policies (e2e, HTL-09)', () => {
 
     const response = await setPolicies(
       hotelId,
-      { checkInTime: '15:30', checkOutTime: '11:00' },
+      { checkInTime: '15:30', checkOutTime: '11:00', cancellationTiers: [] },
       moderatorCookie,
     );
 
@@ -148,6 +155,7 @@ describe('PUT /api/hotels/:id/policies (e2e, HTL-09)', () => {
     expect(response.body).toEqual({
       checkInTime: '15:30',
       checkOutTime: '11:00',
+      cancellationTiers: [],
     });
   });
 
@@ -166,7 +174,7 @@ describe('PUT /api/hotels/:id/policies (e2e, HTL-09)', () => {
   it('rejects a time that is not HH:mm on the 24-hour clock', async () => {
     const response = await setPolicies(
       hotelId,
-      { checkInTime: '2pm', checkOutTime: '24:00' },
+      { ...TIMES, checkInTime: '2pm', checkOutTime: '24:00' },
       moderatorCookie,
     );
 
@@ -193,7 +201,7 @@ describe('PUT /api/hotels/:id/policies (e2e, HTL-09)', () => {
   it('rejects a missing time and a field that is not allowed', async () => {
     const missing = await setPolicies(
       hotelId,
-      { checkInTime: '14:00' },
+      { checkInTime: '14:00', cancellationTiers: [] },
       moderatorCookie,
     );
     const extra = await setPolicies(
@@ -216,13 +224,107 @@ describe('PUT /api/hotels/:id/policies (e2e, HTL-09)', () => {
 
     const response = await setPolicies(
       hotelId,
-      { checkInTime: '01:00', checkOutTime: '02:00' },
+      { checkInTime: '01:00', checkOutTime: '02:00', cancellationTiers: [] },
       otherModeratorCookie,
     );
 
     expect(response.status).toBe(403);
     const stored = await hotels.findById(hotelId);
     expect(stored?.policy).toMatchObject(TIMES);
+  });
+
+  it('stores the tiers with the highest threshold first (HTL-10)', async () => {
+    const response = await setPolicies(
+      hotelId,
+      {
+        ...TIMES,
+        cancellationTiers: [
+          { daysBefore: 0, refundPercent: 0 },
+          { daysBefore: 30, refundPercent: 100 },
+          { daysBefore: 7, refundPercent: 50 },
+        ],
+      },
+      moderatorCookie,
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      (response.body as { cancellationTiers: unknown[] }).cancellationTiers,
+    ).toEqual([
+      { daysBefore: 30, refundPercent: 100 },
+      { daysBefore: 7, refundPercent: 50 },
+      { daysBefore: 0, refundPercent: 0 },
+    ]);
+  });
+
+  it('accepts an empty tier list, which means no refund (HTL-10)', async () => {
+    const response = await setPolicies(
+      hotelId,
+      { ...TIMES, cancellationTiers: [] },
+      moderatorCookie,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ cancellationTiers: [] });
+  });
+
+  it('rejects two tiers with the same threshold (HTL-10)', async () => {
+    const response = await setPolicies(
+      hotelId,
+      {
+        ...TIMES,
+        cancellationTiers: [
+          { daysBefore: 7, refundPercent: 50 },
+          { daysBefore: 7, refundPercent: 80 },
+        ],
+      },
+      moderatorCookie,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      errors: [
+        {
+          field: 'cancellationTiers',
+          messages: ['Each cancellation tier must have a different daysBefore'],
+        },
+      ],
+    });
+  });
+
+  it('rejects a tier outside the limits and a missing tier list (HTL-10)', async () => {
+    const send = (cancellationTiers: unknown) =>
+      setPolicies(hotelId, { ...TIMES, cancellationTiers }, moderatorCookie);
+
+    const negativeDays = await send([{ daysBefore: -1, refundPercent: 50 }]);
+    const fractionDays = await send([{ daysBefore: 1.5, refundPercent: 50 }]);
+    const tooMuch = await send([{ daysBefore: 7, refundPercent: 101 }]);
+    const extraField = await send([
+      { daysBefore: 7, refundPercent: 50, note: 'x' },
+    ]);
+    const missing = await setPolicies(
+      hotelId,
+      { checkInTime: '14:00', checkOutTime: '12:00' },
+      moderatorCookie,
+    );
+
+    for (const response of [
+      negativeDays,
+      fractionDays,
+      tooMuch,
+      extraField,
+      missing,
+    ]) {
+      expect(response.status).toBe(400);
+    }
+    expect(tooMuch.body).toMatchObject({
+      errors: [
+        {
+          field: 'cancellationTiers.0.refundPercent',
+          messages: ['refundPercent must be between 0 and 100'],
+        },
+      ],
+    });
   });
 
   it('answers 403 for a registered user and for an admin', async () => {
