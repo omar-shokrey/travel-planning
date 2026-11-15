@@ -32,6 +32,23 @@ describe('toUserResponse', () => {
     ).toMatchObject({ mustChangePassword: true });
   });
 
+  it('adds the phone and the preferred currency when the account has them (ACC-09)', () => {
+    expect(
+      toUserResponse({
+        ...source,
+        phone: '+20 10 1234 5678',
+        preferredCurrency: 'EGP',
+      }),
+    ).toMatchObject({ phone: '+20 10 1234 5678', preferredCurrency: 'EGP' });
+  });
+
+  it('leaves out the phone and the preferred currency when the account has none', () => {
+    const response = toUserResponse(source);
+
+    expect(response).not.toHaveProperty('phone');
+    expect(response).not.toHaveProperty('preferredCurrency');
+  });
+
   it('leaves out the password hash and every other private field', () => {
     const stored = {
       ...source,
