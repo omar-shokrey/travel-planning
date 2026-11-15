@@ -4,13 +4,14 @@ Registration, login, logout, the authentication cookies and the current user (`/
 
 ## Built so far
 
-| Route                     | Requirement    | Access                                 |
-| ------------------------- | -------------- | -------------------------------------- |
-| `POST /api/auth/register` | ACC-01         | Public                                 |
-| `POST /api/auth/login`    | ACC-04, ACC-05 | Public                                 |
-| `POST /api/auth/logout`   | ACC-06         | Public (see below)                     |
-| `POST /api/auth/refresh`  | ACC-06         | Public (the refresh cookie is checked) |
-| `GET /api/auth/me`        | ACC-04         | Any logged-in user                     |
+| Route                             | Requirement    | Access                                 |
+| --------------------------------- | -------------- | -------------------------------------- |
+| `POST /api/auth/register`         | ACC-01         | Public                                 |
+| `POST /api/auth/login`            | ACC-04, ACC-05 | Public                                 |
+| `POST /api/auth/logout`           | ACC-06         | Public (see below)                     |
+| `POST /api/auth/refresh`          | ACC-06         | Public (the refresh cookie is checked) |
+| `GET /api/auth/me`                | ACC-04         | Any logged-in user                     |
+| `PATCH /api/auth/change-password` | ACC-08         | Any logged-in user                     |
 
 `AuthCookiesService` sets, clears and reads the two authentication cookies (ACC-19). `AuthTokensService` signs and checks the tokens. `SessionsService` owns the `sessions` collection (ACC-06). `JwtAuthGuard` is the guard that protects every route (ACC-04).
 
@@ -48,6 +49,18 @@ The 5th wrong password in a row locks the account for 15 minutes (`MAX_FAILED_LO
 - **Known trade-off.** The lockout message shows that the email has an account, but only to someone who made 5 wrong attempts on it. The requirement asks the system to "show a lockout message", so it is kept. The same 5 attempts also let anyone lock a known email for 15 minutes. That follows from the rule as the requirement states it; limiting attempts per IP address as well would be a separate feature.
 - **Where it lives.** The rule is in `AuthService.login`. The three database operations (`recordFailedLogin`, `clearExpiredLock`, `resetFailedLogins`) are in `UsersService`, which owns the `users` collection. The limits are constants and not environment variables, so no shared-layer change was needed.
 - **Not built here:** a `Retry-After` header. The exception filter builds every error response and sets no headers, so adding one is a shared-layer change for its own pull request. The message already says how long is left.
+
+## Change password (ACC-08)
+
+`PATCH /api/auth/change-password` takes `currentPassword` and `newPassword` and returns the account (200).
+
+- **The current password is always checked**, even right after login, so someone who only has the session (a computer left unlocked) cannot take over the account. A wrong one answers **400** "The current password is incorrect", not 401: the user is logged in, and a 401 would make the frontend think the session ended.
+- **The new password follows the registration rule** (`PASSWORD_PATTERN`, at most 72 characters). A broken rule is a normal validation error with `newPassword` in `errors`. The current password is not checked against the rule, so an older or temporary password still works.
+- **The new password must differ from the current one** (400 "The new password must be different from the current password"). This is checked only after the current password is right, so the answer tells nothing to someone who does not know it. It matters most after a temporary password (ACC-07a, ACC-13). The workbook does not ask for it; it is one string comparison.
+- **It clears `mustChangePassword`.** An admin reset (ACC-07a) or a new moderator account (ACC-13) sets the flag. Login and `GET /api/auth/me` return it in the account, and the frontend sends the user to this route while it is `true`. The team chose not to block other routes on the backend while the flag is set; the flag is the signal.
+- **The hashing and the write are in `UsersService.updatePassword`**, which owns the `users` collection. It sets the new hash and `mustChangePassword: false` in one update. `findEntityByIdWithPasswordHash` is the lookup for the check; neither method is exposed by a controller.
+- **The user stays logged in, and so do the other sessions of the account.** Since ACC-06 the sessions are stored, so ending the others is possible, but it needs a "revoke all sessions of this user" method in `SessionsService`, which does not exist yet. ACC-08 does not ask for it; it is a small follow-up.
+- **Wrong current passwords are not counted for the lockout** (ACC-05). The lockout protects the login of someone who has no session; this route already needs one.
 
 ## Logout, refresh and the 30-minute limit (ACC-06)
 

@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Patch,
   Post,
   Req,
   Res,
@@ -27,6 +28,7 @@ import { Public } from '../common/decorators/public.decorator';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { AuthCookiesService } from './auth-cookies.service';
 import { AuthService } from './auth.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
@@ -173,5 +175,31 @@ export class AuthController {
   @ApiForbiddenResponse({ description: 'Your account is suspended' })
   me(@CurrentUser('id') userId: string): Promise<UserResponseDto> {
     return this.authService.me(userId);
+  }
+
+  @Patch('change-password')
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Change my password (ACC-08)',
+    description:
+      'Any logged-in user. Send the current password and a new one that meets the password rule (8 or more characters with a letter and a digit) and differs from the current one. It also ends a temporary password set by an admin: the account is returned with `mustChangePassword: false`. The user stays logged in.',
+  })
+  @ApiOkResponse({
+    description: 'The password was changed',
+    type: UserResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'The current password is incorrect, the new password breaks the rule or is the same as the current one, or the body has a field that is not allowed. A broken rule lists its field in `errors`.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Not logged in, or the access token is invalid or expired',
+  })
+  @ApiForbiddenResponse({ description: 'Your account is suspended' })
+  changePassword(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<UserResponseDto> {
+    return this.authService.changePassword(userId, dto);
   }
 }

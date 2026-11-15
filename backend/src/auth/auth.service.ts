@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   HttpException,
   HttpStatus,
@@ -16,12 +17,15 @@ import type { AuthTokens } from './auth-cookies.service';
 import { AuthTokensService, type TokenClaims } from './auth-tokens.service';
 import {
   ACCOUNT_SUSPENDED_MESSAGE,
+  CURRENT_PASSWORD_INCORRECT_MESSAGE,
   INVALID_CREDENTIALS_MESSAGE,
   LOCKOUT_MINUTES,
   LOGIN_REQUIRED_MESSAGE,
+  SAME_PASSWORD_MESSAGE,
   MAX_FAILED_LOGIN_ATTEMPTS,
   accountLockedMessage,
 } from './auth.constants';
+import type { ChangePasswordDto } from './dto/change-password.dto';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
 import { SessionsService } from './sessions.service';
@@ -260,6 +264,38 @@ export class AuthService {
       accountLockedMessage(minutesLeft),
       HttpStatus.TOO_MANY_REQUESTS,
     );
+  }
+
+  /**
+   * Changes the password of the logged-in user (ACC-08). The current password
+   * is checked first, so someone who only holds the session (an unlocked
+   * computer) cannot change it. The new password must differ from the current
+   * one, which matters most after a temporary password (ACC-07a, ACC-13).
+   * Saving it clears `mustChangePassword`.
+   */
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+  ): Promise<UserResponseDto> {
+    const user = await this.usersService.findEntityByIdWithPasswordHash(userId);
+    if (!user) {
+      throw new UnauthorizedException(LOGIN_REQUIRED_MESSAGE);
+    }
+    if (!(await compare(dto.currentPassword, user.passwordHash))) {
+      throw new BadRequestException(CURRENT_PASSWORD_INCORRECT_MESSAGE);
+    }
+    if (dto.newPassword === dto.currentPassword) {
+      throw new BadRequestException(SAME_PASSWORD_MESSAGE);
+    }
+
+    const updated = await this.usersService.updatePassword(
+      user._id,
+      dto.newPassword,
+    );
+    if (!updated) {
+      throw new UnauthorizedException(LOGIN_REQUIRED_MESSAGE);
+    }
+    return toUserResponse(updated);
   }
 
   private getUnknownEmailHash(): Promise<string> {

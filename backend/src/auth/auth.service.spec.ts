@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   HttpException,
@@ -18,12 +19,15 @@ import type { AuthTokensService, TokenClaims } from './auth-tokens.service';
 import { AuthService } from './auth.service';
 import {
   ACCOUNT_SUSPENDED_MESSAGE,
+  CURRENT_PASSWORD_INCORRECT_MESSAGE,
   INVALID_CREDENTIALS_MESSAGE,
+  SAME_PASSWORD_MESSAGE,
   LOCKOUT_MINUTES,
   LOGIN_REQUIRED_MESSAGE,
   MAX_FAILED_LOGIN_ATTEMPTS,
   accountLockedMessage,
 } from './auth.constants';
+import type { ChangePasswordDto } from './dto/change-password.dto';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
 import type { SessionsService } from './sessions.service';
@@ -66,7 +70,13 @@ beforeAll(async () => {
   passwordHash = await hash(loginDto.password, 4);
 });
 
-function setup(changes: { status?: UserStatus; lockedUntil?: Date } = {}) {
+function setup(
+  changes: {
+    status?: UserStatus;
+    lockedUntil?: Date;
+    mustChangePassword?: boolean;
+  } = {},
+) {
   // A stored user, with the private fields a real document carries.
   const stored = {
     _id: userObjectId,
@@ -77,6 +87,7 @@ function setup(changes: { status?: UserStatus; lockedUntil?: Date } = {}) {
     status: changes.status ?? UserStatus.Active,
     failedLoginAttempts: 0,
     lockedUntil: changes.lockedUntil,
+    mustChangePassword: changes.mustChangePassword ?? false,
     createdAt: new Date('2026-11-14T10:00:00.000Z'),
   };
   const usersService = {
@@ -87,6 +98,11 @@ function setup(changes: { status?: UserStatus; lockedUntil?: Date } = {}) {
     recordFailedLogin: jest.fn().mockResolvedValue(null),
     clearExpiredLock: jest.fn().mockResolvedValue(undefined),
     resetFailedLogins: jest.fn().mockResolvedValue(undefined),
+    // Change password (ACC-08).
+    findEntityByIdWithPasswordHash: jest.fn().mockResolvedValue(stored),
+    updatePassword: jest
+      .fn()
+      .mockResolvedValue({ ...stored, mustChangePassword: false }),
   };
   const tokens = {
     issueTokens: jest.fn().mockResolvedValue(issuedTokens),
@@ -149,6 +165,7 @@ describe('AuthService', () => {
         email: 'sara@example.com',
         role: 'user',
         status: 'active',
+        mustChangePassword: false,
         createdAt: '2026-11-14T10:00:00.000Z',
       });
     });
@@ -189,6 +206,7 @@ describe('AuthService', () => {
         email: 'sara@example.com',
         role: 'user',
         status: 'active',
+        mustChangePassword: false,
         createdAt: '2026-11-14T10:00:00.000Z',
       });
     });
@@ -788,6 +806,94 @@ describe('AuthService', () => {
 
       await expect(attempt).rejects.toBeInstanceOf(UnauthorizedException);
       await expect(attempt).rejects.toThrow(LOGIN_REQUIRED_MESSAGE);
+    });
+  });
+
+  describe('changePassword (ACC-08)', () => {
+    const userId = '6740f1c2a4b5c6d7e8f90123';
+    const change: ChangePasswordDto = {
+      currentPassword: 'Passw0rdOK',
+      newPassword: 'N3wPassword',
+    };
+
+    it('checks the current password of the logged-in user and saves the new one', async () => {
+      const { usersService, service } = setup();
+
+      await service.changePassword(userId, change);
+
+      expect(usersService.findEntityByIdWithPasswordHash).toHaveBeenCalledWith(
+        userId,
+      );
+      expect(usersService.updatePassword).toHaveBeenCalledWith(
+        userObjectId,
+        'N3wPassword',
+      );
+    });
+
+    it('returns the public user, which no longer has to change the password', async () => {
+      const { service } = setup({ mustChangePassword: true });
+
+      const user = await service.changePassword(userId, change);
+
+      expect(user).toMatchObject({ id: userId, mustChangePassword: false });
+      expect(user).not.toHaveProperty('passwordHash');
+    });
+
+    it('refuses a wrong current password with 400 and saves nothing', async () => {
+      const { usersService, service } = setup();
+
+      const attempt = service.changePassword(userId, {
+        ...change,
+        currentPassword: 'Wr0ngPassword',
+      });
+
+      await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
+      await expect(attempt).rejects.toThrow(CURRENT_PASSWORD_INCORRECT_MESSAGE);
+      expect(usersService.updatePassword).not.toHaveBeenCalled();
+    });
+
+    it('refuses a new password that is the same as the current one', async () => {
+      const { usersService, service } = setup();
+
+      const attempt = service.changePassword(userId, {
+        ...change,
+        newPassword: change.currentPassword,
+      });
+
+      await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
+      await expect(attempt).rejects.toThrow(SAME_PASSWORD_MESSAGE);
+      expect(usersService.updatePassword).not.toHaveBeenCalled();
+    });
+
+    it('checks the current password before it says the new one is the same', async () => {
+      const { service } = setup();
+
+      // Someone who does not know the password learns nothing from this answer.
+      const attempt = service.changePassword(userId, {
+        currentPassword: 'Wr0ngPassword',
+        newPassword: 'Wr0ngPassword',
+      });
+
+      await expect(attempt).rejects.toThrow(CURRENT_PASSWORD_INCORRECT_MESSAGE);
+    });
+
+    it('answers 401 when the account is gone', async () => {
+      const { usersService, service } = setup();
+      usersService.findEntityByIdWithPasswordHash.mockResolvedValue(null);
+
+      const attempt = service.changePassword(userId, change);
+
+      await expect(attempt).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(usersService.updatePassword).not.toHaveBeenCalled();
+    });
+
+    it('answers 401 when the account is gone before the new password is saved', async () => {
+      const { usersService, service } = setup();
+      usersService.updatePassword.mockResolvedValue(null);
+
+      await expect(service.changePassword(userId, change)).rejects.toThrow(
+        LOGIN_REQUIRED_MESSAGE,
+      );
     });
   });
 });

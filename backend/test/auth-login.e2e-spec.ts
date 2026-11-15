@@ -171,6 +171,7 @@ describe('POST /api/auth/login and the authentication guard (e2e, ACC-04)', () =
         email: user.email,
         role: 'user',
         status: 'active',
+        mustChangePassword: false,
         createdAt: expect.stringMatching(
           /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
         ),

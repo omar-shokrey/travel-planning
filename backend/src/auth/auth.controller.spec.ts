@@ -9,6 +9,7 @@ import type { AuthCookiesService } from './auth-cookies.service';
 import { AuthController } from './auth.controller';
 import type { AuthService } from './auth.service';
 import { ACCOUNT_SUSPENDED_MESSAGE } from './auth.constants';
+import type { ChangePasswordDto } from './dto/change-password.dto';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
 
@@ -25,6 +26,7 @@ const created: UserResponseDto = {
   email: 'sara@example.com',
   role: Role.User,
   status: UserStatus.Active,
+  mustChangePassword: false,
   createdAt: '2026-11-14T10:00:00.000Z',
 };
 
@@ -45,6 +47,7 @@ function setup() {
     logout: jest.fn().mockResolvedValue(undefined),
     refresh: jest.fn().mockResolvedValue({ user: created, tokens }),
     me: jest.fn().mockResolvedValue(created),
+    changePassword: jest.fn().mockResolvedValue(created),
   };
   const authCookies = {
     setAuthCookies: jest.fn(),
@@ -241,6 +244,32 @@ describe('AuthController', () => {
         new Reflector().get<boolean | undefined>(
           IS_PUBLIC_KEY,
           AuthController.prototype.me,
+        ),
+      ).toBeUndefined();
+    });
+  });
+
+  describe('changePassword (ACC-08)', () => {
+    const change: ChangePasswordDto = {
+      currentPassword: 'Passw0rdOK',
+      newPassword: 'N3wPassword',
+    };
+
+    it('gives the service the id of the logged-in user and the body, and returns its answer', async () => {
+      const { authService, controller } = setup();
+
+      expect(await controller.changePassword(created.id, change)).toBe(created);
+      expect(authService.changePassword).toHaveBeenCalledWith(
+        created.id,
+        change,
+      );
+    });
+
+    it('needs a login', () => {
+      expect(
+        new Reflector().get<boolean | undefined>(
+          IS_PUBLIC_KEY,
+          AuthController.prototype.changePassword,
         ),
       ).toBeUndefined();
     });
