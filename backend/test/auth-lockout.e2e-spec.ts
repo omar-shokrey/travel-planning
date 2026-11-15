@@ -6,6 +6,7 @@ import type { Model } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import './support/auth-env';
+import { deleteSessionsOf } from './support/delete-sessions';
 import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
 import {
@@ -100,6 +101,7 @@ describe('POST /api/auth/login lockout (e2e, ACC-05)', () => {
 
   afterAll(async () => {
     for (const id of createdIds) {
+      await deleteSessionsOf(app, id);
       await users.findByIdAndDelete(id);
     }
     await app.close();
