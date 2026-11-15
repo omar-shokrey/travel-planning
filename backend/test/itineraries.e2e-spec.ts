@@ -1,5 +1,4 @@
-import { TEST_ACCESS_SECRET } from './support/auth-env';
-import { JwtService } from '@nestjs/jwt';
+import './support/auth-env';
 import { getModelToken } from '@nestjs/mongoose';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -8,11 +7,12 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
-import { ACCESS_TOKEN_COOKIE } from './../src/common/constants/cookies';
 import { Itinerary } from './../src/itineraries/models/itinerary.schema';
 import { City } from './../src/reference/models/city.schema';
 import { Country } from './../src/reference/models/country.schema';
 import { User } from './../src/users/models/user.schema';
+import { deleteSessionsOf } from './support/delete-sessions';
+import { sessionCookieFor } from './support/session-cookie';
 
 /**
  * A country code that is not in countries.csv (codes starting with X are
@@ -45,7 +45,6 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
   let countries: Model<Country>;
   let cities: Model<City>;
   let itineraries: Model<Itinerary>;
-  const jwt = new JwtService();
   /** What these tests created. Each record is deleted by id at the end. */
   const createdUserIds: string[] = [];
   const createdItineraryIds: string[] = [];
@@ -53,7 +52,10 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
   let owner: { id: string; cookie: string };
   let otherUser: { id: string; cookie: string };
 
-  /** A user in the database and the cookie a browser would send after login. */
+  /**
+   * A user in the database and the cookie a browser would send after login.
+   * Login needs a live session (ACC-06), so the cookie comes with one.
+   */
   const createUser = async (): Promise<{ id: string; cookie: string }> => {
     const user = await users.create({
       name: 'Itinerary Test',
@@ -63,11 +65,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
     });
     const id = user._id.toString();
     createdUserIds.push(id);
-    const token = await jwt.signAsync(
-      { sub: id },
-      { secret: TEST_ACCESS_SECRET, expiresIn: 300 },
-    );
-    return { id, cookie: `${ACCESS_TOKEN_COOKIE}=${token}` };
+    return { id, cookie: await sessionCookieFor(app, id) };
   };
 
   const http = () => request(app.getHttpServer());
@@ -126,6 +124,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
       await itineraries.deleteOne({ _id: id });
     }
     for (const id of createdUserIds) {
+      await deleteSessionsOf(app, id);
       await users.deleteOne({ _id: id });
     }
     for (const cityId of [CITY_A, CITY_B]) {
@@ -697,6 +696,9 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
       expect((await itineraries.findById(id).lean())?.days).toHaveLength(0);
     });
 
+    // 61 requests one after the other. Every request now also checks and
+    // extends the login session (ACC-06), one more database call each, so on a
+    // remote test database this needs more than the default 30 seconds.
     it('answers 409 to the 61st day and keeps 60', async () => {
       const id = await existing();
       for (let day = 1; day <= 60; day++) {
@@ -710,7 +712,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
       const stored = await itineraries.findById(id).lean();
       expect(stored?.days).toHaveLength(60);
       expect(stored?.dayCount).toBe(60);
-    });
+    }, 120_000);
 
     it('answers 403 to another user, 404 for a missing itinerary, 400 for a bad id', async () => {
       const id = await existing();
