@@ -5,8 +5,11 @@ import type { User } from '../models/user.schema';
 /** The fields the mapper reads. A user document and a lean user both fit. */
 export type UserSource = Pick<
   User,
-  'name' | 'email' | 'role' | 'status' | 'createdAt'
-> & { _id: Types.ObjectId };
+  'name' | 'email' | 'role' | 'status' | 'mustChangePassword' | 'createdAt'
+> &
+  Partial<Pick<User, 'phone' | 'preferredCurrency'>> & {
+    _id: Types.ObjectId;
+  };
 
 /** Turns a stored user into what the API returns. Anything not listed here stays private. */
 export function toUserResponse(user: UserSource): UserResponseDto {
@@ -16,6 +19,12 @@ export function toUserResponse(user: UserSource): UserResponseDto {
     email: user.email,
     role: user.role,
     status: user.status,
+    mustChangePassword: user.mustChangePassword,
+    // Left out when the account has none (ACC-09).
+    ...(user.phone != null && { phone: user.phone }),
+    ...(user.preferredCurrency != null && {
+      preferredCurrency: user.preferredCurrency,
+    }),
     createdAt: user.createdAt.toISOString(),
   };
 }

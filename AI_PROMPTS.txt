@@ -1,0 +1,733 @@
+AI PROMPT LOG - Travel Planning and Booking Platform
+Every member records prompts that materially contributed to the project.
+Never include secrets, passwords, tokens, .env values, or connection strings.
+
+Copy the template below for each new entry and add it under the last one.
+
+================================================
+Date: YYYY-MM-DD
+Student: Student Name
+Tool: Claude Code / ChatGPT / Copilot / Gemini
+Branch / Issue: feature/FLT-11-flight-search / #12
+Related Requirement: FLT-11
+Prompt:
+(the prompt, or the important prompts of a multi-turn conversation)
+How the output was used:
+(what you used it for)
+Accepted, changed, or rejected:
+(what you kept, edited, or discarded)
+================================================
+
+================================================
+Date: 2026-11-02
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: no branch (GitHub setup); issues #9 to #106
+Related Requirement: All Milestone 1 mandatory requirements (issue creation only)
+Prompt:
+I asked Claude to guide me through the GitHub project setup (board columns and workflows, labels
+per module plus mandatory/bonus, the two milestones) and to turn the official requirements
+workbook into one GitHub issue per requirement, created with the GitHub CLI. Follow-up prompts:
+whether the issues are required by the project description, how the import script and its dry
+run work, which label each issue should get (for example why ACC-19 is labelled GEN), and
+whether Milestone 2 and bonus issues should be created now.
+How the output was used:
+I used the generated issue data and an import script (kept outside the repository) to create
+98 Milestone 1 issues in the board's Backlog, after reading the dry run, creating 3 issues
+first, then the rest. I checked the issue count and labels on GitHub afterwards.
+Accepted, changed, or rejected:
+Accepted: titles, issue bodies, module labels and milestone assignment, after checking them
+against the workbook. Changed: acceptance criteria of UI-only requirements were rewritten so
+they no longer mention the backend or Swagger. Rejected for now (my decision): the 6 UI-only
+Milestone 2 issues and the 11 bonus issues are held back until after the Milestone 2 overview.
+================================================
+
+================================================
+Date: 2026-11-04
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: chore/backend-init / no issue (project setup)
+Related Requirement: None (setup); prepares ACC-19, ACC-06, FLT-23, FLT-29, ITN-18, GEN-06, GEN-13
+Prompt:
+I asked Claude to guide me step by step through generating the NestJS backend in backend/ and
+installing its dependencies, and to scan the folder before every commit. I pasted terminal
+output at each step (Nest CLI prompts, Node version warnings, the TypeScript rootDir error,
+the Jest "Must use import to load ES Module" error, build/test/lint/start results). I also
+asked Claude to choose the dependency list from the requirements workbook instead of a
+generic template.
+How the output was used:
+I followed the steps to generate the app with Nest CLI 12 (CommonJS, Jest), upgraded Node to
+v24.22.2, and ran build, tests, lint and the server. I installed the packages Claude selected
+(config, Mongoose, JWT, bcrypt, cookie-parser, helmet, class-validator, Swagger, Stripe,
+serve-static, schedule, luxon, pdfkit, csv-parse, csv-stringify and their type packages),
+confirmed bcrypt works on Windows with Node 24, that every package loads, and that
+npm audit reports 0 vulnerabilities in production dependencies.
+Accepted, changed, or rejected:
+Accepted: rootDir fix in tsconfig.json, Jest scripts using --experimental-vm-modules, engines
+(Node >=24.15 <25) with engine-strict in backend/.npmrc, ignoring *.tsbuildinfo, a short
+backend README. Changed: removed the unused @nestjs/mau package and its deploy script that
+the generator added; fixed my own typo in the .npmrc file name. Rejected: the optional Nest
+observability prompt, and packages we do not need yet (passport, joi, mongodb-memory-server,
+file-type, an HTTP client), to keep dependencies minimal.
+================================================
+
+================================================
+Date: 2026-11-04
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: docs/update-project-description / no issue (documentation)
+Related Requirement: ACC-15, GEN-12 (also FLT-02, ACC-09, ITN-18)
+Prompt:
+I gave Claude the revised project description (changes highlighted in yellow) and asked it to
+review the changes, compare them with what we had already done and what was planned, and say
+what has to change in the past steps and in the upcoming steps. Follow-up: I asked where the
+requirements workbook in the repository comes from and had it checked against the official sheets.
+How the output was used:
+Claude compared the revised PDF word by word with the copy in the repository and found nine
+changes: airport time zones and supported currencies come from the CSV files, new provider
+deactivate and reactivate endpoints, and corrected requirement references in the endpoint
+tables. I used the result to replace the PDF in docs/requirements and to update
+specs/travel-platform.md.
+Accepted, changed, or rejected:
+Accepted: the list of changes and the spec additions, after checking them against the revised
+PDF. Not changed: the 98 issues, the scaffold and the dependencies, which are not affected.
+Checked afterwards: I downloaded the two official Google Sheets and Claude compared them with
+the repository. The requirements workbook is identical (same file hash) and the four reference
+CSV files match the provided Mock_Data sheet row for row, so no other change was needed.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: chore/backend-structure / no issue (project setup)
+Related Requirement: None (setup); prepares GEN-02, GEN-05, GEN-08, ACC-04, ACC-06, ACC-15, ACC-19
+Prompt:
+I asked Claude to guide me step by step through the backend structure of the project and to take the design decisions itself: the 16 feature
+module folders, the shared code in backend/src/common (roles, guards, pipes, error filter,
+pagination), the application setup (API prefix, CORS, cookies, security headers, validation,
+Swagger), the authentication cookie settings, the validation of environment variables and the
+image upload rules (JPG and PNG only, 5 MB, limits per post, activity, hotel and airline). After
+each item I pasted the terminal output of format, lint, build, unit tests and end-to-end tests,
+and I asked Claude to scan the folder before every commit. Before this pull request I asked
+Claude to scan and test the whole backend structure once more and not to continue until it
+was accurate.
+How the output was used:
+I created and devaloped the files; using CLAUDE as a guide in design decisions, then added them to the repository, ran format, lint, build, test and
+test:e2e after each item, and made one commit per item. The result is 16 empty feature modules,
+the shared code in common/, one setup function used by both main.ts and the end-to-end tests,
+the cookie service, startup validation of the environment variables, and an uploads module
+(a service and two decorators) that the post, activity, hotel and airline endpoints will use.
+AGENTS.md and specs/travel-platform.md were updated with the modules, the response and error
+conventions and the image rules. At the last run, 11 unit test suites (108 tests) and 2
+end-to-end suites (20 tests) passed, lint reported 0 warnings and the build was clean.
+Accepted, changed, or rejected:
+Accepted: the response conventions (a success returns the resource itself, lists return items
+and meta, every error has one body), routes private by default, the cookie design (access and
+refresh tokens in httpOnly cookies), and the image checks based on the first bytes of the file.
+Changed: @nestjs/serve-static, installed in the setup pull request, was replaced by Express
+static file serving and uninstalled, after I read the package I found that it adds a
+fallback page for unknown URLs, answers with its own 404 body and may not work under Jest; the
+check of the JWT secrets moved from the cookie step to ACC-04, where the secrets are first used;
+the final scan found the commands in AGENTS.md out of date and they were updated. Rejected:
+wrapping every response in an envelope, and writing the authentication guard before ACC-04.
+================================================
+
+================================================
+Date: 2026-11-10
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: chore/database-seed / no issue (project setup)
+Related Requirement: None (setup); prepares ACC-01, ACC-04, ACC-09, FLT-02, GEN-12, ITN-18
+Prompt:
+I asked Claude to guide me step by step through the database part of the project (checklist items 33
+to 38) and to take the design decisions itself: connecting the backend to MongoDB Atlas, drawing the
+data model, the first Mongoose models, a seed program for the official reference data and the
+administrator account, running the seed on the shared database, and the rules that protect the
+shared database. For each item I asked Claude for a short brief and its approach first, and I chose
+how to work (read the code in chat before it is saved, or run the steps and paste the output). I
+asked about the parts I did not understand: what the seed does and when it runs, whether its data is
+fake test data, what an ERD is used for, why a test should fail on purpose, and whether the rules in
+AGENTS.md or checks in the API can stop someone from dropping a collection. I pasted the output of
+format, lint, build, the unit tests, tsc, the end-to-end tests, the seed and my own Atlas screens.
+How the output was used:
+Claude drafted the code, the ten Mermaid diagrams, the rules text and a short check script, and
+wrote the files into my folder after I approved them in chat. I read the code before it was saved,
+ran every command myself, made every commit, and did the work in Atlas myself. I put the
+administrator email and password only in my own backend/.env and did not share them with Claude. The
+result is: the Mongoose connection with a startup check of MONGODB_URI (item 33), tested by starting
+the app with wrong settings on purpose; a data model of 25 collections as ten diagrams in
+specs/travel-platform.md (item 34); the user model and the four reference models with offline tests
+(item 35); a seed that checks the CSV files and writes the reference data and one administrator
+account, with a dry-run option and offline tests (item 36); the seed run twice on Atlas, where the
+second run changed nothing (item 37); and a Shared database section in AGENTS.md plus a custom Atlas
+role without the drop permissions for the shared database user (item 38). I tested the role with the
+throwaway script (deleted afterwards): reading worked and dropping a collection was refused. At the
+last full run (item 36) 16 unit test suites (180 tests) passed, tsc was clean, lint reported 0
+warnings and the build was clean; the end-to-end tests passed 20 of 20 again after the Atlas change.
+Accepted, changed, or rejected:
+Accepted: the data model choices (prices as whole cents plus a currency code, the official CSV ids
+as _id, one diagram per area); the seed design (a separate program run by hand, a dry run,
+everything checked before the first write, it adds and updates but never deletes, the administrator
+is created once, and only I run it on the shared database); the Atlas role (read, insert, update and
+delete documents, create collections and indexes, no drop) as the technical protection, with written
+rules for people and AI tools.
+Changed after my runs found mistakes in Claude's code: enum fields need an explicit type: String
+(the models failed to load without it); the model tests used a generic type that tsc rejected and a
+deprecated Mongoose call; the seed wrote through the raw collection with a filter that tsc rejected,
+so it now writes through the models; Claude's first check script expected the plain MongoDB error
+code, but Atlas answers with its own code, so Claude changed it to print the server message. The
+end-to-end tests failed once on a network timeout while connecting to Atlas (after item 36 and again
+after the Atlas change) and passed on the re-run; the lasting fix, a separate test database, is
+planned in the CI step.
+Rejected for now: paid Atlas backups (the seed can rebuild today's data; I will decide again before
+real user data exists).
+================================================
+
+================================================
+Date: 2026-11-10
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: chore/dev-tooling / no issue (project setup)
+Related Requirement: None (setup); prepares every feature (ACC-04 uses the cookie path)
+Prompt:
+I asked Claude to guide me step by step through the development tooling part of the project
+(checklist items 39 to 41) and to take the design decisions itself: naming and date and time
+rules for AGENTS.md, the two PR template sections and the ownership rules from Lab 3, the
+editor and formatting setup (.editorconfig, Prettier, the Husky commit hook), and a health
+endpoint with tests. For each item I asked Claude for a short brief and its approach first, and
+I chose how to work (read the text or code in chat before it is saved, or run the steps and
+paste the output). I pasted the output of the format check, the commits, the unit tests, tsc,
+lint, the build and the end-to-end tests. I also chose the cookie path for the access token
+(decision 16) from Claude's recommendation.
+How the output was used:
+Claude checked the existing code and drafted the AGENTS.md sections (conventions, ownership),
+the PR template sections, .editorconfig, and the health endpoint with its unit tests and the
+end-to-end changes. It wrote the files into my folder after I approved them in chat, except the
+PR template: Claude's file tool cannot write under .github, so I pasted that file myself. I ran
+npm install at the repository root (this activated the Husky hook), ran Prettier on the
+repository, ran every check and made every commit. The result is: GET /api/health, which answers
+200 when the database connection is open and 503 otherwise (item 41); the conventions and
+ownership rules in AGENTS.md and two new PR template sections (item 39); .editorconfig, a root
+lockfile, the active commit hook and one formatting commit that changed only Markdown, JSON and
+template files (item 40); and the access_token cookie path changed from /api to / so the
+Next.js proxy.ts can read it. At the last full run 16 unit test suites (183 tests) passed, tsc
+was clean, lint reported 0 warnings and 0 errors, the build and the format check were clean, and
+21 of 21 end-to-end tests passed.
+Accepted, changed, or rejected:
+Accepted: the naming and date rules (UTC in the database, airport time zones for flights, money
+as whole minor units), ownership per issue and not per person, the health endpoint that checks
+only the connection state and never shows the database name, and Path=/ for the access cookie.
+Changed: the old Hello World route was removed and the three end-to-end tests that used it now
+use /api/health. The first end-to-end run after the health endpoint failed once on a network
+timeout while connecting to Atlas (the known problem) and passed on the re-run; the lasting fix
+is postponed. Rejected: commitlint and running oxlint in the commit hook (CI already lints).
+================================================
+
+================================================
+Date: 2026-11-12
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: chore/ci-and-docs / no issue (project setup)
+Related Requirement: None (setup); prepares every feature
+Prompt:
+I asked Claude to continue guiding me step by step through the last initiation items (42 to 45) and
+to help with the design decisions: a separate database for the end-to-end tests with a longer
+timeout, new CI steps (type check, and end-to-end tests against a temporary MongoDB container), a
+full README for the team, the Entities, DTOs and mappers rules and the merge method in AGENTS.md,
+and up-to-date command lists in AGENTS.md and CLAUDE.md. I chose the mode "show the text or code in
+chat first, then Claude writes the files". I asked whether I must handle the files inside the .github
+folder by hand (no). I sent screenshots of the Atlas custom role dialog and of its error message
+(they show no password and no connection string) and I pasted the output of every command I ran.
+How the output was used:
+Claude wrote the test database helper (it builds the name from MONGODB_URI plus -test and stops if
+it cannot), its unit tests, the Jest end-to-end settings, the changes to the two end-to-end files
+(the app is now built once per file), the typecheck script, the CI steps, the new README and backend
+README, and the new AGENTS.md and CLAUDE.md text. It wrote the files into my folder after I approved
+them in chat, except .github/workflows/ci.yml: Claude's file tool cannot write under .github, so I
+pasted that file myself. I extended the Atlas role readwrite_no_drop to the new test database myself
+on the Atlas website. I ran every command and check and made every commit: 882af70 (end-to-end test
+database), 87f1326 (CI steps), f6f3142 (README) and 2fce3c6 (AGENTS.md, CLAUDE.md and a README fix).
+At the last full run 17 unit test suites (190 tests) passed, tsc was clean, lint reported 0 warnings
+and 0 errors, the build and the format check were clean, and 21 of 21 end-to-end tests passed in
+about 13 seconds on the test database. The new CI end-to-end step has not run on GitHub yet; the
+pull request will show it.
+Accepted, changed, or rejected:
+Accepted: the test database rule (the name in MONGODB_URI plus -test, never the shared database),
+the 30 second test timeout, building the app once per end-to-end file, the response DTO and mapper
+pattern from the development plan, and the merge method "Create a merge commit". Changed after my
+runs and checks found mistakes in Claude's work: (1) Claude told me to add 10 rows in the Atlas role
+dialog, but Atlas groups the actions in 2 rows, and the first save failed with "One or more of the
+resource names provided are invalid" until I ticked "Apply to any collection" on the old database
+pair; (2) Claude's test setup used process.loadEnvFile, which does not reach the Jest test
+environment, so the first end-to-end run stopped with "MONGODB_URI is not set" (the safety stop
+worked and nothing connected), and Claude changed it to read backend/.env with util.parseEnv; (3)
+the ci.yml I pasted lost its final newline and the format check warned, so I ran Prettier on it and
+amended the commit before pushing; (4) Claude's first README said CI runs the same checks as I run,
+but CI does not check formatting, so Claude corrected the sentence and AGENTS.md now says it. Not
+done: a format check step in CI (the Git hook formats staged files).
+================================================
+
+================================================
+Date: 2026-11-12
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: docs/initiation-leftovers / no issue (project setup)
+Related Requirement: None (setup)
+Prompt:
+This entry covers AI help between 14 Oct and 10 Nov that was not logged before, because it changed
+no repository file or it came before the log existed. (1) Setup pull requests #1 to #8 (14 Oct to 1
+Nov): in a setup chat I asked Claude to plan and help me build the repository foundation: the folder
+structure, the root files, the shared AI layer taken from the course demo kit and adapted to our
+project, the project description and requirements files, the issue templates, and the first
+checklist of setup steps. (2) 6 Nov: I gave Claude the six lab documents and asked it to compare
+them with our repository, and to write an explainer document of the backend structure and the
+database for my team and the TA. (3) 7 Nov: I asked Claude to guide me through three things in my
+own accounts: the Atlas cluster and database user, a Stripe sandbox with its keys, and the exchange
+rates key. (4) 10 Nov: I asked Claude to write a development plan for the eight members (the split
+of the 98 issues, build order, sprint plan, Git and Swagger rules) and a documentation of the
+initiation pull requests. On 12 Nov I also asked Claude to draft the descriptions of the pull
+requests for this branch and for the release.
+How the output was used:
+(1) The files and the checklist from the setup chat became the repository foundation in PRs #1 to
+#8; the shared layer from the demo kit was adapted to our project in PR #5. (2) The lab review found
+nothing that contradicts the labs and listed our deliberate differences. It raised decisions that I
+answered later: the models/ folder name, the cookie path, the pull request template sections and the
+ownership rules. The explainer is a Claude document that I use to present; it is not in the
+repository. (3) Claude gave me the clicks, checked the limits in the Atlas and Stripe documentation
+and read my screenshots. I did every step in my own accounts, and Claude never saw a password, a key
+or the connection string. (4) The plan and the documentation are Claude documents outside the
+repository, for the team after initiation.
+Accepted, changed, or rejected:
+Accepted: the lab review result, the models/ folder name, one Stripe sandbox per member, and the
+foundation files. Changed: Claude first leaned towards one shared Stripe sandbox and then changed
+its advice, after noticing that a shared sandbox with the shared database would let two backends
+process the same payment event; I chose one sandbox per member. Rejected: Spec Kit files, which I
+closed as not needed for this project. Not reviewed yet: I have not read the development plan and
+the pull request documentation in detail; I will review them after initiation and correct what is
+wrong.
+================================================
+
+================================================
+Date: 2026-11-14
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/ACC-01-guest-registration / #9
+Related Requirement: ACC-01 (also planning and the reviews of pull requests #115 and #116)
+Prompt:
+This entry covers 13 and 14 Nov. (1) Team work, 13 Nov: I gave Claude the team split (M1 to M8) and
+asked how to divide the 98 Milestone 1 issues and the modules between us, for a description each
+member and their AI can develop from, for a kickoff message, and for a table of the branches each
+member creates. (2) Reviews, 14 Nov: I asked Claude to review Salma's pull request #115 (FLT-02) and
+Maha's pull request #116 (PAY-04) against their issues, AGENTS.md and the specification, including
+the pull request description and the AI log, and to write a follow-up prompt each of them can give
+to her own AI to fix the comments. I also asked for a team message about the checks to run before
+every push, and I asked which layers a pull request must contain, where guards and CORS are set up,
+and whether every entity needs a DTO. (3) ACC-01, 14 Nov: I asked Claude to explain the issue and
+its approach first, and then to develop it: "develop my first issue acc-01".
+How the output was used:
+(1) The split, the member briefs and the branch table are a Claude document outside the repository;
+I sent the tables to the team. (2) I used the two reviews to decide on the pull requests and gave
+Salma and Maha the follow-up prompts. (3) Claude wrote the ACC-01 files into my project folder: the
+register DTO, the user response DTO and its mapper, UsersService, AuthService, AuthController, the
+changes to the two modules and to the User class, the unit and end-to-end tests and the two module
+READMEs. Claude could not install packages in its own workspace, so there it only formatted the
+files with Prettier and read them against the existing code. I ran format, lint, typecheck, the unit
+and end-to-end tests and the build on my machine, read the diff, and committed and pushed through my
+IDE.
+Accepted, changed, or rejected:
+Accepted: the split and the branch names; the review findings; the ACC-01 design (registering does
+not log the user in, UsersService owns the users collection and hashes the password, 409 for an
+email that is already registered, consent stored as a date). Changed: Claude first gave ACC-01 as
+copy-and-paste steps and I then asked it to write the whole issue; its first prompt for Salma was
+too long for a chat she had already started, so I asked for a short follow-up prompt. Rejected:
+changing my Claude network settings so that its workspace could install packages. Two limits are not
+in the workbook and were added by Claude: a name of at most 100 characters and a password of at most
+72.
+================================================
+
+================================================
+Date: 2026-11-14
+Student: Maha Mohamed Gad
+Tool: ChatGPT
+Branch / Issue: feature/PAY-04-single-platform-currency / #103
+Related Requirement: PAY-04
+Prompt:
+I asked ChatGPT to guide me step by step through implementing PAY-04 (One platform currency) according to the official project description, development plan, AGENTS.md and CLAUDE.md. I asked it to inspect the existing repository before making changes, identify how the project defines the platform currency, create the required shared constant and a test for it, and guide me through running the relevant checks.
+
+After Omar's review of pull request #116, I asked ChatGPT to help me fix the review comments, including formatting of the two currency files, the layout and content of this AI_PROMPTS.txt entry, and the PR description.
+
+How the output was used:
+I followed the guidance to create `backend/src/common/constants/currency.ts` with the platform currency defined as USD, and added `backend/src/common/constants/currency.spec.ts` to verify that the platform currency is USD. I installed the backend dependencies because `node_modules` was missing, then ran the targeted Jest test successfully.
+
+After Omar's review, I used the guidance to install the repository dependencies, format the two currency files with Prettier, verify the repository formatting, and update this AI log entry to match the required template and include the review follow-up. I also used the guidance to prepare the corrected PR description.
+
+Accepted, changed, or rejected:
+Accepted: the repository inspection, the decision to define USD once as the platform currency constant, the constant implementation, the unit test, and the verification steps. I also followed the suggested branch name `feature/PAY-04-single-platform-currency`.
+
+After Omar's review, I accepted the requested formatting fixes, AI log corrections, and PR description changes. The implementation approach and platform currency code were not changed.
+
+================================================
+
+================================================
+Date: 2026-11-14
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/ACC-04-login-with-email-and-password / #10
+Related Requirement: ACC-04 (also the review of pull request #117 and a prompt for Salma)
+Prompt:
+This entry covers the evening of 14 Nov. (1) Review: I asked Claude to review Salma's pull request
+#117 (FLT-02, airport list) against its issue, AGENTS.md and the specification, and to write a
+short follow-up prompt for her AI that fixes the problems and leaves her AI log entry and pull
+request description to me. Claude found, among other things, that her change added a second
+`setupFiles` key to `test/jest-e2e.json`, which would replace the setup that points the end-to-end
+tests at the "-test" database. (2) ACC-04: I asked Claude to develop my second issue, "develop my
+second issue acc-04", and first to check whether any issue it depends on is missing. Claude found
+only ACC-01, which is merged, so it went on.
+How the output was used:
+(1) I used the review to decide on the pull request and gave Salma the follow-up prompt. (2) Claude
+wrote the ACC-04 files on the branch: the login DTO, AuthTokensService, JwtAuthGuard, the changes to
+AuthService, AuthController, AuthModule and UsersService, @Public() on the probe controller of
+app.e2e-spec.ts (every route now needs a login), the unit and end-to-end tests and the changes to
+the auth and users READMEs. Claude could not install packages in its own workspace, so there it only
+formatted the files with Prettier and read them against the existing code. Because of a stop hook,
+Claude also pushed the branch to GitHub; I did not want that, so I had the work taken back, deleted
+the remote branch and committed the changes myself. I ran format, lint, typecheck, the unit and
+end-to-end tests and the build, and read the diff. Claude then tried the login, /api/auth/me and the
+failed logins in the in-app browser against my running API, with one throwaway account it created
+through the register route. I committed and pushed through my IDE.
+Accepted, changed, or rejected:
+Accepted: the design (JwtAuthGuard and RolesGuard are global guards registered in AuthModule, so no
+shared-layer pull request was needed; the tokens only in httpOnly cookies; the account is read from
+the database on every request, so a suspension applies at once; one generic message for an unknown
+email, a wrong password and a deactivated account; 403 for a suspended account only after the
+password is right). Added by Claude and not in the issue: GET /api/auth/me, as the smallest
+protected route to prove the cookie works, and a limit of 72 characters on the login password, as in
+registration. Left out on purpose: the lockout after 5 failures (ACC-05), logout and refresh
+(ACC-06), and the startup check of the JWT secrets, which is a change in config/ for its own pull
+request. Changed: nothing in the code. Rejected: Claude's push of the branch to GitHub, which a stop
+hook had asked for; I had it taken back and committed the changes myself.
+================================================
+
+================================================
+Date: 2026-11-14
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: docs/ai-log-gen-12-acc-18 / #104
+Related Requirement: GEN-12
+Prompt:
+I asked Claude to develop and finish GEN-12 (seed reference data), because work of my teammates
+depends on it.
+How the output was used:
+Claude read the issue, the specification and the seed code on develop, and found that GEN-12 was
+already complete (commit 9c23cb2): the seed loads countries, cities, airports and attractions from
+the official CSV files, keeps their ids, and the supported currencies are the currency codes in
+countries.csv. Claude wrote no code. It gave me the steps to verify the seed and wrote the closing
+comment for the issue. I ran the dry run and then the seed twice on the shared database myself;
+Claude did not run the seed.
+Accepted, changed, or rejected:
+Accepted: Claude's finding that no new code was needed, the verification steps and the closing
+comment. My runs showed 8 records in each of the four collections, with 0 added and 0 updated on
+every run, so the data was already loaded and nothing was duplicated. Changed: nothing. Rejected:
+nothing.
+================================================
+
+================================================
+Date: 2026-11-14
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: docs/ai-log-gen-12-acc-18 / #102
+Related Requirement: ACC-18
+Prompt:
+While I verified GEN-12, Claude suggested that I also check ACC-18 (seeded admin accounts), because
+the same seed command creates the administrator account. I asked Claude whether ACC-18 was done.
+How the output was used:
+Claude wrote no code. It told me to log in as the seeded administrator in Swagger and wrote the
+closing comment for the issue. I did the login myself: POST /api/auth/login answered 200 with the
+role "admin" and the status "active", and the seed reported that the administrator account already
+exists and was left unchanged.
+Accepted, changed, or rejected:
+Accepted: the check and the closing comment. Claude also pointed out that I had pasted the admin
+password into the chat, which the project rules do not allow; I will change it when the
+change-password feature exists. Changed: nothing. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/GEN-02-field-level-validation-messages / #93
+Related Requirement: GEN-02
+Prompt:
+I asked Claude to develop GEN-02 (field-level validation messages on all forms).
+How the output was used:
+Claude read the issue, the specification and the shared code and found that the behaviour already
+exists: the global ValidationPipe and the exception filter return a list of fields with their
+messages for every 400, and registration already had tests for it. Login had none that checked the
+fields. Claude wrote one file, test/validation-errors.e2e-spec.ts (9 tests), and no production
+code. The tests send bad bodies to the register and login routes and check that every invalid field
+is reported at once with its own messages, that a name of only spaces and a password that is too
+long are reported on their own fields, that a field that is not allowed is named, and that a body
+that is not valid JSON gets a 400 in the standard error shape. They create nothing in the
+database. Claude could not install packages or run the tests in its own workspace, so it only
+formatted the file with Prettier and checked its syntax; Claude put the file into my project folder
+and I created the branch, ran the checks and committed it myself. I ran format, lint, typecheck,
+the unit tests (300 passed), the end-to-end tests (69 passed) and the build.
+Accepted, changed, or rejected:
+Accepted: the finding that no production code was needed, and the test file as written. Changed:
+nothing. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Salma Sabry
+Tool: ChatGPT
+Branch / Issue: feature/GEN-08 / #97
+Related Requirement: GEN-08
+Prompt:
+I asked ChatGPT to review and complete GEN-08 (Image upload rules), verify the existing uploads
+implementation against the project requirements, inspect the upload service, decorators, constants,
+module, and E2E tests, and guide me through fixing any issues without changing unrelated project
+code. I also asked ChatGPT to verify the testing setup and confirm whether DTOs/mappers or a
+production upload endpoint were required for this shared upload infrastructure.
+How the output was used:
+I used ChatGPT to review the existing GEN-08 implementation and identify the required verification
+changes. The upload E2E tests were isolated from AppModule so they do not depend on the shared Atlas
+database, while keeping the production uploads module unchanged. I ran the targeted upload E2E tests
+and then the full unit tests, full E2E tests, lint, and build.
+Accepted, changed, or rejected:
+Accepted: the verification of the existing image format checks, 5 MB file-size limit, image limits,
+safe storage, static image serving, Swagger upload decorators, and E2E coverage. Accepted: isolating
+the uploads E2E test from the shared database by importing ConfigModule and UploadsModule directly.
+Changed: the upload test request limit remained at 10 files so the UploadsService can enforce the
+feature-specific limit and return the expected error message. Rejected: adding DTOs/mappers or a
+production POST upload endpoint specifically for GEN-08 because this requirement is shared upload
+infrastructure and the existing project structure does not require them for this module.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/GEN-05-pagination / #94
+Related Requirement: GEN-05
+Prompt:
+I asked Claude to develop GEN-05 (every list longer than 10 rows is paginated, page size 10).
+How the output was used:
+Claude read the issue, the specification and the shared code and found that the behaviour already
+exists in the shared layer: PaginationQueryDto (page 1, 10 per page, at most 50), paginate() and
+the Swagger decorator ApiPaginatedResponse, with unit tests, and the existing end-to-end test only
+checked how the query is read. Claude wrote one file, test/pagination.e2e-spec.ts (18 tests), and no
+production code. It uses a throwaway list route built the way every real list will be and checks
+the default page of 10 rows, later pages, a page after the last one, the boundary of 0, 1, 10 and
+11 rows, the page size limit of 50, the 400 answers with the field named for an invalid page, limit
+or unknown parameter, and the Swagger description of the page parameters and the items and meta
+body. Claude could not install packages or run the tests in its own workspace, so it only
+formatted the file with Prettier and checked its syntax, then put the file into my project folder.
+I created the branch and ran format, lint, typecheck, the unit tests (300 passed), the end-to-end
+tests (87 passed, 18 of them new) and the build myself.
+Accepted, changed, or rejected:
+Accepted: the finding that no production code was needed, and the test file as written. Changed:
+nothing. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/GEN-13-backend-enforced-rules / #105
+Related Requirement: GEN-13
+Prompt:
+I asked Claude to develop GEN-13 (the backend enforces all validation, business rules and
+authorisation regardless of the frontend, and passwords are stored only as salted hashes).
+How the output was used:
+Claude read the issue, the specification and the code and found that the behaviour already exists:
+passwords are hashed with bcrypt (cost 12) in registration and in the admin seed, the hash is hidden
+from queries and never returned, the global pipe rejects unknown fields, and the global login and
+role guards are tested end to end in the login tests. Claude wrote one file,
+test/backend-enforcement.e2e-spec.ts (12 tests), and no production code. It registers accounts
+through the API in the -test database and checks that the stored hash is bcrypt with the project
+cost and that no plain password is stored, that two accounts with the same password get different
+hashes (salted), that the password and the hash are never sent back or repeated in an error, and
+that registration rejects every field the server controls (role, status, passwordHash,
+failedLoginAttempts, consentAcceptedAt, createdAt, id, _id) without creating an account. The tests
+delete their own accounts one by one by id. Claude could not install packages or run the tests in
+its own workspace, so it only formatted the file with Prettier and checked its syntax, then put the
+file into my project folder. I created the branch and ran format, lint, typecheck, the unit tests
+(300 passed), the end-to-end tests (99 passed, 12 of them new) and the build myself.
+Accepted, changed, or rejected:
+Accepted: the finding that no production code was needed, and the test file. Changed: my first
+end-to-end run failed on one test, because Claude had built the "rejected" password from a random
+UUID that contains digits, so the password rule accepted it; Claude replaced it with a fixed text
+without digits and the next run passed. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/ACC-05-account-lockout-after-failed-logins / #11
+Related Requirement: ACC-05
+Prompt:
+I asked Claude to develop ACC-05 (after 5 consecutive failed login attempts the system locks the
+account for 15 minutes and shows a lockout message; a successful login resets the counter), after
+checking that it does not depend on anything that is not finished yet.
+How the output was used:
+Claude checked the dependencies first: ACC-05 depends only on ACC-04, which is merged, and no other
+requirement depends on ACC-05. It then read the issue, the specification, the user schema (which
+already has failedLoginAttempts and lockedUntil) and the login code and tests, told me its design
+decisions, and wrote the code into my project folder. The constants (5 attempts, 15 minutes, the
+lockout message) are in auth.constants.ts. The three database operations are in UsersService:
+recordFailedLogin (one atomic $inc, and the lock is set only on an account that has no active lock),
+clearExpiredLock and resetFailedLogins. The rule is in AuthService.login: a locked account is refused
+with 429 before its password is looked at, the 5th wrong password already gets the 429 answer with
+the minutes left, an expired lock is cleared so the user gets 5 new attempts, a successful login
+resets the count, and unknown emails and deactivated accounts (ACC-12) are never counted or locked.
+Claude also documented the 429 answer in Swagger, added a lockout section to the auth README (with
+the known trade-off that the message shows an email has an account), added 28 unit tests and wrote
+test/auth-lockout.e2e-spec.ts (18 tests, including ten wrong passwords sent at the same moment and
+the end of a lock). Claude could not install packages or run the tests in its own workspace, so it
+only formatted the files with Prettier and checked their syntax, then put them into my project
+folder. I created the branch and ran format, lint, typecheck, the unit tests (328 passed), the
+end-to-end tests (117 passed, 18 of them new) and the build myself.
+Accepted, changed, or rejected:
+Accepted: the design (429 for a locked account, the lock checked before the password, the count
+starting again after the lock, no counting of unknown or deactivated accounts), the code and the
+tests. Changed: my first end-to-end run printed a Mongoose deprecation warning for every failed
+login, because Claude had used the option { new: true } in recordFailedLogin; Claude changed it to
+{ returnDocument: 'after' } and I ran the checks again. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-01-itinerary-schemas / #66
+Related Requirement: ITN-01, ITN-05, ITN-09, ITN-10, ITN-14, ITN-16, ITN-20, ITN-21 (entities only)
+Prompt:
+I gave Claude the development plan and my issue list and said I am member 8 (itineraries and
+currency). Claude offered to plan the schema pull request and ITN-01, and I asked it to do the work.
+How the output was used:
+Claude read specs/travel-platform.md, the ITN rows of the workbook, AGENTS.md and the shared code in
+backend/src/common, then wrote the files of this branch: the Itinerary entity with its embedded day,
+activity, budget entry, transport cost and clone source, the enums and constants, the create, update
+and response DTOs, the module registration, the unit tests and the module README. Claude ran format,
+lint, typecheck, build and the unit tests in its own workspace. It has no connection string, so it
+did not run anything against our Atlas databases.
+Accepted, changed, or rejected:
+The design follows the data model in the spec: one document per itinerary, nothing derived stored
+except dayCount, dates as YYYY-MM-DD strings, money as whole minor units. Claude left out the
+exchange_rates entity (it comes with ITN-18) and kept the moderation enum inside the module, because
+a shared enum needs its own pull request.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. I also started the API against the
+shared database and it connected. I changed nothing and rejected nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-01-itinerary-crud / #66
+Related Requirement: ITN-01
+Prompt:
+In the same chat as the schema branch, I asked Claude to implement ITN-01 (create, edit and delete
+an itinerary) on top of the schemas.
+How the output was used:
+Claude wrote the mapper, the service (create, update, remove, findEntityOrThrow), the controller with
+its Swagger documentation, the module wiring, the unit tests and test/itineraries.e2e-spec.ts (19
+tests). It ran format, lint, typecheck, build and the unit tests in its own workspace. It has no
+connection string, so it ran the end-to-end file only against a local MongoDB-compatible stand-in
+(FerretDB), where the 19 tests passed. It did not run them on real MongoDB or try the routes in
+Swagger.
+Accepted, changed, or rejected:
+Changed by Claude after its own checks: (1) a PATCH that sent a field as null would have failed at
+save, so absent and null fields are now both left unchanged; (2) the first version was written
+before ACC-04 was merged and had a temporary 401 check in the controller and no logged-in
+end-to-end tests. After the authentication guard reached develop, Claude removed the check and
+rewrote the end-to-end tests to use a logged-in user.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger, POST /api/itineraries
+answered 401 before I logged in. After logging in it created an itinerary (201, private, owned by my
+account), PATCH with an empty title answered 400, DELETE answered 204 and opening the itinerary
+afterwards answered 404. I changed nothing and rejected nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-03-list-itineraries / #67
+Related Requirement: ITN-03
+Prompt:
+I told Claude that my goal for the day was to finish my wave 2 issues, and it continued in the same
+chat with ITN-03 (list my itineraries, open one).
+How the output was used:
+Claude wrote the day and detail response DTOs, the mapper functions that number and date the days,
+findMine and findOne in the service, the two GET routes with their Swagger documentation, and the
+unit and end-to-end tests. It ran format, lint, typecheck, build and the unit tests in its own
+workspace, and the end-to-end file against a local MongoDB-compatible stand-in (FerretDB), not real
+MongoDB.
+Accepted, changed, or rejected:
+Design choices by Claude: the list returns the summary without the days; the detail route is for the
+owner only, because reading a public itinerary of someone else is ITN-21; a second sort key (_id)
+keeps the page order fixed.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger, GET /api/itineraries
+returned my itinerary with meta total 1, and GET /api/itineraries/{id} returned it with its two
+days, numbered 1 and 2 and dated 2026-12-20 and 2026-12-21. Changed after my check: I noticed that
+the Swagger example of the detail response showed dayCount 0 next to a list with one day, and Claude
+corrected the example to 1. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-05-days-and-cities / #68
+Related Requirement: ITN-05
+Prompt:
+Continuing my wave 2 issues in the same chat, Claude implemented ITN-05 (add days to an itinerary
+and edit each day's city and notes, at most 60 days).
+How the output was used:
+Claude wrote the add-day and update-day DTOs, addDay and updateDay in the service, the two routes
+with their Swagger documentation, and the unit and end-to-end tests. It ran format, lint, typecheck,
+build and the unit tests in its own workspace, and the end-to-end file against a local
+MongoDB-compatible stand-in (FerretDB), not real MongoDB.
+Accepted, changed, or rejected:
+Design choices by Claude: a new day always goes at the end; adding a day is one conditional update
+($push and $inc where dayCount is below 60) so the limit holds under concurrent requests; a full
+itinerary answers 409; the city is checked against the cities collection but not against the
+itinerary's countries, because the workbook does not ask for it.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger I added two days in
+cairo (201 each, the second with notes), and edited the notes of day 1 with PATCH
+/api/itineraries/{id}/days/{dayId} (200; the city stayed and day 2 did not change). My login expired
+after 10 minutes during this check and the route answered 401 until I logged in again. I changed
+nothing and rejected nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-20-itinerary-visibility / #77
+Related Requirement: ITN-20
+Prompt:
+Continuing my wave 2 issues in the same chat, Claude implemented ITN-20 (set an itinerary's
+visibility to public or private).
+How the output was used:
+Claude added the visibility field to UpdateItineraryDto, applied it in the service's update method,
+updated the Swagger text of the PATCH route, and wrote the unit and end-to-end tests. It ran format,
+lint, typecheck, build and the unit tests in its own workspace, and the end-to-end file against a
+local MongoDB-compatible stand-in (FerretDB), not real MongoDB.
+Accepted, changed, or rejected:
+Design choices by Claude: visibility is part of PATCH /api/itineraries/:id as the endpoint table
+says, not a new route; only the update DTO has the field, so a new itinerary is always private.
+Changed by Claude after its own checks: the first version broke the type check of an existing DTO
+test, and Claude fixed the test helper's type.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger, PATCH
+/api/itineraries/{id} with visibility public answered 200 and the itinerary showed as public. I
+changed nothing and rejected nothing.
+================================================

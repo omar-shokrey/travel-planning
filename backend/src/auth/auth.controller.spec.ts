@@ -1,6 +1,6 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
 import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
@@ -9,6 +9,7 @@ import type { AuthCookiesService } from './auth-cookies.service';
 import { AuthController } from './auth.controller';
 import type { AuthService } from './auth.service';
 import { ACCOUNT_SUSPENDED_MESSAGE } from './auth.constants';
+import type { ChangePasswordDto } from './dto/change-password.dto';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
 
@@ -25,6 +26,7 @@ const created: UserResponseDto = {
   email: 'sara@example.com',
   role: Role.User,
   status: UserStatus.Active,
+  mustChangePassword: false,
   createdAt: '2026-11-14T10:00:00.000Z',
 };
 
@@ -42,16 +44,26 @@ function setup() {
   const authService = {
     register: jest.fn().mockResolvedValue(created),
     login: jest.fn().mockResolvedValue({ user: created, tokens }),
+    logout: jest.fn().mockResolvedValue(undefined),
+    refresh: jest.fn().mockResolvedValue({ user: created, tokens }),
     me: jest.fn().mockResolvedValue(created),
+    changePassword: jest.fn().mockResolvedValue(created),
   };
-  const authCookies = { setAuthCookies: jest.fn() };
+  const authCookies = {
+    setAuthCookies: jest.fn(),
+    clearAuthCookies: jest.fn(),
+    // The request below is a stand-in; the cookies it carries are told here.
+    readAccessToken: jest.fn().mockReturnValue('an-access-token'),
+    readRefreshToken: jest.fn().mockReturnValue('a-refresh-token'),
+  };
+  const request = {} as Request;
   const response = {} as Response;
   const controller = new AuthController(
     authService as unknown as AuthService,
     authCookies as unknown as AuthCookiesService,
   );
 
-  return { authService, authCookies, response, controller };
+  return { authService, authCookies, request, response, controller };
 }
 
 describe('AuthController', () => {
@@ -113,6 +125,112 @@ describe('AuthController', () => {
     });
   });
 
+  describe('logout (ACC-06)', () => {
+    it('hands the tokens of the request to the service and clears both cookies', async () => {
+      const { authService, authCookies, request, response, controller } =
+        setup();
+
+      await expect(
+        controller.logout(request, response),
+      ).resolves.toBeUndefined();
+
+      expect(authCookies.readRefreshToken).toHaveBeenCalledWith(request);
+      expect(authCookies.readAccessToken).toHaveBeenCalledWith(request);
+      expect(authService.logout).toHaveBeenCalledWith({
+        refreshToken: 'a-refresh-token',
+        accessToken: 'an-access-token',
+      });
+      expect(authCookies.clearAuthCookies).toHaveBeenCalledWith(response);
+    });
+
+    it('revokes the session before it clears the cookies', async () => {
+      const { authService, authCookies, request, response, controller } =
+        setup();
+
+      await controller.logout(request, response);
+
+      const [revoked] = authService.logout.mock.invocationCallOrder;
+      const [cleared] = authCookies.clearAuthCookies.mock.invocationCallOrder;
+      expect(revoked).toBeLessThan(cleared);
+    });
+
+    it('clears the cookies even when the request carries none', async () => {
+      const { authService, authCookies, request, response, controller } =
+        setup();
+      authCookies.readAccessToken.mockReturnValue(undefined);
+      authCookies.readRefreshToken.mockReturnValue(undefined);
+
+      await controller.logout(request, response);
+
+      expect(authService.logout).toHaveBeenCalledWith({
+        refreshToken: undefined,
+        accessToken: undefined,
+      });
+      expect(authCookies.clearAuthCookies).toHaveBeenCalledWith(response);
+    });
+
+    it('is open to everyone, so an expired access token cannot block it', () => {
+      expect(
+        new Reflector().get<boolean>(
+          IS_PUBLIC_KEY,
+          AuthController.prototype.logout,
+        ),
+      ).toBe(true);
+    });
+  });
+
+  describe('refresh (ACC-06)', () => {
+    it('hands the refresh token of the request to the service and returns the user', async () => {
+      const { authService, authCookies, request, response, controller } =
+        setup();
+
+      expect(await controller.refresh(request, response)).toBe(created);
+
+      expect(authCookies.readRefreshToken).toHaveBeenCalledWith(request);
+      expect(authService.refresh).toHaveBeenCalledWith('a-refresh-token');
+    });
+
+    it('sets the new cookies and keeps the tokens out of the body', async () => {
+      const { authCookies, request, response, controller } = setup();
+
+      const body = await controller.refresh(request, response);
+
+      expect(authCookies.setAuthCookies).toHaveBeenCalledWith(response, tokens);
+      expect(JSON.stringify(body)).not.toContain(tokens.accessToken);
+      expect(JSON.stringify(body)).not.toContain(tokens.refreshToken);
+    });
+
+    it('sets no cookie, and keeps the old ones, when the refresh fails', async () => {
+      const { authService, authCookies, request, response, controller } =
+        setup();
+      const refused = new UnauthorizedException('You must log in to do this');
+      authService.refresh.mockRejectedValueOnce(refused);
+
+      await expect(controller.refresh(request, response)).rejects.toBe(refused);
+      expect(authCookies.setAuthCookies).not.toHaveBeenCalled();
+      expect(authCookies.clearAuthCookies).not.toHaveBeenCalled();
+    });
+
+    it('passes undefined to the service when the request has no refresh cookie', async () => {
+      const { authService, authCookies, request, response, controller } =
+        setup();
+      authCookies.readRefreshToken.mockReturnValue(undefined);
+
+      await controller.refresh(request, response);
+
+      expect(authService.refresh).toHaveBeenCalledWith(undefined);
+    });
+
+    it('is open to everyone, because the access token is what has expired', () => {
+      expect(
+        new Reflector().get<boolean>(
+          IS_PUBLIC_KEY,
+          AuthController.prototype.refresh,
+        ),
+      ).toBe(true);
+    });
+  });
+
   describe('me (ACC-04)', () => {
     it('gives the service the id of the logged-in user and returns its answer', async () => {
       const { authService, controller } = setup();
@@ -126,6 +244,36 @@ describe('AuthController', () => {
         new Reflector().get<boolean | undefined>(
           IS_PUBLIC_KEY,
           AuthController.prototype.me,
+        ),
+      ).toBeUndefined();
+    });
+  });
+
+  describe('changePassword (ACC-08)', () => {
+    const change: ChangePasswordDto = {
+      currentPassword: 'Passw0rdOK',
+      newPassword: 'N3wPassword',
+    };
+
+    it('gives the service the id of the logged-in user, the access cookie and the body, and returns its answer', async () => {
+      const { authService, authCookies, request, controller } = setup();
+
+      expect(await controller.changePassword(created.id, request, change)).toBe(
+        created,
+      );
+      expect(authCookies.readAccessToken).toHaveBeenCalledWith(request);
+      expect(authService.changePassword).toHaveBeenCalledWith(
+        created.id,
+        'an-access-token',
+        change,
+      );
+    });
+
+    it('needs a login', () => {
+      expect(
+        new Reflector().get<boolean | undefined>(
+          IS_PUBLIC_KEY,
+          AuthController.prototype.changePassword,
         ),
       ).toBeUndefined();
     });
