@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiCookieAuth,
@@ -8,10 +8,14 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Role } from '../common/enums/role.enum';
 import { CreatePostDto } from './dto/create-post.dto';
+import { MyPostResponseDto } from './dto/my-post-response.dto';
 import { PostResponseDto } from './dto/post-response.dto';
 import { PostsService } from './posts.service';
 
@@ -48,5 +52,33 @@ export class PostsController {
     @CurrentUser('id') userId: string,
   ): Promise<PostResponseDto> {
     return this.posts.create(dto, userId);
+  }
+
+  // Declared before any `GET /posts/:id` route (BLG-02), so `mine` is never
+  // read as a post id.
+  @Get('mine')
+  @Roles(Role.User)
+  @ApiOperation({
+    summary: 'List my posts (BLG-03)',
+    description:
+      'Registered users only. The posts of the logged-in user, drafts and published, newest first, 10 per page by default (GEN-05). Each row has the title, the status, the dates and the like and comment counts. An empty page is `items: []`.',
+  })
+  @ApiPaginatedResponse(MyPostResponseDto)
+  @ApiBadRequestResponse({
+    description:
+      '`page` or `limit` is invalid (limit at most 50), or the query has a parameter that is not allowed',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Not logged in, or the access token is invalid or expired',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The caller is not a registered user (moderators and admins have no posts), or the account is suspended',
+  })
+  listMine(
+    @CurrentUser('id') userId: string,
+    @Query() query: PaginationQueryDto,
+  ): Promise<PaginatedResponse<MyPostResponseDto>> {
+    return this.posts.listMine(userId, query);
   }
 }

@@ -1,4 +1,5 @@
 import type { Types } from 'mongoose';
+import type { MyPostResponseDto } from '../dto/my-post-response.dto';
 import type { PostResponseDto } from '../dto/post-response.dto';
 import type { BlogPost } from '../models/blog-post.schema';
 
@@ -31,5 +32,31 @@ export function toPostResponse(post: PostSource): PostResponseDto {
     images: post.images,
     createdAt: post.createdAt.toISOString(),
     updatedAt: post.updatedAt.toISOString(),
+  };
+}
+
+/** The fields a "my posts" row reads (BLG-03). */
+export type MyPostSource = Pick<
+  BlogPost,
+  | 'title'
+  | 'status'
+  | 'publishedAt'
+  | 'likeCount'
+  | 'commentCount'
+  | 'createdAt'
+  | 'updatedAt'
+> & { _id: Types.ObjectId };
+
+/** Turns a stored post into one row of "my posts" (BLG-03). */
+export function toMyPostResponse(post: MyPostSource): MyPostResponseDto {
+  return {
+    id: post._id.toString(),
+    title: post.title,
+    status: post.status,
+    ...(post.publishedAt && { publishedAt: post.publishedAt.toISOString() }),
+    createdAt: post.createdAt.toISOString(),
+    updatedAt: post.updatedAt.toISOString(),
+    likeCount: post.likeCount,
+    commentCount: post.commentCount,
   };
 }

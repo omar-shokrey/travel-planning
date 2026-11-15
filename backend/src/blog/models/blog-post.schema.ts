@@ -40,9 +40,20 @@ export class BlogPost {
   @Prop({ type: [String], default: [] })
   images: string[];
 
+  /** Kept in step with the `comments` collection by CommentsService (BLG-05). */
+  @Prop({ type: Number, default: 0, min: 0 })
+  commentCount: number;
+
+  /** Kept in step with the `likes` collection by LikesService (BLG-06). */
+  @Prop({ type: Number, default: 0, min: 0 })
+  likeCount: number;
+
   createdAt: Date;
   updatedAt: Date;
 }
 
 export type BlogPostDocument = HydratedDocument<BlogPost>;
 export const BlogPostSchema = SchemaFactory.createForClass(BlogPost);
+
+/** "My posts" (BLG-03): one author's posts, newest first. */
+BlogPostSchema.index({ authorId: 1, createdAt: -1, _id: -1 });
