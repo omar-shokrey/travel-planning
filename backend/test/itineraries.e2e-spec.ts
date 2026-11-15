@@ -34,7 +34,7 @@ interface SwaggerOperation {
   responses: Record<string, unknown>;
 }
 
-describe('Itineraries: create, edit, delete (e2e, ITN-01)', () => {
+describe('Itineraries (e2e, ITN-01, ITN-03)', () => {
   let app: NestExpressApplication;
   let users: Model<User>;
   let countries: Model<Country>;
@@ -123,6 +123,8 @@ describe('Itineraries: create, edit, delete (e2e, ITN-01)', () => {
 
     it.each([
       ['post', '/api/itineraries'],
+      ['get', '/api/itineraries'],
+      ['get', `/api/itineraries/${id}`],
       ['patch', `/api/itineraries/${id}`],
       ['delete', `/api/itineraries/${id}`],
     ] as const)('refuses %s %s', async (method, path) => {
@@ -225,6 +227,140 @@ describe('Itineraries: create, edit, delete (e2e, ITN-01)', () => {
     });
   });
 
+  describe('GET /api/itineraries', () => {
+    it('lists only my itineraries, most recently updated first', async () => {
+      const user = await createUser();
+      const titles = ['First', 'Second', 'Third'];
+      const ids: string[] = [];
+      for (const title of titles) {
+        const response = await create(user.cookie, { ...validBody(), title });
+        ids.push(response.body.id as string);
+      }
+      // Editing the first one makes it the most recently updated.
+      await http()
+        .patch(`/api/itineraries/${ids[0]}`)
+        .set('Cookie', user.cookie)
+        .send({ title: 'First, edited' })
+        .expect(200);
+      await existing();
+
+      const response = await http()
+        .get('/api/itineraries')
+        .set('Cookie', user.cookie)
+        .expect(200);
+
+      expect(
+        (response.body.items as { title: string }[]).map((item) => item.title),
+      ).toEqual(['First, edited', 'Third', 'Second']);
+      expect(response.body.items[0]).toEqual({
+        id: ids[0],
+        ownerId: user.id,
+        title: 'First, edited',
+        countries: [TEST_COUNTRY],
+        startDate: '2026-12-20',
+        visibility: 'private',
+        dayCount: 0,
+      });
+      expect(response.body.meta).toEqual({
+        page: 1,
+        limit: 10,
+        total: 3,
+        totalPages: 1,
+      });
+    });
+
+    it('returns an empty list to a user with no itineraries', async () => {
+      const user = await createUser();
+
+      const response = await http()
+        .get('/api/itineraries')
+        .set('Cookie', user.cookie)
+        .expect(200);
+
+      expect(response.body).toEqual({
+        items: [],
+        meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
+      });
+    });
+
+    it('returns the requested page', async () => {
+      const user = await createUser();
+      for (const title of ['A', 'B', 'C']) {
+        await create(user.cookie, { ...validBody(), title });
+      }
+
+      const response = await http()
+        .get('/api/itineraries?page=2&limit=2')
+        .set('Cookie', user.cookie)
+        .expect(200);
+
+      expect(response.body.items).toHaveLength(1);
+      expect(response.body.items[0].title).toBe('A');
+      expect(response.body.meta).toEqual({
+        page: 2,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+    });
+
+    it('rejects a page size above 50', async () => {
+      const response = await http()
+        .get('/api/itineraries?limit=51')
+        .set('Cookie', owner.cookie);
+
+      expect(response.status).toBe(400);
+      expect(response.body.errors).toEqual([
+        { field: 'limit', messages: expect.any(Array) },
+      ]);
+    });
+  });
+
+  describe('GET /api/itineraries/:id', () => {
+    it('returns my itinerary with its days', async () => {
+      const id = await existing();
+
+      const response = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', owner.cookie)
+        .expect(200);
+
+      expect(response.body).toEqual({
+        id,
+        ownerId: owner.id,
+        title: 'Ten days in Egypt',
+        countries: [TEST_COUNTRY],
+        startDate: '2026-12-20',
+        visibility: 'private',
+        dayCount: 0,
+        days: [],
+      });
+    });
+
+    it('answers 403 to another user: a private itinerary is for its owner only', async () => {
+      const id = await existing();
+
+      const response = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', otherUser.cookie);
+
+      expect(response.status).toBe(403);
+      expect(JSON.stringify(response.body)).not.toContain('Ten days in Egypt');
+    });
+
+    it('answers 404 for an id that has no itinerary and 400 for a bad id', async () => {
+      const missing = await http()
+        .get(`/api/itineraries/${new Types.ObjectId().toString()}`)
+        .set('Cookie', owner.cookie);
+      const badId = await http()
+        .get('/api/itineraries/not-an-id')
+        .set('Cookie', owner.cookie);
+
+      expect(missing.status).toBe(404);
+      expect(badId.status).toBe(400);
+    });
+  });
+
   describe('PATCH /api/itineraries/:id', () => {
     it('changes only the fields that are sent', async () => {
       const id = await existing();
@@ -320,6 +456,44 @@ describe('Itineraries: create, edit, delete (e2e, ITN-01)', () => {
       expect(response.status).toBe(403);
       expect(await itineraries.findById(id).lean()).not.toBeNull();
     });
+  });
+
+  it('documents the ITN-03 routes in Swagger', async () => {
+    const response = await http().get('/api/docs-json').expect(200);
+    const paths = response.body.paths as Record<
+      string,
+      Record<string, SwaggerOperation>
+    >;
+    const list = paths['/api/itineraries'].get;
+    const detail = paths['/api/itineraries/{id}'].get;
+
+    for (const operation of [list, detail]) {
+      expect(operation.tags).toEqual(['Itineraries']);
+      expect(operation.description).toMatch(/^ITN-03\. /);
+    }
+    expect(Object.keys(list.responses)).toEqual(
+      expect.arrayContaining(['200', '400', '401']),
+    );
+    expect(Object.keys(detail.responses)).toEqual(
+      expect.arrayContaining(['200', '400', '401', '403', '404']),
+    );
+    expect(Object.keys(response.body.components.schemas)).toEqual(
+      expect.arrayContaining([
+        'ItineraryResponseDto',
+        'ItineraryDetailResponseDto',
+        'ItineraryDayResponseDto',
+        'PaginationMeta',
+      ]),
+    );
+    // The example of the detail response must not contradict itself.
+    const schemas = response.body.components.schemas as Record<
+      string,
+      { properties: Record<string, { example?: unknown }> }
+    >;
+    expect(schemas.ItineraryDetailResponseDto.properties.dayCount.example).toBe(
+      1,
+    );
+    expect(schemas.ItineraryResponseDto.properties.dayCount.example).toBe(0);
   });
 
   it('documents the ITN-01 routes in Swagger', async () => {
