@@ -812,3 +812,29 @@ HotelResponseDto is unchanged. Change to Asser's HotelsService: one new public m
 findManagedEntityOrThrow, which reuses his moderator check so the ownership rule stays in one
 place; it has its own unit tests. The branch is pushed only after I have read the diff.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Ahmed Rashad (Mado)
+Tool: Claude Code (VS Code extension)
+Branch / Issue: feature/HTL-10-hotel-cancellation-tiers / #51
+Related Requirement: HTL-10
+Prompt:
+Continuing my wave 2 hotel issues in the same Claude Code session (the prompt is in my HTL-02
+entry), Claude Code implemented HTL-10 (the hotel moderator defines cancellation tiers, applied
+with the selection rule of FLT-09).
+How the output was used:
+Claude Code branched from my HTL-09 branch and added the embedded CancellationTier schema, the
+tier list in the request and response DTOs and the mapper, the selection rule as a pure function
+(selectRefundPercent), the tiers in PUT /api/hotels/:id/policies and on the hotel page, the unit
+tests, more end-to-end tests and a section in the hotels README. It ran format, lint, typecheck,
+build, the unit tests and the hotel end-to-end files on my laptop: 52 unit suites and 687 tests
+passed, the 3 hotel end-to-end files passed with 28 tests (14 of them in
+hotel-policies.e2e-spec.ts), lint reported 0 warnings, and the type check and the build were clean.
+Accepted, changed, or rejected:
+Design choices by Claude Code: the tiers use the same PUT route as the times, as in the endpoint
+table, and are required in the body, with an empty list meaning no refund; two tiers with the same
+daysBefore answer 400; at most 10 tiers per hotel, a limit Claude Code chose because the workbook
+gives none; tiers are stored highest threshold first; the percentages are not forced to rise with
+the threshold. The branch is pushed only after I have read the diff.
+================================================
