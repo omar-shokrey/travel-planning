@@ -302,6 +302,51 @@ describe('ItinerariesService', () => {
       expect(countryFind).not.toHaveBeenCalled();
     });
 
+    it('makes the itinerary public, and private again (ITN-20)', async () => {
+      const itinerary = stored();
+
+      const published = await service.update(
+        itinerary.id as string,
+        { visibility: ItineraryVisibility.Public },
+        ownerId,
+      );
+      const hidden = await service.update(
+        itinerary.id as string,
+        { visibility: ItineraryVisibility.Private },
+        ownerId,
+      );
+
+      expect(published.visibility).toBe(ItineraryVisibility.Public);
+      expect(hidden.visibility).toBe(ItineraryVisibility.Private);
+      expect(itinerary.save).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps the visibility when only other fields are sent (ITN-20)', async () => {
+      const itinerary = stored();
+      itinerary.visibility = ItineraryVisibility.Public;
+
+      const response = await service.update(
+        itinerary.id as string,
+        { title: 'Renamed' },
+        ownerId,
+      );
+
+      expect(response.visibility).toBe(ItineraryVisibility.Public);
+    });
+
+    it('does not let another user change the visibility (ITN-20)', async () => {
+      const itinerary = stored(otherUserId);
+
+      await expect(
+        service.update(
+          itinerary.id as string,
+          { visibility: ItineraryVisibility.Public },
+          ownerId,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(itinerary.visibility).toBe(ItineraryVisibility.Private);
+    });
+
     it('leaves a field that is sent as null unchanged', async () => {
       const itinerary = stored();
       const dto = { title: null, countries: null, startDate: null };
