@@ -2,7 +2,7 @@ import { PostsService } from './posts.service';
 import { PostStatus } from './models/post-status.enum';
 
 describe('PostsService', () => {
-  it('creates a post for the authenticated user', async () => {
+  it('creates a draft post for the authenticated user', async () => {
     const createdPost = {
       id: 'post-1',
       authorId: {
@@ -11,8 +11,11 @@ describe('PostsService', () => {
       title: 'Three days in Cairo',
       body: 'I spent three amazing days exploring Cairo.',
       status: PostStatus.Draft,
+      publishedAt: undefined,
       tags: [],
       images: [],
+      createdAt: new Date('2026-11-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-11-15T10:00:00.000Z'),
     };
 
     const posts = {
@@ -33,6 +36,7 @@ describe('PostsService', () => {
       title: 'Three days in Cairo',
       body: 'I spent three amazing days exploring Cairo.',
       authorId: expect.anything(),
+      publishedAt: undefined,
     });
 
     expect(result).toEqual({
@@ -41,12 +45,19 @@ describe('PostsService', () => {
       title: 'Three days in Cairo',
       body: 'I spent three amazing days exploring Cairo.',
       status: PostStatus.Draft,
+      publishedAt: undefined,
       tags: [],
       images: [],
+      createdAt: new Date('2026-11-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-11-15T10:00:00.000Z'),
     });
   });
 
-  it('creates a published post with tags', async () => {
+  it('creates a published post with tags and publishedAt', async () => {
+    const publishedAt = new Date('2026-11-15T10:00:00.000Z');
+    const createdAt = new Date('2026-11-15T10:00:00.000Z');
+    const updatedAt = new Date('2026-11-15T10:00:00.000Z');
+
     const createdPost = {
       id: 'post-2',
       authorId: {
@@ -55,8 +66,11 @@ describe('PostsService', () => {
       title: 'Best places in Cairo',
       body: 'Here are some of my favorite places in Cairo.',
       status: PostStatus.Published,
+      publishedAt,
       tags: ['cairo', 'egypt'],
       images: [],
+      createdAt,
+      updatedAt,
     };
 
     const posts = {
@@ -81,6 +95,7 @@ describe('PostsService', () => {
       status: PostStatus.Published,
       tags: ['cairo', 'egypt'],
       authorId: expect.anything(),
+      publishedAt: expect.any(Date),
     });
 
     expect(result).toEqual({
@@ -89,8 +104,11 @@ describe('PostsService', () => {
       title: 'Best places in Cairo',
       body: 'Here are some of my favorite places in Cairo.',
       status: PostStatus.Published,
+      publishedAt,
       tags: ['cairo', 'egypt'],
       images: [],
+      createdAt,
+      updatedAt,
     });
   });
 });

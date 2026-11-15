@@ -3,7 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CreatePostDto } from './dto/create-post.dto';
 import { PostResponseDto } from './dto/post-response.dto';
-import { BlogPost, BlogPostDocument } from './models/blog-post.schema';
+import { BlogPost } from './models/blog-post.schema';
+import { PostStatus } from './models/post-status.enum';
 import { toPostResponse } from './mappers/post.mapper';
 
 @Injectable()
@@ -17,8 +18,9 @@ export class PostsService {
     const post = await this.posts.create({
       ...dto,
       authorId: new Types.ObjectId(userId),
+      publishedAt: dto.status === PostStatus.Published ? new Date() : undefined,
     });
 
-    return toPostResponse(post as BlogPostDocument);
+    return toPostResponse(post);
   }
 }

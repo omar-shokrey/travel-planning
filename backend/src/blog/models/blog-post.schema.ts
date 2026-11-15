@@ -15,7 +15,7 @@ export class BlogPost {
   @Prop({ required: true, trim: true })
   title: string;
 
-  @Prop({ required: true })
+  @Prop({ required: true, trim: true })
   body: string;
 
   @Prop({
@@ -24,6 +24,9 @@ export class BlogPost {
     default: PostStatus.Draft,
   })
   status: PostStatus;
+
+  @Prop({ type: Date, index: true })
+  publishedAt?: Date;
 
   @Prop({ type: [String], default: [] })
   tags: string[];

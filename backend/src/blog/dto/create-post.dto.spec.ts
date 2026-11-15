@@ -75,6 +75,24 @@ describe('CreatePostDto (BLG-01)', () => {
     expect(await invalidFields({ ...valid, [field]: value })).toEqual([field]);
   });
 
+  it('rejects a blank title after trimming', async () => {
+    expect(
+      await invalidFields({
+        ...valid,
+        title: '   ',
+      }),
+    ).toEqual(['title']);
+  });
+
+  it('rejects a blank body after trimming', async () => {
+    expect(
+      await invalidFields({
+        ...valid,
+        body: '   ',
+      }),
+    ).toEqual(['body']);
+  });
+
   it('rejects an invalid post status', async () => {
     expect(
       await invalidFields({
@@ -82,6 +100,15 @@ describe('CreatePostDto (BLG-01)', () => {
         status: 'invalid-status',
       }),
     ).toEqual(['status']);
+  });
+
+  it('trims and lowercases tags and removes duplicates and empty tags', async () => {
+    const dto = await parse({
+      ...valid,
+      tags: [' Cairo ', 'EGYPT', 'cairo', ' ', ' Travel '],
+    });
+
+    expect(dto.tags).toEqual(['cairo', 'egypt', 'travel']);
   });
 
   it('rejects tags that are not an array', async () => {
@@ -98,6 +125,24 @@ describe('CreatePostDto (BLG-01)', () => {
       await invalidFields({
         ...valid,
         tags: ['cairo', 123],
+      }),
+    ).toEqual(['tags']);
+  });
+
+  it('rejects more than five tags', async () => {
+    expect(
+      await invalidFields({
+        ...valid,
+        tags: ['one', 'two', 'three', 'four', 'five', 'six'],
+      }),
+    ).toEqual(['tags']);
+  });
+
+  it('rejects a tag longer than 30 characters', async () => {
+    expect(
+      await invalidFields({
+        ...valid,
+        tags: ['a'.repeat(31)],
       }),
     ).toEqual(['tags']);
   });

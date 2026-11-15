@@ -8,7 +8,10 @@ export function toPostResponse(post: BlogPostDocument): PostResponseDto {
     title: post.title,
     body: post.body,
     status: post.status,
+    publishedAt: post.publishedAt,
     tags: post.tags,
     images: post.images,
+    createdAt: post.createdAt,
+    updatedAt: post.updatedAt,
   };
 }
