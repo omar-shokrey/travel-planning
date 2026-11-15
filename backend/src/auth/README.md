@@ -4,11 +4,11 @@ Registration, login, logout, the authentication cookies and the current user (`/
 
 ## Built so far
 
-| Route                     | Requirement | Access             |
-| ------------------------- | ----------- | ------------------ |
-| `POST /api/auth/register` | ACC-01      | Public             |
-| `POST /api/auth/login`    | ACC-04      | Public             |
-| `GET /api/auth/me`        | ACC-04      | Any logged-in user |
+| Route                     | Requirement    | Access             |
+| ------------------------- | -------------- | ------------------ |
+| `POST /api/auth/register` | ACC-01         | Public             |
+| `POST /api/auth/login`    | ACC-04, ACC-05 | Public             |
+| `GET /api/auth/me`        | ACC-04         | Any logged-in user |
 
 `AuthCookiesService` sets and clears the two authentication cookies (ACC-19). `AuthTokensService` signs and checks the tokens. `JwtAuthGuard` is the guard that protects every route (ACC-04).
 
@@ -32,5 +32,18 @@ Registration, login, logout, the authentication cookies and the current user (`/
 - **A suspended account gets 403 "Your account is suspended"**, as the requirement asks, but only after the password is right, so the suspension is not shown to someone who does not know the password. The guard also refuses a suspended user who still has a valid token.
 - **A missing, expired or invalid token answers 401 "You must log in to do this"**, whatever the reason, so the answer does not help someone who forges tokens.
 - **`GET /api/auth/me` is here only as the smallest protected route**, to prove that the cookie works and so that the frontend can learn the current user (ACC-19). ACC-19 can extend it.
-- **Not built here:** the lockout after 5 failed attempts (ACC-05), logout, the refresh route and the 30-minute inactivity limit (ACC-06). Until the refresh route exists, the access token expires after `ACCESS_TOKEN_MINUTES` and the user logs in again.
+- **Not built here:** logout, the refresh route and the 30-minute inactivity limit (ACC-06). Until the refresh route exists, the access token expires after `ACCESS_TOKEN_MINUTES` and the user logs in again.
 - **Swagger:** log in with `POST /api/auth/login` in Swagger UI. The browser keeps the cookies and sends them with every later request, including the ones made by "Try it out". If the browser does not keep them over `http://localhost`, set `COOKIE_SECURE=false` in your own `backend/.env`.
+
+## Account lockout (ACC-05)
+
+The 5th wrong password in a row locks the account for 15 minutes (`MAX_FAILED_LOGIN_ATTEMPTS` and `LOCKOUT_MINUTES` in `auth.constants.ts`). The state is `failedLoginAttempts` and `lockedUntil` on the user. Neither field ever leaves the API.
+
+- **The 5th failure already gets the lockout answer.** The user does not have to try a 6th time to find out. The answer is **429**, which keeps it apart from 401 (wrong password) and 403 (suspended), so the frontend can tell the three apart by the status. The message says how many minutes are left, rounded up so nobody tries too early: "Too many failed login attempts. Your account is locked. Try again in 15 minutes."
+- **A locked account is refused before the password is looked at.** Even the right password gets 429 until the lock ends. The refused attempts are not counted and do not move the end of the lock, so an attacker cannot extend it and the owner knows exactly when it ends.
+- **When the lock ends, the count starts again.** The first login after the lock clears `lockedUntil` and sets the count to 0, so the user gets 5 new attempts and not just one. A successful login also sets the count to 0, so the failures have to be in a row. A login only writes to the database when there is something to reset.
+- **The count is one atomic `$inc`.** Ten wrong passwords that arrive at the same moment cannot read the same number and slip past the limit. The lock is set with a filter that matches only an account with no active lock, so the first failure over the limit sets it and the others leave it alone.
+- **Who is counted.** Only real accounts. An unknown email and a deactivated account (ACC-12) are never counted or locked, so they still answer a plain 401 and cannot be told from "no account". A suspended account is counted like any other, because it is a real account; its right password still gets 403 and is not counted as a failure, and it does not reset the count either, because it is not a successful login. The lock comes before the suspension message.
+- **Known trade-off.** The lockout message shows that the email has an account, but only to someone who made 5 wrong attempts on it. The requirement asks the system to "show a lockout message", so it is kept. The same 5 attempts also let anyone lock a known email for 15 minutes. That follows from the rule as the requirement states it; limiting attempts per IP address as well would be a separate feature.
+- **Where it lives.** The rule is in `AuthService.login`. The three database operations (`recordFailedLogin`, `clearExpiredLock`, `resetFailedLogins`) are in `UsersService`, which owns the `users` collection. The limits are constants and not environment variables, so no shared-layer change was needed.
+- **Not built here:** a `Retry-After` header. The exception filter builds every error response and sets no headers, so adding one is a shared-layer change for its own pull request. The message already says how long is left.
