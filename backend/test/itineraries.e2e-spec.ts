@@ -770,6 +770,15 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05)', () => {
         'PaginationMeta',
       ]),
     );
+    // The example of the detail response must not contradict itself.
+    const schemas = response.body.components.schemas as Record<
+      string,
+      { properties: Record<string, { example?: unknown }> }
+    >;
+    expect(schemas.ItineraryDetailResponseDto.properties.dayCount.example).toBe(
+      1,
+    );
+    expect(schemas.ItineraryResponseDto.properties.dayCount.example).toBe(0);
   });
 
   it('documents the ITN-01 routes in Swagger', async () => {
