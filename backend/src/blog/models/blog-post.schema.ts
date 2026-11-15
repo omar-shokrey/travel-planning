@@ -38,6 +38,10 @@ export class BlogPost {
   @Prop({ type: Number, default: 0, min: 0 })
   commentCount: number;
 
+  /** Kept in step with the `likes` collection by LikesService (BLG-06). */
+  @Prop({ type: Number, default: 0, min: 0 })
+  likeCount: number;
+
   createdAt: Date;
   updatedAt: Date;
 }
