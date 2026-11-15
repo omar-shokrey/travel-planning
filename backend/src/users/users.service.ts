@@ -1,7 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { hash } from 'bcrypt';
-import { isValidObjectId, type Model } from 'mongoose';
+import { isValidObjectId, type Model, type Types } from 'mongoose';
 import { PASSWORD_SALT_ROUNDS } from '../common/constants/password';
 import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
@@ -17,6 +17,14 @@ export interface CreateUserInput {
   password: string;
   /** When the user accepted the terms and the privacy policy. */
   consentAcceptedAt: Date;
+}
+
+/** When a run of failed logins locks an account (ACC-05). */
+export interface LockoutPolicy {
+  /** The number of failed logins in a row that locks the account. */
+  maxAttempts: number;
+  /** How long the lock lasts, in milliseconds. */
+  lockMs: number;
 }
 
 /**
@@ -72,5 +80,79 @@ export class UsersService {
       return Promise.resolve(null);
     }
     return this.users.findById(id).exec();
+  }
+
+  /**
+   * Counts one failed login of the account (ACC-05). It returns the time the
+   * account is locked until when this failure reached the limit, and `null`
+   * while the account is still open.
+   *
+   * The count is one atomic `$inc`, so requests that fail at the same moment
+   * cannot count the same number twice and slip past the limit. Only the
+   * first failure over the limit sets the lock: the others find it already
+   * set, so a second request cannot push the end of the lock back.
+   */
+  async recordFailedLogin(
+    id: Types.ObjectId,
+    policy: LockoutPolicy,
+    now: Date,
+  ): Promise<Date | null> {
+    const counted = await this.users
+      .findByIdAndUpdate(
+        id,
+        { $inc: { failedLoginAttempts: 1 } },
+        { returnDocument: 'after' },
+      )
+      .select('failedLoginAttempts')
+      .exec();
+    if (!counted || counted.failedLoginAttempts < policy.maxAttempts) {
+      return null;
+    }
+
+    const lockedUntil = new Date(now.getTime() + policy.lockMs);
+    await this.users
+      .updateOne(
+        {
+          _id: id,
+          $or: [{ lockedUntil: null }, { lockedUntil: { $lte: now } }],
+        },
+        { $set: { lockedUntil } },
+      )
+      .exec();
+    return lockedUntil;
+  }
+
+  /**
+   * Opens an account whose lock has run out, and starts its count again, so
+   * the user has the full number of attempts after the lock (ACC-05). It does
+   * nothing for an account that is not locked or is still locked.
+   */
+  async clearExpiredLock(id: Types.ObjectId, now: Date): Promise<void> {
+    await this.users
+      .updateOne(
+        { _id: id, lockedUntil: { $lte: now } },
+        { $set: { failedLoginAttempts: 0 }, $unset: { lockedUntil: 1 } },
+      )
+      .exec();
+  }
+
+  /**
+   * Forgets the failed logins of the account after a successful login
+   * (ACC-05). An account with nothing to forget is not written to, which is
+   * the case of almost every login.
+   */
+  async resetFailedLogins(id: Types.ObjectId): Promise<void> {
+    await this.users
+      .updateOne(
+        {
+          _id: id,
+          $or: [
+            { failedLoginAttempts: { $gt: 0 } },
+            { lockedUntil: { $ne: null } },
+          ],
+        },
+        { $set: { failedLoginAttempts: 0 }, $unset: { lockedUntil: 1 } },
+      )
+      .exec();
   }
 }

@@ -1,6 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { compare } from 'bcrypt';
-import type { Model } from 'mongoose';
+import { Types, type Model } from 'mongoose';
 import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import type { User } from './models/user.schema';
@@ -8,6 +8,7 @@ import {
   EMAIL_TAKEN_MESSAGE,
   UsersService,
   type CreateUserInput,
+  type LockoutPolicy,
 } from './users.service';
 
 const input: CreateUserInput = {
@@ -38,6 +39,28 @@ function setup(
   const storedFields = (): StoredFields => model.create.mock.calls[0][0];
 
   return { model, select, service, storedFields };
+}
+
+/** The lockout of ACC-05, as the auth service gives it: 5 failures, 15 minutes. */
+const policy: LockoutPolicy = { maxAttempts: 5, lockMs: 15 * 60_000 };
+const now = new Date('2026-11-15T12:00:00.000Z');
+const userObjectId = new Types.ObjectId('6740f1c2a4b5c6d7e8f90123');
+
+/**
+ * A model for the lockout methods. `counted` is what `findByIdAndUpdate`
+ * finds after it added one failed login (`null`: there is no such account).
+ */
+function setupLockout(counted: { failedLoginAttempts: number } | null) {
+  const countExec = jest.fn().mockResolvedValue(counted);
+  const countSelect = jest.fn(() => ({ exec: countExec }));
+  const updateExec = jest.fn().mockResolvedValue({ modifiedCount: 1 });
+  const model = {
+    findByIdAndUpdate: jest.fn(() => ({ select: countSelect })),
+    updateOne: jest.fn(() => ({ exec: updateExec })),
+  };
+  const service = new UsersService(model as unknown as Model<User>);
+
+  return { model, countSelect, service };
 }
 
 describe('UsersService', () => {
@@ -169,6 +192,119 @@ describe('UsersService', () => {
 
       expect(await service.findEntityById('not-an-id')).toBeNull();
       expect(model.findById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('recordFailedLogin (ACC-05)', () => {
+    it('adds one failed login with a single atomic increment', async () => {
+      const { model, countSelect, service } = setupLockout({
+        failedLoginAttempts: 1,
+      });
+
+      await service.recordFailedLogin(userObjectId, policy, now);
+
+      expect(model.findByIdAndUpdate).toHaveBeenCalledTimes(1);
+      expect(model.findByIdAndUpdate).toHaveBeenCalledWith(
+        userObjectId,
+        { $inc: { failedLoginAttempts: 1 } },
+        { returnDocument: 'after' },
+      );
+      expect(countSelect).toHaveBeenCalledWith('failedLoginAttempts');
+    });
+
+    it.each([1, 2, 3, 4])(
+      'leaves the account open on failure number %i',
+      async (count) => {
+        const { model, service } = setupLockout({ failedLoginAttempts: count });
+
+        expect(
+          await service.recordFailedLogin(userObjectId, policy, now),
+        ).toBeNull();
+        expect(model.updateOne).not.toHaveBeenCalled();
+      },
+    );
+
+    it('locks the account for 15 minutes on the 5th failure and returns the end of the lock', async () => {
+      const { model, service } = setupLockout({ failedLoginAttempts: 5 });
+
+      const lockedUntil = await service.recordFailedLogin(
+        userObjectId,
+        policy,
+        now,
+      );
+
+      expect(lockedUntil).toEqual(new Date('2026-11-15T12:15:00.000Z'));
+      expect(model.updateOne).toHaveBeenCalledTimes(1);
+      expect(model.updateOne).toHaveBeenCalledWith(
+        {
+          _id: userObjectId,
+          $or: [{ lockedUntil: null }, { lockedUntil: { $lte: now } }],
+        },
+        { $set: { lockedUntil } },
+      );
+    });
+
+    it('sets the lock only on an account that has none, so a late failure cannot push it back', async () => {
+      const { model, service } = setupLockout({ failedLoginAttempts: 7 });
+
+      await service.recordFailedLogin(userObjectId, policy, now);
+
+      const [filter] = model.updateOne.mock.calls[0] as unknown as [
+        { $or: object[] },
+      ];
+      expect(filter.$or).toEqual([
+        { lockedUntil: null },
+        { lockedUntil: { $lte: now } },
+      ]);
+    });
+
+    it('still reports the lock for a failure over the limit, which arrived at the same time as the 5th', async () => {
+      const { service } = setupLockout({ failedLoginAttempts: 6 });
+
+      expect(
+        await service.recordFailedLogin(userObjectId, policy, now),
+      ).toEqual(new Date('2026-11-15T12:15:00.000Z'));
+    });
+
+    it('does nothing when the account is gone', async () => {
+      const { model, service } = setupLockout(null);
+
+      expect(
+        await service.recordFailedLogin(userObjectId, policy, now),
+      ).toBeNull();
+      expect(model.updateOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('clearExpiredLock (ACC-05)', () => {
+    it('clears a lock that has ended, with the count that caused it', async () => {
+      const { model, service } = setupLockout(null);
+
+      await service.clearExpiredLock(userObjectId, now);
+
+      expect(model.updateOne).toHaveBeenCalledWith(
+        { _id: userObjectId, lockedUntil: { $lte: now } },
+        { $set: { failedLoginAttempts: 0 }, $unset: { lockedUntil: 1 } },
+      );
+    });
+  });
+
+  describe('resetFailedLogins (ACC-05)', () => {
+    it('forgets the failed logins and the lock, and writes only when there is something to forget', async () => {
+      const { model, service } = setupLockout(null);
+
+      await service.resetFailedLogins(userObjectId);
+
+      expect(model.updateOne).toHaveBeenCalledWith(
+        {
+          _id: userObjectId,
+          $or: [
+            { failedLoginAttempts: { $gt: 0 } },
+            { lockedUntil: { $ne: null } },
+          ],
+        },
+        { $set: { failedLoginAttempts: 0 }, $unset: { lockedUntil: 1 } },
+      );
     });
   });
 });

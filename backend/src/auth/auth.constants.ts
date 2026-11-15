@@ -19,3 +19,20 @@ export const ACCOUNT_SUSPENDED_MESSAGE = 'Your account is suspended';
 
 /** The answer of any route that needs a logged-in user. It matches the one of RolesGuard. */
 export const LOGIN_REQUIRED_MESSAGE = 'You must log in to do this';
+
+/** How many failed logins in a row lock an account (ACC-05). */
+export const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+
+/** How long a locked account stays locked, in minutes (ACC-05). */
+export const LOCKOUT_MINUTES = 15;
+
+/**
+ * The answer of a login to a locked account (ACC-05), with the time that is
+ * left, rounded up to whole minutes so the user never tries too early. It is
+ * the same whether or not the password that was sent is right, so it says
+ * nothing about the password.
+ */
+export function accountLockedMessage(minutesLeft: number): string {
+  const unit = minutesLeft === 1 ? 'minute' : 'minutes';
+  return `Too many failed login attempts. Your account is locked. Try again in ${minutesLeft} ${unit}.`;
+}
