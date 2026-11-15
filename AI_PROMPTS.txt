@@ -408,31 +408,3 @@ registration. Left out on purpose: the lockout after 5 failures (ACC-05), logout
 request. Changed: nothing in the code. Rejected: Claude's push of the branch to GitHub, which a stop
 hook had asked for; I had it taken back and committed the changes myself.
 ================================================
-
-================================================
-Date: 2026-11-14
-Student: Ali Ahmed
-Tool: Claude Code (desktop app)
-Branch / Issue: feature/GEN-01-notifications / #92
-Related Requirement: GEN-01
-Prompt:
-I gave Claude my 13 assigned issues, the team development plan and the GEN-01 issue, and asked it
-to read AGENTS.md, CLAUDE.md, the specification, the PR template and this log, to ask me before
-deciding anything, and to never commit or open .env. It found that ACC-04 (the auth guard) had
-been merged after my branch was cut, so I recreated the branch from the latest develop. I approved
-four routes: GET /api/notifications (paginated, ?unread filter), GET /api/notifications/unread-count,
-PATCH /api/notifications/:id/read and PATCH /api/notifications/read-all, plus
-NotificationsService.notify() for the other members. Then I asked it to build GEN-01 with tests.
-How the output was used:
-Claude wrote the notifications module (schema, enums, DTOs, mapper, service, controller with Swagger
-text, README) and its unit tests and e2e test. It ran format, lint, typecheck, the unit tests, the
-build and the root format check. I run the e2e test myself, with my own backend/.env, which
-Claude never reads.
-Accepted, changed, or rejected:
-Accepted: the four routes; 404 instead of 403 for another user's notification; notify() and
-notifyMany() that log a failure instead of throwing, because they run after the booking or refund
-is already saved; keeping the first read time when a notification is marked read again. Added by
-Claude beyond the approved contract: notifyMany(), so a flight change reaches all passengers in one
-write. Changed: Claude first wrote the files in the main checkout instead of its worktree; a hook
-stopped it before any file was written. Rejected: email notifications (GEN-01-B, an optional bonus).
-================================================
