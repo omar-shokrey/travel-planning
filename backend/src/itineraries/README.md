@@ -22,3 +22,10 @@ Owner: Ali Ghayesh (M8). Requirements: ITN-01 to ITN-26. Routes: `/api/itinerari
 - **`PATCH` changes only the fields that are sent.** A field that is absent or `null` is left as it is.
 - **`findEntityOrThrow()`** is for other services (for example the admin module, GEN-10). It returns the entity and is never used by a controller.
 - **The end-to-end tests add their own country.** The test database may hold no reference data (CI starts with an empty one), so the tests insert one country with a code that no real country has (`X` plus a letter) and delete it at the end, with the users and itineraries they created.
+
+## ITN-03: list my itineraries, open one
+
+- **The list returns the summary only** (title, countries, start date, number of days, visibility). The days come with `GET /api/itineraries/:id`, so a list of 10 itineraries never loads up to 600 days.
+- **Sorted by `updatedAt`, newest first, then by `_id`**, so two itineraries updated in the same millisecond keep a fixed order across pages. The index (`ownerId`, `updatedAt`) serves it.
+- **`GET /api/itineraries/:id` is for the owner only**, public or not: 404 if missing, 403 for another user. Reading someone else's public itinerary is a different route, `GET /api/itineraries/public/:id` (ITN-21).
+- **A day's number and date are computed in the mapper**: the number is the position in `days` plus 1, and the date is `startDate` plus the position, added in UTC with `luxon` so a clock change cannot shift it.

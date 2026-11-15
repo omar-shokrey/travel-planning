@@ -648,3 +648,26 @@ rewrote the end-to-end tests to use a logged-in user.
 TO COMPLETE BY ME BEFORE THE PULL REQUEST: what I checked myself in Swagger and with the end-to-end
 tests on the test database, and what I changed or rejected after reading every line.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-03-list-itineraries / #67
+Related Requirement: ITN-03
+Prompt:
+I told Claude that my goal for the day was to finish my wave 2 issues, and it continued in the same
+chat with ITN-03 (list my itineraries, open one).
+How the output was used:
+Claude wrote the day and detail response DTOs, the mapper functions that number and date the days,
+findMine and findOne in the service, the two GET routes with their Swagger documentation, and the
+unit and end-to-end tests. It ran format, lint, typecheck, build and the unit tests in its own
+workspace, and the end-to-end file against a local MongoDB-compatible stand-in (FerretDB), not real
+MongoDB.
+Accepted, changed, or rejected:
+Design choices by Claude: the list returns the summary without the days; the detail route is for the
+owner only, because reading a public itinerary of someone else is ITN-21; a second sort key (_id)
+keeps the page order fixed.
+TO COMPLETE BY ME BEFORE THE PULL REQUEST: what I checked myself in Swagger and with the end-to-end
+tests on the test database, and what I changed or rejected after reading every line.
+================================================
