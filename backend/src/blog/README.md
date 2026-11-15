@@ -22,3 +22,13 @@
 - `GET /api/posts/:id/comments` is public and paginated. It returns the comments oldest first (`createdAt`, then `_id` as a tie-breaker), which is the chronological order BLG-05 asks for. The endpoint table of the project description has no route for reading comments, so this one was added; the post page (BLG-02) can call `CommentsService.listForPost` instead.
 - The post keeps a `commentCount`, as in the data model of the spec. `CommentsService` raises it with one `$inc` update after a comment is saved, so two comments at the same moment are both counted. It is not part of `PostResponseDto` yet; BLG-02 adds it to the post page.
 - Index: (`postId`, `createdAt`) for the list.
+
+## Likes (BLG-06)
+
+- Likes are stored in their own `likes` collection (`Like` schema): one document per user and post.
+- "Like once" is enforced by the unique (`postId`, `userId`) index, not by a read before the write. Two requests at the same moment cannot store two likes; the second answers 409 "You have already liked this post".
+- `POST /api/posts/:id/like` and `DELETE /api/posts/:id/like` are for registered users (`user` role) and take no body. The user is the logged-in user. An author may like their own post; the workbook does not forbid it.
+- Removing a like that does not exist answers 409 "You have not liked this post". 404 is kept for "no published post has this id", so the two cases cannot be confused.
+- Only a published post can be liked. A draft answers 404, the same as a missing post.
+- The post keeps a `likeCount`, as in the data model of the spec. It changes with one `$inc` update only after the like was really stored or deleted, and the decrement is guarded so the counter never goes below 0.
+- Both routes return `{ postId, liked, likeCount }`, so the client can show the like count without a second request. `likeCount` is not part of `PostResponseDto` yet; BLG-02 adds it to the post page.
