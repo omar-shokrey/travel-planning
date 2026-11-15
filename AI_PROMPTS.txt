@@ -679,3 +679,30 @@ days, numbered 1 and 2 and dated 2026-12-20 and 2026-12-21. Changed after my che
 the Swagger example of the detail response showed dayCount 0 next to a list with one day, and Claude
 corrected the example to 1. Rejected: nothing.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-05-days-and-cities / #68
+Related Requirement: ITN-05
+Prompt:
+Continuing my wave 2 issues in the same chat, Claude implemented ITN-05 (add days to an itinerary
+and edit each day's city and notes, at most 60 days).
+How the output was used:
+Claude wrote the add-day and update-day DTOs, addDay and updateDay in the service, the two routes
+with their Swagger documentation, and the unit and end-to-end tests. It ran format, lint, typecheck,
+build and the unit tests in its own workspace, and the end-to-end file against a local
+MongoDB-compatible stand-in (FerretDB), not real MongoDB.
+Accepted, changed, or rejected:
+Design choices by Claude: a new day always goes at the end; adding a day is one conditional update
+($push and $inc where dayCount is below 60) so the limit holds under concurrent requests; a full
+itinerary answers 409; the city is checked against the cities collection but not against the
+itinerary's countries, because the workbook does not ask for it.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger I added two days in
+cairo (201 each, the second with notes), and edited the notes of day 1 with PATCH
+/api/itineraries/{id}/days/{dayId} (200; the city stayed and day 2 did not change). My login expired
+after 10 minutes during this check and the route answered 401 until I logged in again. I changed
+nothing and rejected nothing.
+================================================

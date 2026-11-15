@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
+  ApiConflictResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
@@ -28,9 +29,11 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
+import { AddDayDto } from './dto/add-day.dto';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
 import { ItineraryResponseDto } from './dto/itinerary-response.dto';
+import { UpdateDayDto } from './dto/update-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { ItinerariesService } from './itineraries.service';
 
@@ -137,5 +140,58 @@ export class ItinerariesController {
     @CurrentUser('id') userId: string,
   ): Promise<void> {
     return this.itineraries.remove(id, userId);
+  }
+
+  @Post(':id/days')
+  @ApiOperation({
+    summary: 'Add a day',
+    description:
+      'ITN-05. Add a day at the end of your own itinerary, with a city from the city list and optional notes. Days are numbered in order and each date follows from the start date. An itinerary has at most 60 days.',
+  })
+  @ApiParam({ name: 'id', description: 'Itinerary id' })
+  @ApiCreatedResponse({ type: ItineraryDetailResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'The id or a field is invalid, an unknown field was sent, or the city is not in the city list',
+  })
+  @ApiForbiddenResponse({
+    description: 'The itinerary belongs to another user',
+  })
+  @ApiNotFoundResponse({ description: 'No itinerary has this id' })
+  @ApiConflictResponse({ description: 'The itinerary already has 60 days' })
+  addDay(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: AddDayDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    return this.itineraries.addDay(id, dto, userId);
+  }
+
+  @Patch(':id/days/:dayId')
+  @ApiOperation({
+    summary: 'Edit a day',
+    description:
+      'ITN-05. Edit the city or the notes of a day of your own itinerary. Send only the fields that change. Send empty notes to clear them.',
+  })
+  @ApiParam({ name: 'id', description: 'Itinerary id' })
+  @ApiParam({ name: 'dayId', description: 'Day id' })
+  @ApiOkResponse({ type: ItineraryDetailResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'An id or a field is invalid, an unknown field was sent, or the city is not in the city list',
+  })
+  @ApiForbiddenResponse({
+    description: 'The itinerary belongs to another user',
+  })
+  @ApiNotFoundResponse({
+    description: 'No itinerary has this id, or it has no day with this id',
+  })
+  updateDay(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Param('dayId', ParseObjectIdPipe) dayId: string,
+    @Body() dto: UpdateDayDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    return this.itineraries.updateDay(id, dayId, dto, userId);
   }
 }

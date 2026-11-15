@@ -10,6 +10,7 @@ import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
 import { ACCESS_TOKEN_COOKIE } from './../src/common/constants/cookies';
 import { Itinerary } from './../src/itineraries/models/itinerary.schema';
+import { City } from './../src/reference/models/city.schema';
 import { Country } from './../src/reference/models/country.schema';
 import { User } from './../src/users/models/user.schema';
 
@@ -20,6 +21,10 @@ import { User } from './../src/users/models/user.schema';
  */
 const TEST_COUNTRY = `X${String.fromCharCode(65 + Math.floor(Math.random() * 26))}`;
 const TEST_COUNTRY_NAME = 'Itineraries e2e test country';
+
+/** Two cities of that country, with ids that no real city has. */
+const CITY_A = `itn-e2e-${randomUUID()}`;
+const CITY_B = `itn-e2e-${randomUUID()}`;
 
 const validBody = () => ({
   title: 'Ten days in Egypt',
@@ -34,10 +39,11 @@ interface SwaggerOperation {
   responses: Record<string, unknown>;
 }
 
-describe('Itineraries (e2e, ITN-01, ITN-03)', () => {
+describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05)', () => {
   let app: NestExpressApplication;
   let users: Model<User>;
   let countries: Model<Country>;
+  let cities: Model<City>;
   let itineraries: Model<Itinerary>;
   const jwt = new JwtService();
   /** What these tests created. Each record is deleted by id at the end. */
@@ -96,6 +102,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03)', () => {
 
     users = app.get<Model<User>>(getModelToken(User.name));
     countries = app.get<Model<Country>>(getModelToken(Country.name));
+    cities = app.get<Model<City>>(getModelToken(City.name));
     itineraries = app.get<Model<Itinerary>>(getModelToken(Itinerary.name));
 
     await countries.updateOne(
@@ -103,6 +110,13 @@ describe('Itineraries (e2e, ITN-01, ITN-03)', () => {
       { $setOnInsert: { name: TEST_COUNTRY_NAME, currency: 'USD' } },
       { upsert: true },
     );
+    for (const cityId of [CITY_A, CITY_B]) {
+      await cities.create({
+        _id: cityId,
+        name: 'Itineraries e2e test city',
+        countryCode: TEST_COUNTRY,
+      });
+    }
     owner = await createUser();
     otherUser = await createUser();
   });
@@ -113,6 +127,9 @@ describe('Itineraries (e2e, ITN-01, ITN-03)', () => {
     }
     for (const id of createdUserIds) {
       await users.deleteOne({ _id: id });
+    }
+    for (const cityId of [CITY_A, CITY_B]) {
+      await cities.deleteOne({ _id: cityId });
     }
     await countries.deleteOne({ _id: TEST_COUNTRY, name: TEST_COUNTRY_NAME });
     await app.close();
@@ -127,6 +144,8 @@ describe('Itineraries (e2e, ITN-01, ITN-03)', () => {
       ['get', `/api/itineraries/${id}`],
       ['patch', `/api/itineraries/${id}`],
       ['delete', `/api/itineraries/${id}`],
+      ['post', `/api/itineraries/${id}/days`],
+      ['patch', `/api/itineraries/${id}/days/${id}`],
     ] as const)('refuses %s %s', async (method, path) => {
       const response = await http()[method](path).send(validBody());
 
@@ -456,6 +475,272 @@ describe('Itineraries (e2e, ITN-01, ITN-03)', () => {
       expect(response.status).toBe(403);
       expect(await itineraries.findById(id).lean()).not.toBeNull();
     });
+  });
+
+  describe('POST /api/itineraries/:id/days', () => {
+    const addDay = (
+      id: string,
+      body: Record<string, unknown>,
+      cookie = owner.cookie,
+    ) =>
+      http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', cookie)
+        .send(body);
+
+    it('adds days in order, numbered from 1, dated from the start date', async () => {
+      const id = await existing();
+
+      const first = await addDay(id, {
+        cityId: CITY_A,
+        notes: ' Arrive late ',
+      });
+      const second = await addDay(id, { cityId: CITY_A });
+      const third = await addDay(id, { cityId: CITY_B });
+
+      expect(first.status).toBe(201);
+      expect(second.status).toBe(201);
+      expect(third.status).toBe(201);
+      expect(third.body.dayCount).toBe(3);
+      expect(third.body.days).toEqual([
+        {
+          id: expect.stringMatching(/^[0-9a-f]{24}$/),
+          dayNumber: 1,
+          date: '2026-12-20',
+          cityId: CITY_A,
+          notes: 'Arrive late',
+        },
+        {
+          id: expect.stringMatching(/^[0-9a-f]{24}$/),
+          dayNumber: 2,
+          date: '2026-12-21',
+          cityId: CITY_A,
+        },
+        {
+          id: expect.stringMatching(/^[0-9a-f]{24}$/),
+          dayNumber: 3,
+          date: '2026-12-22',
+          cityId: CITY_B,
+        },
+      ]);
+    });
+
+    it('shows the days and the day count when the itinerary is read again', async () => {
+      const id = await existing();
+      await addDay(id, { cityId: CITY_A }).expect(201);
+      await addDay(id, { cityId: CITY_B }).expect(201);
+
+      const detail = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', owner.cookie)
+        .expect(200);
+
+      expect(detail.body.dayCount).toBe(2);
+      expect(
+        (detail.body.days as { cityId: string }[]).map((day) => day.cityId),
+      ).toEqual([CITY_A, CITY_B]);
+      const stored = await itineraries.findById(id).lean();
+      expect(stored?.dayCount).toBe(2);
+      expect(stored?.days).toHaveLength(2);
+    });
+
+    it('moves every date when the start date changes', async () => {
+      const id = await existing();
+      await addDay(id, { cityId: CITY_A }).expect(201);
+      await addDay(id, { cityId: CITY_A }).expect(201);
+
+      await http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', owner.cookie)
+        .send({ startDate: '2027-02-28' })
+        .expect(200);
+      const detail = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', owner.cookie)
+        .expect(200);
+
+      expect(
+        (detail.body.days as { date: string }[]).map((day) => day.date),
+      ).toEqual(['2027-02-28', '2027-03-01']);
+    });
+
+    it('requires a city and rejects one that is not in the city list', async () => {
+      const id = await existing();
+
+      const noCity = await addDay(id, { notes: 'No city' });
+      const unknownCity = await addDay(id, { cityId: 'atlantis' });
+      const extraField = await addDay(id, { cityId: CITY_A, dayNumber: 5 });
+
+      expect(noCity.status).toBe(400);
+      expect(noCity.body.errors).toEqual([
+        { field: 'cityId', messages: expect.any(Array) },
+      ]);
+      expect(unknownCity.status).toBe(400);
+      expect(unknownCity.body.message).toBe('Unknown city id: atlantis');
+      expect(extraField.status).toBe(400);
+      expect((await itineraries.findById(id).lean())?.days).toHaveLength(0);
+    });
+
+    it('answers 409 to the 61st day and keeps 60', async () => {
+      const id = await existing();
+      for (let day = 1; day <= 60; day++) {
+        await addDay(id, { cityId: CITY_A }).expect(201);
+      }
+
+      const response = await addDay(id, { cityId: CITY_A });
+
+      expect(response.status).toBe(409);
+      expect(response.body.message).toBe('An itinerary has at most 60 days');
+      const stored = await itineraries.findById(id).lean();
+      expect(stored?.days).toHaveLength(60);
+      expect(stored?.dayCount).toBe(60);
+    });
+
+    it('answers 403 to another user, 404 for a missing itinerary, 400 for a bad id', async () => {
+      const id = await existing();
+
+      const forbidden = await addDay(id, { cityId: CITY_A }, otherUser.cookie);
+      const missing = await addDay(new Types.ObjectId().toString(), {
+        cityId: CITY_A,
+      });
+      const badId = await addDay('not-an-id', { cityId: CITY_A });
+
+      expect(forbidden.status).toBe(403);
+      expect(missing.status).toBe(404);
+      expect(badId.status).toBe(400);
+      expect((await itineraries.findById(id).lean())?.days).toHaveLength(0);
+    });
+  });
+
+  describe('PATCH /api/itineraries/:id/days/:dayId', () => {
+    /** An itinerary with two days in city A. Returns its id and the day ids. */
+    const withTwoDays = async () => {
+      const id = await existing();
+      const call = () =>
+        http()
+          .post(`/api/itineraries/${id}/days`)
+          .set('Cookie', owner.cookie)
+          .send({ cityId: CITY_A, notes: 'Original notes' })
+          .expect(201);
+      await call();
+      const response = await call();
+      const dayIds = (response.body.days as { id: string }[]).map(
+        (day) => day.id,
+      );
+      return { id, dayIds };
+    };
+    const patchDay = (
+      id: string,
+      dayId: string,
+      body: Record<string, unknown>,
+      cookie = owner.cookie,
+    ) =>
+      http()
+        .patch(`/api/itineraries/${id}/days/${dayId}`)
+        .set('Cookie', cookie)
+        .send(body);
+
+    it('changes the city and the notes of that day only', async () => {
+      const { id, dayIds } = await withTwoDays();
+
+      const response = await patchDay(id, dayIds[1], {
+        cityId: CITY_B,
+        notes: 'New notes',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body.days).toEqual([
+        {
+          id: dayIds[0],
+          dayNumber: 1,
+          date: '2026-12-20',
+          cityId: CITY_A,
+          notes: 'Original notes',
+        },
+        {
+          id: dayIds[1],
+          dayNumber: 2,
+          date: '2026-12-21',
+          cityId: CITY_B,
+          notes: 'New notes',
+        },
+      ]);
+    });
+
+    it('changes only the field that is sent, and clears notes sent empty', async () => {
+      const { id, dayIds } = await withTwoDays();
+
+      const notesOnly = await patchDay(id, dayIds[0], { notes: 'Only notes' });
+      const cleared = await patchDay(id, dayIds[0], { notes: '' });
+
+      expect(notesOnly.body.days[0]).toMatchObject({
+        cityId: CITY_A,
+        notes: 'Only notes',
+      });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.days[0]).not.toHaveProperty('notes');
+      expect(cleared.body.days[0].cityId).toBe(CITY_A);
+    });
+
+    it('rejects an empty city and a city that is not in the city list', async () => {
+      const { id, dayIds } = await withTwoDays();
+
+      const empty = await patchDay(id, dayIds[0], { cityId: '' });
+      const unknown = await patchDay(id, dayIds[0], { cityId: 'atlantis' });
+
+      expect(empty.status).toBe(400);
+      expect(unknown.status).toBe(400);
+      expect(unknown.body.message).toBe('Unknown city id: atlantis');
+    });
+
+    it('answers 404 for a day that is not in the itinerary and 400 for a bad day id', async () => {
+      const { id } = await withTwoDays();
+
+      const missing = await patchDay(id, new Types.ObjectId().toString(), {
+        notes: 'x',
+      });
+      const badId = await patchDay(id, 'not-an-id', { notes: 'x' });
+
+      expect(missing.status).toBe(404);
+      expect(missing.body.message).toBe('Day not found');
+      expect(badId.status).toBe(400);
+    });
+
+    it('answers 403 to another user and changes nothing', async () => {
+      const { id, dayIds } = await withTwoDays();
+
+      const response = await patchDay(
+        id,
+        dayIds[0],
+        { notes: 'Mine now' },
+        otherUser.cookie,
+      );
+
+      expect(response.status).toBe(403);
+      const stored = await itineraries.findById(id).lean();
+      expect(stored?.days[0].notes).toBe('Original notes');
+    });
+  });
+
+  it('documents the ITN-05 routes in Swagger', async () => {
+    const response = await http().get('/api/docs-json').expect(200);
+    const paths = response.body.paths as Record<
+      string,
+      Record<string, SwaggerOperation>
+    >;
+    const add = paths['/api/itineraries/{id}/days'].post;
+    const edit = paths['/api/itineraries/{id}/days/{dayId}'].patch;
+
+    for (const operation of [add, edit]) {
+      expect(operation.tags).toEqual(['Itineraries']);
+      expect(operation.description).toMatch(/^ITN-05\. /);
+    }
+    expect(Object.keys(add.responses)).toEqual(
+      expect.arrayContaining(['201', '400', '401', '403', '404', '409']),
+    );
+    expect(Object.keys(edit.responses)).toEqual(
+      expect.arrayContaining(['200', '400', '401', '403', '404']),
+    );
   });
 
   it('documents the ITN-03 routes in Swagger', async () => {
