@@ -6,6 +6,7 @@ import {
 import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Mongoose, Types } from 'mongoose';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Country } from '../reference/models/country.schema';
 import { ItineraryVisibility } from './enums/itinerary-visibility.enum';
 import { ItinerariesService } from './itineraries.service';
@@ -136,6 +137,120 @@ describe('ItinerariesService', () => {
       const response = await service.create(dto, ownerId);
 
       expect(response.countries).toEqual(['EG', 'AE', 'GB']);
+    });
+  });
+
+  describe('findMine', () => {
+    /** Replaces find().sort().skip().limit() and countDocuments(). */
+    const withItineraries = (found: ItineraryDocument[], total: number) => {
+      const chain = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue(found),
+      };
+      const findSpy = jest
+        .spyOn(ItineraryModel, 'find')
+        .mockReturnValue(chain as never);
+      const countSpy = jest
+        .spyOn(ItineraryModel, 'countDocuments')
+        .mockResolvedValue(total as never);
+      return { chain, findSpy, countSpy };
+    };
+    const page = (page: number, limit: number) =>
+      Object.assign(new PaginationQueryDto(), { page, limit });
+
+    it('returns only the itineraries of the logged-in user', async () => {
+      const { findSpy, countSpy } = withItineraries([stored()], 1);
+
+      await service.findMine(page(1, 10), ownerId);
+
+      const filter = { ownerId: new Types.ObjectId(ownerId) };
+      expect(findSpy).toHaveBeenCalledWith(filter);
+      expect(countSpy).toHaveBeenCalledWith(filter);
+    });
+
+    it('sorts by the most recently updated first', async () => {
+      const { chain } = withItineraries([], 0);
+
+      await service.findMine(page(1, 10), ownerId);
+
+      expect(chain.sort).toHaveBeenCalledWith({ updatedAt: -1, _id: -1 });
+    });
+
+    it('reads the requested page', async () => {
+      const { chain } = withItineraries([], 25);
+
+      const response = await service.findMine(page(3, 10), ownerId);
+
+      expect(chain.skip).toHaveBeenCalledWith(20);
+      expect(chain.limit).toHaveBeenCalledWith(10);
+      expect(response.meta).toEqual({
+        page: 3,
+        limit: 10,
+        total: 25,
+        totalPages: 3,
+      });
+    });
+
+    it('returns the list fields of each itinerary', async () => {
+      const itinerary = stored();
+      withItineraries([itinerary], 1);
+
+      const response = await service.findMine(page(1, 10), ownerId);
+
+      expect(response.items).toEqual([
+        {
+          id: itinerary.id as string,
+          ownerId,
+          title: 'Ten days in Egypt',
+          countries: ['EG'],
+          startDate: '2026-12-20',
+          visibility: ItineraryVisibility.Private,
+          dayCount: 0,
+        },
+      ]);
+    });
+
+    it('returns an empty list when the user has no itineraries', async () => {
+      withItineraries([], 0);
+
+      const response = await service.findMine(page(1, 10), ownerId);
+
+      expect(response).toEqual({
+        items: [],
+        meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
+      });
+    });
+  });
+
+  describe('findOne', () => {
+    it('returns the itinerary of the logged-in user with its days', async () => {
+      const itinerary = stored();
+      itinerary.days.push({ cityId: 'cairo' } as never);
+
+      const response = await service.findOne(itinerary.id as string, ownerId);
+
+      expect(response).toMatchObject({
+        id: itinerary.id as string,
+        title: 'Ten days in Egypt',
+        days: [{ dayNumber: 1, date: '2026-12-20', cityId: 'cairo' }],
+      });
+    });
+
+    it('answers 404 when the itinerary does not exist', async () => {
+      await expect(
+        service.findOne(new Types.ObjectId().toString(), ownerId),
+      ).rejects.toThrow(new NotFoundException('Itinerary not found'));
+    });
+
+    it('answers 403 for an itinerary of another user', async () => {
+      const itinerary = stored(otherUserId);
+
+      await expect(
+        service.findOne(itinerary.id as string, ownerId),
+      ).rejects.toThrow(
+        new ForbiddenException('You can only open your own itineraries'),
+      );
     });
   });
 

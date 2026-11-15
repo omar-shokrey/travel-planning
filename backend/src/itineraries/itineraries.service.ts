@@ -6,11 +6,20 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import {
+  paginate,
+  type PaginatedResponse,
+} from '../common/dto/paginated-response.dto';
+import type { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Country } from '../reference/models/country.schema';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto';
+import type { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
 import type { ItineraryResponseDto } from './dto/itinerary-response.dto';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto';
-import { toItineraryResponse } from './mappers/itinerary.mapper';
+import {
+  toItineraryDetailResponse,
+  toItineraryResponse,
+} from './mappers/itinerary.mapper';
 import { Itinerary, type ItineraryDocument } from './models/itinerary.schema';
 
 @Injectable()
@@ -35,6 +44,36 @@ export class ItinerariesService {
       ownerId: new Types.ObjectId(userId),
     });
     return toItineraryResponse(itinerary);
+  }
+
+  /** ITN-03: the caller's itineraries, most recently updated first. */
+  async findMine(
+    query: PaginationQueryDto,
+    userId: string,
+  ): Promise<PaginatedResponse<ItineraryResponseDto>> {
+    const filter = { ownerId: new Types.ObjectId(userId) };
+    const [itineraries, total] = await Promise.all([
+      this.itineraries
+        .find(filter)
+        .sort({ updatedAt: -1, _id: -1 })
+        .skip(query.skip)
+        .limit(query.limit),
+      this.itineraries.countDocuments(filter),
+    ]);
+    return paginate(itineraries.map(toItineraryResponse), total, query);
+  }
+
+  /** ITN-03: one of the caller's itineraries with its days. */
+  async findOne(
+    id: string,
+    userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    const itinerary = await this.findOwnedOrThrow(
+      id,
+      userId,
+      'You can only open your own itineraries',
+    );
+    return toItineraryDetailResponse(itinerary);
   }
 
   /** ITN-01: edit the title, the countries or the start date of your own itinerary. */
@@ -83,10 +122,11 @@ export class ItinerariesService {
   private async findOwnedOrThrow(
     id: string,
     userId: string,
+    forbiddenMessage = 'You can only change your own itineraries',
   ): Promise<ItineraryDocument> {
     const itinerary = await this.findEntityOrThrow(id);
     if (itinerary.ownerId.toString() !== userId) {
-      throw new ForbiddenException('You can only change your own itineraries');
+      throw new ForbiddenException(forbiddenMessage);
     }
     return itinerary;
   }
