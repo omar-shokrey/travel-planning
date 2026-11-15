@@ -15,7 +15,7 @@ import type { ImageFile } from '../uploads/uploads.types';
 import { UsersService } from '../users/users.service';
 import type { CreateHotelDto } from './dto/create-hotel.dto';
 import type { HotelResponseDto } from './dto/hotel-response.dto';
-import type { UpdateHotelDto } from './dto/update-hotel.dto';
+import { nullFieldsOf, type UpdateHotelDto } from './dto/update-hotel.dto';
 import { toHotelResponse } from './mappers/hotel.mapper';
 import { Hotel, type HotelDocument } from './models/hotel.schema';
 
@@ -65,6 +65,19 @@ export class HotelsService {
     dto: UpdateHotelDto,
     userId: string | undefined,
   ): Promise<HotelResponseDto> {
+    // Before anything is read: `null` would reach the schema on save and
+    // answer 500, so it is a 400 in the usual validation shape instead.
+    const nullFields = nullFieldsOf(dto);
+    if (nullFields.length > 0) {
+      throw new BadRequestException({
+        message: 'Validation failed',
+        errors: nullFields.map((field) => ({
+          field,
+          messages: [`${field} must not be null`],
+        })),
+      });
+    }
+
     const hotel = await this.findHotelOrThrow(id);
     await this.assertHotelModerator(hotel, userId);
 

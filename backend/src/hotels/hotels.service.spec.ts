@@ -13,6 +13,7 @@ import { UsersService } from '../users/users.service';
 import type { CreateHotelDto } from './dto/create-hotel.dto';
 import { HotelsService } from './hotels.service';
 import { Hotel, type HotelDocument } from './models/hotel.schema';
+import type { UpdateHotelDto } from './dto/update-hotel.dto';
 
 const HOTEL_ID = '6740f1c2a4b5c6d7e8f90123';
 const USER_ID = '6740f1c2a4b5c6d7e8f90124';
@@ -184,6 +185,56 @@ describe('HotelsService (HTL-01)', () => {
       expect(citiesModel.findById).toHaveBeenCalledWith('city_002');
       expect(hotel.cityId).toBe('city_002');
       expect(hotel.countryCode).toBe('US');
+    });
+
+    it.each([
+      ['name'],
+      ['addressLine'],
+      ['cityId'],
+      ['description'],
+      ['starClass'],
+      ['amenities'],
+    ])(
+      'refuses %s sent as null with 400, before reading or saving anything',
+      async (field) => {
+        const hotel = makeHotel();
+        const { hotelsModel, service } = setup({ hotel });
+
+        const attempt = service.update(
+          HOTEL_ID,
+          { [field]: null } as unknown as UpdateHotelDto,
+          USER_ID,
+        );
+
+        await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
+        const error = (await attempt.catch(
+          (e: unknown) => e,
+        )) as BadRequestException;
+        expect(error.getResponse()).toEqual({
+          message: 'Validation failed',
+          errors: [{ field, messages: [`${field} must not be null`] }],
+        });
+        expect(hotelsModel.findById).not.toHaveBeenCalled();
+        expect(hotel.save).not.toHaveBeenCalled();
+      },
+    );
+
+    it('lists every field sent as null', async () => {
+      const { service } = setup({ hotel: makeHotel() });
+
+      const error = (await service
+        .update(
+          HOTEL_ID,
+          { name: null, amenities: null } as unknown as UpdateHotelDto,
+          USER_ID,
+        )
+        .catch((e: unknown) => e)) as BadRequestException;
+
+      expect(
+        (error.getResponse() as { errors: { field: string }[] }).errors.map(
+          ({ field }) => field,
+        ),
+      ).toEqual(['amenities', 'name']);
     });
 
     it('returns 404 before checking the moderator when the hotel is missing', async () => {
