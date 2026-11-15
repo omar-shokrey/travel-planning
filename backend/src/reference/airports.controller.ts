@@ -18,7 +18,7 @@ export class AirportsController {
   @ApiOperation({
     summary: 'List the airports',
     description:
-      'FLT-02. The predefined, read-only list of airports loaded at setup: IATA code, name, city, country and IANA time zone, sorted by IATA code. Open to guests.',
+      'FLT-02. The predefined, read-only list of airports loaded at setup. Each airport has an id, which is its IATA code (for example CAI), and a name, city, country and IANA time zone. Sorted by id. Open to guests.',
   })
   @ApiPaginatedResponse(AirportResponseDto)
   @ApiBadRequestResponse({ description: 'page or limit is invalid' })
