@@ -694,3 +694,26 @@ itinerary's countries, because the workbook does not ask for it.
 TO COMPLETE BY ME BEFORE THE PULL REQUEST: what I checked myself in Swagger and with the end-to-end
 tests on the test database, and what I changed or rejected after reading every line.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-20-itinerary-visibility / #77
+Related Requirement: ITN-20
+Prompt:
+Continuing my wave 2 issues in the same chat, Claude implemented ITN-20 (set an itinerary's
+visibility to public or private).
+How the output was used:
+Claude added the visibility field to UpdateItineraryDto, applied it in the service's update method,
+updated the Swagger text of the PATCH route, and wrote the unit and end-to-end tests. It ran format,
+lint, typecheck, build and the unit tests in its own workspace, and the end-to-end file against a
+local MongoDB-compatible stand-in (FerretDB), not real MongoDB.
+Accepted, changed, or rejected:
+Design choices by Claude: visibility is part of PATCH /api/itineraries/:id as the endpoint table
+says, not a new route; only the update DTO has the field, so a new itinerary is always private.
+Changed by Claude after its own checks: the first version broke the type check of an existing DTO
+test, and Claude fixed the test helper's type.
+TO COMPLETE BY ME BEFORE THE PULL REQUEST: what I checked myself in Swagger and with the end-to-end
+tests on the test database, and what I changed or rejected after reading every line.
+================================================
