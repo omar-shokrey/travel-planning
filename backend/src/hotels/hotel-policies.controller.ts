@@ -18,7 +18,7 @@ import { HotelPolicyResponseDto } from './dto/hotel-policy-response.dto';
 import { SetHotelPoliciesDto } from './dto/set-hotel-policies.dto';
 import { HotelPoliciesService } from './hotel-policies.service';
 
-/** The policies of a hotel, set by its moderator (HTL-09). */
+/** The policies of a hotel, set by its moderator (HTL-09, HTL-10). */
 @ApiTags('hotels')
 @ApiCookieAuth()
 @Controller('hotels')
@@ -28,9 +28,9 @@ export class HotelPoliciesController {
   @Put(':id/policies')
   @Roles(Role.HotelModerator)
   @ApiOperation({
-    summary: 'Set the hotel policies (HTL-09)',
+    summary: 'Set the hotel policies (HTL-09, HTL-10)',
     description:
-      'HTL-09. A hotel moderator sets the standard check-in and check-out times of their assigned hotel, as HH:mm on the 24-hour clock. The request replaces the policies as a whole. The times are shown on the hotel page (`GET /api/hotels/{id}`) and the booking summary.',
+      'HTL-09, HTL-10. A hotel moderator sets the policies of their assigned hotel: the standard check-in and check-out times (HH:mm, 24-hour clock) and the cancellation tiers. Each tier has a different `daysBefore` (whole days before check-in, 0 or more) and a `refundPercent` (0 to 100). A cancellation is refunded by the tier with the highest `daysBefore` that does not exceed the days remaining; if no tier applies, the refund is 0%. The request replaces the policies as a whole. They are shown on the hotel page (`GET /api/hotels/{id}`) and the booking summary.',
   })
   @ApiParam({
     name: 'id',
@@ -40,7 +40,7 @@ export class HotelPoliciesController {
   @ApiOkResponse({ type: HotelPolicyResponseDto })
   @ApiBadRequestResponse({
     description:
-      'The hotel id is not a valid id, a time is missing or is not HH:mm, or the body has a field that is not allowed',
+      'The hotel id is not a valid id, a time is missing or is not HH:mm, a tier is invalid, two tiers have the same `daysBefore`, or the body has a field that is not allowed',
   })
   @ApiUnauthorizedResponse({
     description: 'Not logged in, or the access token is invalid or expired',

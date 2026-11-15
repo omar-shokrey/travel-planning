@@ -62,10 +62,14 @@ describe('HotelDetailsService', () => {
       });
     });
 
-    it('shows the check-in and check-out times the moderator set (HTL-09)', async () => {
+    it('shows the times and the cancellation policy the moderator set (HTL-09, HTL-10)', async () => {
       const { service } = setup({
         ...storedHotel(),
-        policy: { checkInTime: '14:00', checkOutTime: '12:00' },
+        policy: {
+          checkInTime: '14:00',
+          checkOutTime: '12:00',
+          cancellationTiers: [{ daysBefore: 7, refundPercent: 50 }],
+        },
       });
 
       const result = await service.findActiveById(HOTEL_ID);
@@ -73,6 +77,7 @@ describe('HotelDetailsService', () => {
       expect(result.policy).toEqual({
         checkInTime: '14:00',
         checkOutTime: '12:00',
+        cancellationTiers: [{ daysBefore: 7, refundPercent: 50 }],
       });
     });
 

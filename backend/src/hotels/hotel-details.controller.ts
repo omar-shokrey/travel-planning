@@ -29,7 +29,7 @@ export class HotelDetailsController {
   @ApiOperation({
     summary: 'Hotel details (HTL-02)',
     description:
-      'HTL-02. The hotel page for guests and users: profile, photos, amenities, check-in and check-out times (HTL-09), average rating and number of ratings. A deactivated hotel answers 404.',
+      'HTL-02. The hotel page for guests and users: profile, photos, amenities, check-in and check-out times (HTL-09), cancellation policy (HTL-10), average rating and number of ratings. A deactivated hotel answers 404.',
   })
   @ApiParam({
     name: 'id',
