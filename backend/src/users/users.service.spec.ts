@@ -394,4 +394,62 @@ describe('UsersService', () => {
       ).toBeNull();
     });
   });
+
+  describe('setTemporaryPassword (ACC-07a)', () => {
+    function setupReset(updated: object | null) {
+      const exec = jest.fn().mockResolvedValue(updated);
+      const model = { findByIdAndUpdate: jest.fn(() => ({ exec })) };
+      const service = new UsersService(model as unknown as Model<User>);
+      const update = () =>
+        (model.findByIdAndUpdate.mock.calls[0] as unknown[])[1] as {
+          $set: Record<string, unknown>;
+          $unset: Record<string, unknown>;
+        };
+      return { model, service, update };
+    }
+
+    it('stores a bcrypt hash of the temporary password and never the plain one', async () => {
+      const { service, update } = setupReset({ _id: userObjectId });
+
+      await service.setTemporaryPassword(userObjectId, 'Temp0rary1');
+
+      const { passwordHash } = update().$set;
+      expect(passwordHash).not.toBe('Temp0rary1');
+      expect(await compare('Temp0rary1', passwordHash as string)).toBe(true);
+    });
+
+    it('asks for a new password at the next login and clears the lockout', async () => {
+      const { model, service, update } = setupReset({ _id: userObjectId });
+
+      await service.setTemporaryPassword(userObjectId, 'Temp0rary1');
+
+      expect(model.findByIdAndUpdate).toHaveBeenCalledWith(
+        userObjectId,
+        expect.anything(),
+        { returnDocument: 'after' },
+      );
+      expect(update().$set).toMatchObject({
+        mustChangePassword: true,
+        failedLoginAttempts: 0,
+      });
+      expect(update().$unset).toEqual({ lockedUntil: 1 });
+    });
+
+    it('returns the updated account, or null when it is gone', async () => {
+      const updated = { _id: userObjectId, mustChangePassword: true };
+
+      expect(
+        await setupReset(updated).service.setTemporaryPassword(
+          userObjectId,
+          'Temp0rary1',
+        ),
+      ).toBe(updated);
+      expect(
+        await setupReset(null).service.setTemporaryPassword(
+          userObjectId,
+          'Temp0rary1',
+        ),
+      ).toBeNull();
+    });
+  });
 });
