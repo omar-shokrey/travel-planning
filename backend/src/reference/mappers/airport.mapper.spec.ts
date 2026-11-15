@@ -17,7 +17,7 @@ describe('toAirportResponse', () => {
         new Map([['EG', 'Egypt']]),
       ),
     ).toEqual({
-      code: 'CAI',
+      id: 'CAI',
       name: 'Cairo International Airport',
       cityId: 'cairo',
       cityName: 'Cairo',

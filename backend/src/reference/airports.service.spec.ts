@@ -98,7 +98,7 @@ describe('AirportsService', () => {
 
       expect(response.items).toEqual([
         {
-          code: 'CAI',
+          id: 'CAI',
           name: 'Cairo International Airport',
           cityId: 'cairo',
           cityName: 'Cairo',
@@ -107,7 +107,7 @@ describe('AirportsService', () => {
           timeZone: 'Africa/Cairo',
         },
         {
-          code: 'DXB',
+          id: 'DXB',
           name: 'Dubai International Airport',
           cityId: 'dubai',
           cityName: 'Dubai',

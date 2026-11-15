@@ -2,8 +2,11 @@ import { ApiProperty } from '@nestjs/swagger';
 
 /** FLT-02: one airport of the predefined list, as the API returns it. */
 export class AirportResponseDto {
-  @ApiProperty({ description: 'IATA code', example: 'CAI' })
-  code: string;
+  @ApiProperty({
+    description: "IATA code, which is the airport's id",
+    example: 'CAI',
+  })
+  id: string;
 
   @ApiProperty({ example: 'Cairo International Airport' })
   name: string;

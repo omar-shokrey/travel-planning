@@ -18,7 +18,7 @@ export function toAirportResponse(
   countryNames: ReadonlyMap<string, string>,
 ): AirportResponseDto {
   return {
-    code: airport._id,
+    id: airport._id,
     name: airport.name,
     cityId: airport.cityId,
     cityName: cityNames.get(airport.cityId) ?? airport.cityId,

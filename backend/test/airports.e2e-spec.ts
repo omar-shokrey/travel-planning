@@ -16,7 +16,7 @@ const TEST_CITY = `flt02-e2e-${randomUUID()}`;
 const letter = (): string => String.fromCharCode(65 + randomInt(26));
 
 interface AirportBody {
-  code: string;
+  id: string;
   name: string;
   cityId: string;
   cityName: string;
@@ -132,7 +132,7 @@ describe('Airport list (e2e, FLT-02)', () => {
 
     for (const [index, code] of testAirports.entries()) {
       expect(listed).toContainEqual({
-        code,
+        id: code,
         name: `${TEST_NAME} ${code}`,
         cityId: TEST_CITY,
         cityName: TEST_NAME,
@@ -145,7 +145,7 @@ describe('Airport list (e2e, FLT-02)', () => {
   });
 
   it('sorts the airports by IATA code', async () => {
-    const codes = (await listAll()).map((airport) => airport.code);
+    const codes = (await listAll()).map((airport) => airport.id);
 
     expect(codes).toEqual([...codes].sort());
   });
@@ -206,7 +206,7 @@ describe('Airport list (e2e, FLT-02)', () => {
         response.body.components.schemas.AirportResponseDto.properties,
       ),
     ).toEqual([
-      'code',
+      'id',
       'name',
       'cityId',
       'cityName',
