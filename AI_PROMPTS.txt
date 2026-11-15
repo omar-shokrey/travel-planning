@@ -671,3 +671,26 @@ keeps the page order fixed.
 TO COMPLETE BY ME BEFORE THE PULL REQUEST: what I checked myself in Swagger and with the end-to-end
 tests on the test database, and what I changed or rejected after reading every line.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-05-days-and-cities / #68
+Related Requirement: ITN-05
+Prompt:
+Continuing my wave 2 issues in the same chat, Claude implemented ITN-05 (add days to an itinerary
+and edit each day's city and notes, at most 60 days).
+How the output was used:
+Claude wrote the add-day and update-day DTOs, addDay and updateDay in the service, the two routes
+with their Swagger documentation, and the unit and end-to-end tests. It ran format, lint, typecheck,
+build and the unit tests in its own workspace, and the end-to-end file against a local
+MongoDB-compatible stand-in (FerretDB), not real MongoDB.
+Accepted, changed, or rejected:
+Design choices by Claude: a new day always goes at the end; adding a day is one conditional update
+($push and $inc where dayCount is below 60) so the limit holds under concurrent requests; a full
+itinerary answers 409; the city is checked against the cities collection but not against the
+itinerary's countries, because the workbook does not ask for it.
+TO COMPLETE BY ME BEFORE THE PULL REQUEST: what I checked myself in Swagger and with the end-to-end
+tests on the test database, and what I changed or rejected after reading every line.
+================================================

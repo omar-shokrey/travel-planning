@@ -29,3 +29,12 @@ Owner: Ali Ghayesh (M8). Requirements: ITN-01 to ITN-26. Routes: `/api/itinerari
 - **Sorted by `updatedAt`, newest first, then by `_id`**, so two itineraries updated in the same millisecond keep a fixed order across pages. The index (`ownerId`, `updatedAt`) serves it.
 - **`GET /api/itineraries/:id` is for the owner only**, public or not: 404 if missing, 403 for another user. Reading someone else's public itinerary is a different route, `GET /api/itineraries/public/:id` (ITN-21).
 - **A day's number and date are computed in the mapper**: the number is the position in `days` plus 1, and the date is `startDate` plus the position, added in UTC with `luxon` so a clock change cannot shift it.
+
+## ITN-05: add days and cities
+
+- **A new day goes at the end.** `POST /api/itineraries/:id/days` takes a city and optional notes. The client never sends a number or a date: both follow from the position. Moving a day is ITN-08.
+- **The city is checked against the `cities` collection** (400 with the unknown id). The workbook does not ask that the city belongs to one of the itinerary's countries, so that is not checked.
+- **Adding a day is one conditional update**: `$push` the day and `$inc` `dayCount`, only where `dayCount` is below 60. Two requests at the same moment cannot pass the limit or leave `dayCount` different from the number of days. When the update matches nothing, the itinerary is full and the answer is 409.
+- **The day routes return the whole itinerary with its days**, because one change can affect the numbers and dates of other days.
+- **Editing a day changes only the fields that are sent.** Empty notes clear the notes. A day always keeps a city (ITN-09), so the city can be replaced but not removed.
+- **A day id that is not in this itinerary gives 404** "Day not found".
