@@ -532,7 +532,7 @@ describe('Logout, refresh and the inactivity limit (e2e, ACC-06)', () => {
       );
     });
 
-    it('issues different tokens for the same session, and the new access token works', async () => {
+    it('issues a new refresh token for the same session, and the new access token works', async () => {
       const login = await loginAs(await createUser());
 
       const response = await refresh(login.cookies);
@@ -540,7 +540,9 @@ describe('Logout, refresh and the inactivity limit (e2e, ACC-06)', () => {
       const lines = setCookieLines(response);
       const accessToken = cookieValue(lines, 'access_token') ?? '';
       const refreshToken = cookieValue(lines, 'refresh_token') ?? '';
-      expect(accessToken).not.toBe(login.accessToken);
+      // Only the refresh token is always new (it has a random id). An access
+      // token made in the same second as the login is the same text, so the
+      // test must not compare the two.
       expect(refreshToken).not.toBe(login.refreshToken);
       const payload = await jwt.verifyAsync<{ sid: string }>(refreshToken, {
         secret: TEST_REFRESH_SECRET,
