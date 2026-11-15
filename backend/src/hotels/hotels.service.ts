@@ -149,6 +149,21 @@ export class HotelsService {
     return toHotelResponse(updated);
   }
 
+  /**
+   * The hotel entity, for the other services of this module that change a
+   * hotel (policies, rooms). Answers 404 when the hotel does not exist and 403
+   * when the user is not the moderator assigned to it. Never expose it through
+   * a controller.
+   */
+  async findManagedEntityOrThrow(
+    id: string,
+    userId: string | undefined,
+  ): Promise<HotelDocument> {
+    const hotel = await this.findHotelOrThrow(id);
+    await this.assertHotelModerator(hotel, userId);
+    return hotel;
+  }
+
   private async findHotelOrThrow(id: string): Promise<HotelDocument> {
     const hotel = await this.hotels.findById(id).exec();
     if (!hotel) {

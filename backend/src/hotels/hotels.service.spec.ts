@@ -323,4 +323,42 @@ describe('HotelsService (HTL-01)', () => {
       expect(uploads.deleteImage).not.toHaveBeenCalled();
     });
   });
+
+  describe('findManagedEntityOrThrow', () => {
+    it('returns the hotel entity to the moderator assigned to it', async () => {
+      const { hotel, service } = setup();
+
+      expect(await service.findManagedEntityOrThrow(HOTEL_ID, USER_ID)).toBe(
+        hotel,
+      );
+    });
+
+    it('answers 404 for a hotel that does not exist', async () => {
+      const { service } = setup({ hotel: null });
+
+      await expect(
+        service.findManagedEntityOrThrow(HOTEL_ID, USER_ID),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('answers 403 for the moderator of another hotel', async () => {
+      const { service } = setup({
+        user: moderator(ProviderType.Hotel, '6740f1c2a4b5c6d7e8f90199'),
+      });
+
+      await expect(
+        service.findManagedEntityOrThrow(HOTEL_ID, USER_ID),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('answers 403 for an airline moderator', async () => {
+      const { service } = setup({
+        user: moderator(ProviderType.Airline, HOTEL_ID),
+      });
+
+      await expect(
+        service.findManagedEntityOrThrow(HOTEL_ID, USER_ID),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
 });
