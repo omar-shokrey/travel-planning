@@ -129,7 +129,7 @@ export class AirlinesService {
             ...(code !== undefined && { code }),
             ...(storedLogo && { logo: storedLogo.filename }),
           },
-          { new: true, runValidators: true },
+          { returnDocument: 'after', runValidators: true },
         )
         .exec();
     } catch (error) {

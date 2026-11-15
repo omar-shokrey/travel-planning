@@ -191,7 +191,7 @@ describe('AirlinesService', () => {
       expect(model.findByIdAndUpdate).toHaveBeenCalledWith(
         AIRLINE_ID,
         { name: 'EgyptAir Updated' },
-        { new: true, runValidators: true },
+        { returnDocument: 'after', runValidators: true },
       );
       expect(response.name).toBe('EgyptAir Updated');
       expect(response).not.toHaveProperty('_id');
