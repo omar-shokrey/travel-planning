@@ -18,7 +18,8 @@ import {
   ACCOUNT_SUSPENDED_MESSAGE,
   LOGIN_REQUIRED_MESSAGE,
 } from '../auth.constants';
-import { AuthTokensService } from '../auth-tokens.service';
+import { AuthTokensService, type TokenClaims } from '../auth-tokens.service';
+import { SessionsService } from '../sessions.service';
 
 /**
  * The authentication guard (ACC-04), registered for the whole app. A route
@@ -28,6 +29,11 @@ import { AuthTokensService } from '../auth-tokens.service';
  *
  * The account is read on every request, so a suspension or a role change
  * applies at once, without waiting for the token to expire.
+ *
+ * A valid token is not enough (ACC-06): the session it names must still be
+ * live. Logout revokes the session, and a session that had no authenticated
+ * request for the inactivity limit has run out. Each request that gets in
+ * counts as activity and moves the end of the session forward.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -35,6 +41,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly tokens: AuthTokensService,
     private readonly usersService: UsersService,
+    private readonly sessions: SessionsService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -67,15 +74,26 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException(LOGIN_REQUIRED_MESSAGE);
     }
 
-    let userId: string;
+    let claims: TokenClaims;
     try {
-      userId = await this.tokens.verifyAccessToken(token);
+      claims = await this.tokens.verifyAccessToken(token);
     } catch {
       // Expired, tampered with, or signed with another secret.
       throw new UnauthorizedException(LOGIN_REQUIRED_MESSAGE);
     }
 
-    const user = await this.usersService.findEntityById(userId);
+    // Logged out, idle for too long, or never existed: the same answer as for
+    // a token that is not valid, so the reason is not told to the caller.
+    const live = await this.sessions.touch(
+      claims.sessionId,
+      claims.userId,
+      new Date(),
+    );
+    if (!live) {
+      throw new UnauthorizedException(LOGIN_REQUIRED_MESSAGE);
+    }
+
+    const user = await this.usersService.findEntityById(claims.userId);
     if (!user) {
       throw new UnauthorizedException(LOGIN_REQUIRED_MESSAGE);
     }

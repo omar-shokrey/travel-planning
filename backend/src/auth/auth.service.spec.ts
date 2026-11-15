@@ -14,7 +14,7 @@ import {
   type CreateUserInput,
   type UsersService,
 } from '../users/users.service';
-import type { AuthTokensService } from './auth-tokens.service';
+import type { AuthTokensService, TokenClaims } from './auth-tokens.service';
 import { AuthService } from './auth.service';
 import {
   ACCOUNT_SUSPENDED_MESSAGE,
@@ -26,6 +26,7 @@ import {
 } from './auth.constants';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
+import type { SessionsService } from './sessions.service';
 
 const dto: RegisterDto = {
   name: 'Sara Ahmed',
@@ -49,6 +50,14 @@ const wrongLogin: LoginDto = { ...loginDto, password: 'Wr0ngPassword' };
 const issuedTokens = {
   accessToken: 'an-access-token',
   refreshToken: 'a-refresh-token',
+};
+
+const SESSION_ID = '6740f1c2a4b5c6d7e8f90abc';
+
+/** What the tokens service reads out of a token of the stored user's session. */
+const claims: TokenClaims = {
+  userId: '6740f1c2a4b5c6d7e8f90123',
+  sessionId: SESSION_ID,
 };
 
 /** A real bcrypt hash of the password above. Few rounds, so the tests stay fast. */
@@ -79,13 +88,26 @@ function setup(changes: { status?: UserStatus; lockedUntil?: Date } = {}) {
     clearExpiredLock: jest.fn().mockResolvedValue(undefined),
     resetFailedLogins: jest.fn().mockResolvedValue(undefined),
   };
-  const tokens = { issueTokens: jest.fn().mockResolvedValue(issuedTokens) };
+  const tokens = {
+    issueTokens: jest.fn().mockResolvedValue(issuedTokens),
+    verifyRefreshToken: jest.fn().mockResolvedValue(claims),
+    readClaims: jest.fn().mockResolvedValue(claims),
+    // Not a real hash, but one that shows which token it was made from.
+    hashToken: jest.fn((token: string) => `hash-of-${token}`),
+  };
+  // The sessions (ACC-06): by default the session is live, so a refresh wins.
+  const sessions = {
+    create: jest.fn().mockResolvedValue(undefined),
+    rotate: jest.fn().mockResolvedValue(true),
+    revoke: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new AuthService(
     usersService as unknown as UsersService,
     tokens as unknown as AuthTokensService,
+    sessions as unknown as SessionsService,
   );
 
-  return { usersService, tokens, service };
+  return { usersService, tokens, sessions, service };
 }
 
 describe('AuthService', () => {
@@ -158,6 +180,7 @@ describe('AuthService', () => {
 
       expect(tokens.issueTokens).toHaveBeenCalledWith(
         '6740f1c2a4b5c6d7e8f90123',
+        expect.stringMatching(/^[0-9a-f]{24}$/),
       );
       expect(result.tokens).toBe(issuedTokens);
       expect(result.user).toEqual({
@@ -177,6 +200,68 @@ describe('AuthService', () => {
 
       expect(JSON.stringify(user)).not.toContain(passwordHash);
       expect(user).not.toHaveProperty('passwordHash');
+    });
+
+    it('starts a session with the id that both tokens carry (ACC-06)', async () => {
+      const { tokens, sessions, service } = setup();
+
+      await service.login(loginDto);
+
+      const [, tokenSessionId] = tokens.issueTokens.mock.calls[0] as [
+        string,
+        string,
+      ];
+      expect(sessions.create).toHaveBeenCalledTimes(1);
+      const [created] = sessions.create.mock.calls[0] as [
+        { id: Types.ObjectId; userId: Types.ObjectId; now: Date },
+      ];
+      expect(created.id.toString()).toBe(tokenSessionId);
+      expect(created.userId).toBe(userObjectId);
+      expect(created.now).toBeInstanceOf(Date);
+    });
+
+    it('stores the hash of the refresh token and never the token (ACC-06)', async () => {
+      const { sessions, service } = setup();
+
+      await service.login(loginDto);
+
+      expect(sessions.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          refreshTokenHash: 'hash-of-a-refresh-token',
+        }),
+      );
+      expect(JSON.stringify(sessions.create.mock.calls)).not.toContain(
+        issuedTokens.accessToken,
+      );
+      expect(JSON.stringify(sessions.create.mock.calls)).not.toContain(
+        `"${issuedTokens.refreshToken}"`,
+      );
+    });
+
+    it('makes a new session on every login, so two browsers do not share one (ACC-06)', async () => {
+      const { sessions, service } = setup();
+
+      await service.login(loginDto);
+      await service.login(loginDto);
+
+      const [first, second] = sessions.create.mock.calls.map(([created]) =>
+        (created as { id: Types.ObjectId }).id.toString(),
+      );
+      expect(first).not.toBe(second);
+    });
+
+    it('starts no session when the login fails (ACC-06)', async () => {
+      const wrong = setup();
+      const suspended = setup({ status: UserStatus.Suspended });
+      const locked = setup({ lockedUntil: new Date(Date.now() + MINUTE) });
+
+      await wrong.service.login(wrongLogin).catch(() => undefined);
+      await suspended.service.login(loginDto).catch(() => undefined);
+      await locked.service.login(loginDto).catch(() => undefined);
+
+      expect(wrong.sessions.create).not.toHaveBeenCalled();
+      expect(suspended.sessions.create).not.toHaveBeenCalled();
+      expect(locked.sessions.create).not.toHaveBeenCalled();
     });
 
     it('rejects a wrong password with the generic message and issues nothing', async () => {
@@ -461,6 +546,220 @@ describe('AuthService', () => {
       expect((error as HttpException).getStatus()).toBe(
         HttpStatus.TOO_MANY_REQUESTS,
       );
+    });
+  });
+
+  describe('logout (ACC-06)', () => {
+    it('revokes the session named by the refresh token', async () => {
+      const { tokens, sessions, service } = setup();
+
+      await service.logout({ refreshToken: 'a-refresh-token' });
+
+      expect(tokens.readClaims).toHaveBeenCalledWith(
+        'a-refresh-token',
+        'refresh',
+      );
+      expect(sessions.revoke).toHaveBeenCalledTimes(1);
+      expect(sessions.revoke).toHaveBeenCalledWith(
+        SESSION_ID,
+        claims.userId,
+        expect.any(Date),
+      );
+    });
+
+    it('revokes the session named by the access token when there is no refresh token', async () => {
+      const { tokens, sessions, service } = setup();
+
+      await service.logout({ accessToken: 'an-access-token' });
+
+      expect(tokens.readClaims).toHaveBeenCalledWith(
+        'an-access-token',
+        'access',
+      );
+      expect(sessions.revoke).toHaveBeenCalledWith(
+        SESSION_ID,
+        claims.userId,
+        expect.any(Date),
+      );
+    });
+
+    it('revokes the session once when both tokens name it', async () => {
+      const { sessions, service } = setup();
+
+      await service.logout({
+        refreshToken: 'a-refresh-token',
+        accessToken: 'an-access-token',
+      });
+
+      expect(sessions.revoke).toHaveBeenCalledTimes(1);
+    });
+
+    it('revokes both sessions when the two tokens name different ones', async () => {
+      const { tokens, sessions, service } = setup();
+      tokens.readClaims.mockResolvedValueOnce(claims).mockResolvedValueOnce({
+        ...claims,
+        sessionId: '6740f1c2a4b5c6d7e8f90def',
+      });
+
+      await service.logout({
+        refreshToken: 'a-refresh-token',
+        accessToken: 'an-access-token',
+      });
+
+      expect(sessions.revoke).toHaveBeenCalledTimes(2);
+    });
+
+    it('does nothing, and does not fail, when no token was sent', async () => {
+      const { tokens, sessions, service } = setup();
+
+      await expect(service.logout({})).resolves.toBeUndefined();
+
+      expect(tokens.readClaims).not.toHaveBeenCalled();
+      expect(sessions.revoke).not.toHaveBeenCalled();
+    });
+
+    it('revokes nothing, and does not fail, when the token is not ours', async () => {
+      const { tokens, sessions, service } = setup();
+      tokens.readClaims.mockResolvedValue(null);
+
+      await expect(
+        service.logout({ refreshToken: 'garbage', accessToken: 'garbage' }),
+      ).resolves.toBeUndefined();
+
+      expect(sessions.revoke).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('refresh (ACC-06)', () => {
+    /** Runs a refresh that must fail and returns the error. */
+    const failureOf = (attempt: Promise<unknown>): Promise<unknown> =>
+      attempt.then(
+        () => {
+          throw new Error('The refresh was expected to fail');
+        },
+        (error: unknown) => error,
+      );
+
+    it('issues new tokens for the same session and returns the public user', async () => {
+      const { tokens, service } = setup();
+      const newTokens = {
+        accessToken: 'new-access',
+        refreshToken: 'new-refresh',
+      };
+      tokens.issueTokens.mockResolvedValueOnce(newTokens);
+
+      const result = await service.refresh('a-refresh-token');
+
+      expect(tokens.verifyRefreshToken).toHaveBeenCalledWith('a-refresh-token');
+      expect(tokens.issueTokens).toHaveBeenCalledWith(
+        claims.userId,
+        SESSION_ID,
+      );
+      expect(result.tokens).toBe(newTokens);
+      expect(result.user).toMatchObject({
+        id: claims.userId,
+        email: 'sara@example.com',
+        role: 'user',
+      });
+      expect(JSON.stringify(result.user)).not.toContain(passwordHash);
+    });
+
+    it('swaps the stored hash of the old refresh token for the hash of the new one', async () => {
+      const { tokens, sessions, service } = setup();
+      tokens.issueTokens.mockResolvedValueOnce({
+        accessToken: 'new-access',
+        refreshToken: 'new-refresh',
+      });
+
+      await service.refresh('a-refresh-token');
+
+      expect(sessions.rotate).toHaveBeenCalledWith({
+        sessionId: SESSION_ID,
+        userId: claims.userId,
+        currentHash: 'hash-of-a-refresh-token',
+        newHash: 'hash-of-new-refresh',
+        now: expect.any(Date),
+      });
+    });
+
+    it('answers 401 without looking anything up when there is no refresh token', async () => {
+      const { usersService, tokens, sessions, service } = setup();
+
+      const error = await failureOf(service.refresh(undefined));
+
+      expect(error).toBeInstanceOf(UnauthorizedException);
+      expect((error as UnauthorizedException).message).toBe(
+        LOGIN_REQUIRED_MESSAGE,
+      );
+      expect(tokens.verifyRefreshToken).not.toHaveBeenCalled();
+      expect(usersService.findEntityById).not.toHaveBeenCalled();
+      expect(sessions.rotate).not.toHaveBeenCalled();
+    });
+
+    it('answers 401 when the token is not valid or has expired, and issues nothing', async () => {
+      const { usersService, tokens, sessions, service } = setup();
+      tokens.verifyRefreshToken.mockRejectedValue(new Error('jwt expired'));
+
+      const error = await failureOf(service.refresh('a-refresh-token'));
+
+      expect(error).toBeInstanceOf(UnauthorizedException);
+      // The reason (expired, tampered, wrong secret) is not told to the caller.
+      expect((error as UnauthorizedException).message).toBe(
+        LOGIN_REQUIRED_MESSAGE,
+      );
+      expect(usersService.findEntityById).not.toHaveBeenCalled();
+      expect(tokens.issueTokens).not.toHaveBeenCalled();
+      expect(sessions.rotate).not.toHaveBeenCalled();
+    });
+
+    it('answers 401 when the session is revoked, has run out or holds another token', async () => {
+      const { sessions, service } = setup();
+      // One atomic update decides all three: it matched no live session with this token.
+      sessions.rotate.mockResolvedValue(false);
+
+      const error = await failureOf(service.refresh('a-refresh-token'));
+
+      expect(error).toBeInstanceOf(UnauthorizedException);
+      expect((error as UnauthorizedException).message).toBe(
+        LOGIN_REQUIRED_MESSAGE,
+      );
+    });
+
+    it('answers 401 when the account is gone', async () => {
+      const { usersService, sessions, service } = setup();
+      usersService.findEntityById.mockResolvedValue(null);
+
+      const error = await failureOf(service.refresh('a-refresh-token'));
+
+      expect(error).toBeInstanceOf(UnauthorizedException);
+      expect(sessions.rotate).not.toHaveBeenCalled();
+    });
+
+    it('answers 401 when the account was deactivated (ACC-12)', async () => {
+      const { tokens, sessions, service } = setup({
+        status: UserStatus.Deactivated,
+      });
+
+      const error = await failureOf(service.refresh('a-refresh-token'));
+
+      expect(error).toBeInstanceOf(UnauthorizedException);
+      expect(tokens.issueTokens).not.toHaveBeenCalled();
+      expect(sessions.rotate).not.toHaveBeenCalled();
+    });
+
+    it('answers 403 when the account is suspended, and issues nothing', async () => {
+      const { tokens, sessions, service } = setup({
+        status: UserStatus.Suspended,
+      });
+
+      const error = await failureOf(service.refresh('a-refresh-token'));
+
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect((error as ForbiddenException).message).toBe(
+        ACCOUNT_SUSPENDED_MESSAGE,
+      );
+      expect(tokens.issueTokens).not.toHaveBeenCalled();
+      expect(sessions.rotate).not.toHaveBeenCalled();
     });
   });
 

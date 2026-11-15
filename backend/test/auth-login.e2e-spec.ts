@@ -9,6 +9,7 @@ import { Types, type Model } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { TEST_ACCESS_SECRET, TEST_REFRESH_SECRET } from './support/auth-env';
+import { deleteSessionsOf } from './support/delete-sessions';
 import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
 import {
@@ -121,9 +122,16 @@ describe('POST /api/auth/login and the authentication guard (e2e, ACC-04)', () =
     return cookie ? call.set('Cookie', cookie) : call;
   };
 
+  /**
+   * An access cookie made by hand. The session it names does not exist, so
+   * the guard refuses it however well it is signed (ACC-06).
+   */
   const accessCookieFor = (userId: string, secret = TEST_ACCESS_SECRET) =>
     jwt
-      .signAsync({ sub: userId }, { secret, expiresIn: 60 })
+      .signAsync(
+        { sub: userId, sid: new Types.ObjectId().toString() },
+        { secret, expiresIn: 60 },
+      )
       .then((token) => `${ACCESS_TOKEN_COOKIE}=${token}`);
 
   beforeAll(async () => {
@@ -144,6 +152,7 @@ describe('POST /api/auth/login and the authentication guard (e2e, ACC-04)', () =
 
   afterAll(async () => {
     for (const id of createdIds) {
+      await deleteSessionsOf(app, id);
       await users.findByIdAndDelete(id);
     }
     await app.close();
@@ -376,9 +385,12 @@ describe('POST /api/auth/login and the authentication guard (e2e, ACC-04)', () =
           { sub: user.id },
           { secret: TEST_ACCESS_SECRET, expiresIn: -10 },
         )}`,
-        'a token of a user that does not exist': await accessCookieFor(
-          new Types.ObjectId().toString(),
-        ),
+        'a token of a user and a session that do not exist':
+          await accessCookieFor(new Types.ObjectId().toString()),
+        'a token with no session (made before ACC-06)': `${ACCESS_TOKEN_COOKIE}=${await jwt.signAsync(
+          { sub: user.id },
+          { secret: TEST_ACCESS_SECRET, expiresIn: 60 },
+        )}`,
         'a token that names no user': `${ACCESS_TOKEN_COOKIE}=${await jwt.signAsync(
           {},
           { secret: TEST_ACCESS_SECRET, expiresIn: 60 },
