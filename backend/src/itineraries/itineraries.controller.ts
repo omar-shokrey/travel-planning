@@ -2,11 +2,13 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -21,9 +23,13 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
+import { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
 import { ItineraryResponseDto } from './dto/itinerary-response.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { ItinerariesService } from './itineraries.service';
@@ -51,6 +57,41 @@ export class ItinerariesController {
     @CurrentUser('id') userId: string,
   ): Promise<ItineraryResponseDto> {
     return this.itineraries.create(dto, userId);
+  }
+
+  @Get()
+  @ApiOperation({
+    summary: 'List my itineraries',
+    description:
+      'ITN-03. The itineraries of the logged-in user with their title, countries, start date, number of days and visibility, most recently updated first.',
+  })
+  @ApiPaginatedResponse(ItineraryResponseDto)
+  @ApiBadRequestResponse({ description: 'page or limit is invalid' })
+  findMine(
+    @Query() query: PaginationQueryDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<PaginatedResponse<ItineraryResponseDto>> {
+    return this.itineraries.findMine(query, userId);
+  }
+
+  @Get(':id')
+  @ApiOperation({
+    summary: 'Open one of my itineraries',
+    description:
+      'ITN-03. The full details of your own itinerary: its fields and its days in order, each with its number and date.',
+  })
+  @ApiParam({ name: 'id', description: 'Itinerary id' })
+  @ApiOkResponse({ type: ItineraryDetailResponseDto })
+  @ApiBadRequestResponse({ description: 'The id is not a valid id' })
+  @ApiForbiddenResponse({
+    description: 'The itinerary belongs to another user',
+  })
+  @ApiNotFoundResponse({ description: 'No itinerary has this id' })
+  findOne(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    return this.itineraries.findOne(id, userId);
   }
 
   @Patch(':id')
