@@ -34,6 +34,10 @@ export class BlogPost {
   @Prop({ type: [String], default: [] })
   images: string[];
 
+  /** Kept in step with the `comments` collection by CommentsService (BLG-05). */
+  @Prop({ type: Number, default: 0, min: 0 })
+  commentCount: number;
+
   createdAt: Date;
   updatedAt: Date;
 }
