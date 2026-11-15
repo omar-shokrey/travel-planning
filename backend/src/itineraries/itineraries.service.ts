@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -11,11 +12,15 @@ import {
   type PaginatedResponse,
 } from '../common/dto/paginated-response.dto';
 import type { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
+import type { AddDayDto } from './dto/add-day.dto';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto';
 import type { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
 import type { ItineraryResponseDto } from './dto/itinerary-response.dto';
+import type { UpdateDayDto } from './dto/update-day.dto';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto';
+import { ITINERARY_MAX_DAYS } from './itineraries.constants';
 import {
   toItineraryDetailResponse,
   toItineraryResponse,
@@ -28,6 +33,7 @@ export class ItinerariesService {
     @InjectModel(Itinerary.name)
     private readonly itineraries: Model<Itinerary>,
     @InjectModel(Country.name) private readonly countries: Model<Country>,
+    @InjectModel(City.name) private readonly cities: Model<City>,
   ) {}
 
   /** ITN-01: create an itinerary. The owner is the logged-in user and it starts private. */
@@ -109,6 +115,65 @@ export class ItinerariesService {
     await itinerary.deleteOne();
   }
 
+  /**
+   * ITN-05: add a day at the end of your own itinerary. One conditional update
+   * adds the day and counts it, and only while there are fewer than 60, so two
+   * requests at the same moment cannot pass the limit or leave `dayCount`
+   * different from the number of days.
+   */
+  async addDay(
+    id: string,
+    dto: AddDayDto,
+    userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    await this.findOwnedOrThrow(id, userId);
+    await this.assertCityExists(dto.cityId);
+
+    const day = {
+      cityId: dto.cityId,
+      ...(dto.notes ? { notes: dto.notes } : {}),
+    };
+    const itinerary = await this.itineraries.findOneAndUpdate(
+      { _id: id, dayCount: { $lt: ITINERARY_MAX_DAYS } },
+      { $push: { days: day }, $inc: { dayCount: 1 } },
+      { returnDocument: 'after', runValidators: true },
+    );
+    if (!itinerary) {
+      throw new ConflictException(
+        `An itinerary has at most ${ITINERARY_MAX_DAYS} days`,
+      );
+    }
+    return toItineraryDetailResponse(itinerary);
+  }
+
+  /** ITN-05: edit the city or the notes of a day of your own itinerary. */
+  async updateDay(
+    id: string,
+    dayId: string,
+    dto: UpdateDayDto,
+    userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    const itinerary = await this.findOwnedOrThrow(id, userId);
+    const day = itinerary.days.find(
+      (candidate) => candidate._id.toString() === dayId,
+    );
+    if (!day) {
+      throw new NotFoundException('Day not found');
+    }
+
+    // A field that is absent or null is left as it is.
+    if (dto.cityId != null) {
+      await this.assertCityExists(dto.cityId);
+      day.cityId = dto.cityId;
+    }
+    if (dto.notes != null) {
+      day.notes = dto.notes;
+    }
+
+    await itinerary.save();
+    return toItineraryDetailResponse(itinerary);
+  }
+
   /** For other services, which need the entity. Never return it from a controller. */
   async findEntityOrThrow(id: string): Promise<ItineraryDocument> {
     const itinerary = await this.itineraries.findById(id);
@@ -144,6 +209,14 @@ export class ItinerariesService {
       throw new BadRequestException(
         `Unknown country code: ${unknown.join(', ')}`,
       );
+    }
+  }
+
+  /** ITN-05: a day's city comes from the seeded city list (GEN-12). */
+  private async assertCityExists(cityId: string): Promise<void> {
+    const city = await this.cities.exists({ _id: cityId });
+    if (!city) {
+      throw new BadRequestException(`Unknown city id: ${cityId}`);
     }
   }
 }

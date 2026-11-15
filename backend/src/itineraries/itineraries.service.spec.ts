@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
@@ -7,6 +8,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Mongoose, Types } from 'mongoose';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
 import { ItineraryVisibility } from './enums/itinerary-visibility.enum';
 import { ItinerariesService } from './itineraries.service';
@@ -26,6 +28,7 @@ const ItineraryModel = mongoose.model(Itinerary.name, ItinerarySchema);
 const ownerId = new Types.ObjectId().toString();
 const otherUserId = new Types.ObjectId().toString();
 const KNOWN_COUNTRIES = ['EG', 'AE', 'GB'];
+const KNOWN_CITIES = ['cairo', 'dubai'];
 
 const createDto = {
   title: 'Ten days in Egypt',
@@ -38,6 +41,7 @@ describe('ItinerariesService', () => {
   let createSpy: jest.SpiedFunction<typeof ItineraryModel.create>;
   let findByIdSpy: jest.SpiedFunction<typeof ItineraryModel.findById>;
   let countryFind: jest.Mock;
+  let cityExists: jest.Mock;
 
   /** An itinerary that is "in the database": findById returns it. */
   const stored = (owner = ownerId): ItineraryDocument => {
@@ -74,6 +78,13 @@ describe('ItinerariesService', () => {
       }),
     }));
 
+    // cities.exists({ _id: cityId })
+    cityExists = jest.fn((filter: { _id: string }) =>
+      Promise.resolve(
+        KNOWN_CITIES.includes(filter._id) ? { _id: filter._id } : null,
+      ),
+    );
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         ItinerariesService,
@@ -82,6 +93,7 @@ describe('ItinerariesService', () => {
           provide: getModelToken(Country.name),
           useValue: { find: countryFind },
         },
+        { provide: getModelToken(City.name), useValue: { exists: cityExists } },
       ],
     }).compile();
     service = moduleRef.get(ItinerariesService);
@@ -353,6 +365,226 @@ describe('ItinerariesService', () => {
         service.remove(itinerary.id as string, ownerId),
       ).rejects.toThrow(ForbiddenException);
       expect(itinerary.deleteOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('addDay', () => {
+    /** Replaces the conditional update: it adds the day as the database would. */
+    const withUpdate = (itinerary: ItineraryDocument | null) =>
+      jest.spyOn(ItineraryModel, 'findOneAndUpdate').mockImplementation(((
+        _filter: unknown,
+        update: { $push: { days: Record<string, unknown> } },
+      ) => {
+        if (itinerary) {
+          itinerary.days.push(update.$push.days as never);
+          itinerary.dayCount += 1;
+        }
+        return Promise.resolve(itinerary);
+      }) as never);
+
+    it('adds the day at the end and returns the itinerary with its days', async () => {
+      const itinerary = stored();
+      itinerary.days.push({ cityId: 'cairo' } as never);
+      itinerary.dayCount = 1;
+      withUpdate(itinerary);
+
+      const response = await service.addDay(
+        itinerary.id as string,
+        { cityId: 'dubai', notes: 'Fly in the morning' },
+        ownerId,
+      );
+
+      expect(response.dayCount).toBe(2);
+      expect(response.days).toEqual([
+        expect.objectContaining({
+          dayNumber: 1,
+          date: '2026-12-20',
+          cityId: 'cairo',
+        }),
+        {
+          id: expect.stringMatching(/^[0-9a-f]{24}$/),
+          dayNumber: 2,
+          date: '2026-12-21',
+          cityId: 'dubai',
+          notes: 'Fly in the morning',
+        },
+      ]);
+    });
+
+    it('adds and counts the day in one update that only passes below 60 days', async () => {
+      const itinerary = stored();
+      const updateSpy = withUpdate(itinerary);
+
+      await service.addDay(
+        itinerary.id as string,
+        { cityId: 'cairo' },
+        ownerId,
+      );
+
+      expect(updateSpy).toHaveBeenCalledWith(
+        { _id: itinerary.id, dayCount: { $lt: 60 } },
+        { $push: { days: { cityId: 'cairo' } }, $inc: { dayCount: 1 } },
+        { returnDocument: 'after', runValidators: true },
+      );
+    });
+
+    it('answers 409 when the itinerary already has 60 days', async () => {
+      const itinerary = stored();
+      const updateSpy = withUpdate(null);
+
+      await expect(
+        service.addDay(itinerary.id as string, { cityId: 'cairo' }, ownerId),
+      ).rejects.toThrow(
+        new ConflictException('An itinerary has at most 60 days'),
+      );
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a city that is not in the city list and adds nothing', async () => {
+      const itinerary = stored();
+      const updateSpy = withUpdate(itinerary);
+
+      await expect(
+        service.addDay(itinerary.id as string, { cityId: 'atlantis' }, ownerId),
+      ).rejects.toThrow(new BadRequestException('Unknown city id: atlantis'));
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the itinerary does not exist', async () => {
+      const updateSpy = withUpdate(null);
+
+      await expect(
+        service.addDay(
+          new Types.ObjectId().toString(),
+          { cityId: 'cairo' },
+          ownerId,
+        ),
+      ).rejects.toThrow(NotFoundException);
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('answers 403 for an itinerary of another user and adds nothing', async () => {
+      const itinerary = stored(otherUserId);
+      const updateSpy = withUpdate(itinerary);
+
+      await expect(
+        service.addDay(itinerary.id as string, { cityId: 'cairo' }, ownerId),
+      ).rejects.toThrow(ForbiddenException);
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateDay', () => {
+    /** An itinerary with two days in Cairo. Returns it with the id of day 2. */
+    const withDays = (owner = ownerId) => {
+      const itinerary = stored(owner);
+      itinerary.days.push(
+        { cityId: 'cairo', notes: 'Pyramids' } as never,
+        { cityId: 'cairo', notes: 'Museum' } as never,
+      );
+      itinerary.dayCount = 2;
+      return { itinerary, dayId: itinerary.days[1]._id.toString() };
+    };
+
+    it('changes the city and the notes of that day only', async () => {
+      const { itinerary, dayId } = withDays();
+
+      const response = await service.updateDay(
+        itinerary.id as string,
+        dayId,
+        { cityId: 'dubai', notes: 'Old town' },
+        ownerId,
+      );
+
+      expect(response.days).toEqual([
+        expect.objectContaining({
+          dayNumber: 1,
+          cityId: 'cairo',
+          notes: 'Pyramids',
+        }),
+        expect.objectContaining({
+          id: dayId,
+          dayNumber: 2,
+          date: '2026-12-21',
+          cityId: 'dubai',
+          notes: 'Old town',
+        }),
+      ]);
+      expect(itinerary.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('changes only the field that is sent', async () => {
+      const { itinerary, dayId } = withDays();
+
+      const response = await service.updateDay(
+        itinerary.id as string,
+        dayId,
+        { notes: 'Citadel' },
+        ownerId,
+      );
+
+      expect(response.days[1]).toMatchObject({
+        cityId: 'cairo',
+        notes: 'Citadel',
+      });
+      expect(cityExists).not.toHaveBeenCalled();
+    });
+
+    it('clears the notes when an empty text is sent', async () => {
+      const { itinerary, dayId } = withDays();
+
+      const response = await service.updateDay(
+        itinerary.id as string,
+        dayId,
+        { notes: '' },
+        ownerId,
+      );
+
+      expect(response.days[1]).not.toHaveProperty('notes');
+    });
+
+    it('answers 404 when the day is not in the itinerary', async () => {
+      const { itinerary } = withDays();
+
+      await expect(
+        service.updateDay(
+          itinerary.id as string,
+          new Types.ObjectId().toString(),
+          { notes: 'x' },
+          ownerId,
+        ),
+      ).rejects.toThrow(new NotFoundException('Day not found'));
+      expect(itinerary.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a city that is not in the city list and changes nothing', async () => {
+      const { itinerary, dayId } = withDays();
+
+      await expect(
+        service.updateDay(
+          itinerary.id as string,
+          dayId,
+          { cityId: 'atlantis' },
+          ownerId,
+        ),
+      ).rejects.toThrow(new BadRequestException('Unknown city id: atlantis'));
+      expect(itinerary.days[1].cityId).toBe('cairo');
+      expect(itinerary.save).not.toHaveBeenCalled();
+    });
+
+    it('answers 403 for an itinerary of another user and changes nothing', async () => {
+      const { itinerary, dayId } = withDays(otherUserId);
+
+      await expect(
+        service.updateDay(
+          itinerary.id as string,
+          dayId,
+          { notes: 'Mine now' },
+          ownerId,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(itinerary.days[1].notes).toBe('Museum');
+      expect(itinerary.save).not.toHaveBeenCalled();
     });
   });
 
