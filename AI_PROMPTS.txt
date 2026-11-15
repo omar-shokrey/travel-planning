@@ -619,8 +619,9 @@ The design follows the data model in the spec: one document per itinerary, nothi
 except dayCount, dates as YYYY-MM-DD strings, money as whole minor units. Claude left out the
 exchange_rates entity (it comes with ITN-18) and kept the moderation enum inside the module, because
 a shared enum needs its own pull request.
-TO COMPLETE BY ME BEFORE THE PULL REQUEST: what I checked myself, and what I changed or rejected
-after reading every line.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. I also started the API against the
+shared database and it connected. I changed nothing and rejected nothing.
 ================================================
 
 ================================================
@@ -645,8 +646,11 @@ save, so absent and null fields are now both left unchanged; (2) the first versi
 before ACC-04 was merged and had a temporary 401 check in the controller and no logged-in
 end-to-end tests. After the authentication guard reached develop, Claude removed the check and
 rewrote the end-to-end tests to use a logged-in user.
-TO COMPLETE BY ME BEFORE THE PULL REQUEST: what I checked myself in Swagger and with the end-to-end
-tests on the test database, and what I changed or rejected after reading every line.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger, POST /api/itineraries
+answered 401 before I logged in. After logging in it created an itinerary (201, private, owned by my
+account), PATCH with an empty title answered 400, DELETE answered 204 and opening the itinerary
+afterwards answered 404. I changed nothing and rejected nothing.
 ================================================
 
 ================================================
