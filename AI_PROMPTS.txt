@@ -533,15 +533,6 @@ nothing. Rejected: nothing.
 
 ================================================
 Date: 2026-11-15
-Student: Maha
-Tool: ChatGPT
-Branch / Issue: feature/BLG-01-create-post / BLG-01
-Related Requirement: BLG-01
-Prompt:
-I asked ChatGPT to help me implement BLG-01 (allow a registered user to create a blog post with a required title and body, optional tags and images, and save it as Draft or Publish).
-
-How the output was used:
-ChatGPT helped me review the BLG-01 requirement and the existing project structure, then guided the implementation of the blog post status enum, BlogPost Mongoose schema, create-post DTO, response DTO, mapper, posts service, posts controller, and BlogModule registration. It also helped identify that tags needed to be included in the DTO because the project uses forbidNonWhitelisted validation. ChatGPT helped create focused unit tests for the service, controller, and DTO validation, including draft creation, published posts with tags, required fields, invalid status, invalid tags, and unknown fields. I ran the tests and project checks myself.
 Student: Omar Hossam
 Tool: Claude (claude.ai Project chat)
 Branch / Issue: feature/GEN-13-backend-enforced-rules / #105
@@ -607,3 +598,16 @@ login, because Claude had used the option { new: true } in recordFailedLogin; Cl
 { returnDocument: 'after' } and I ran the checks again. Rejected: nothing.
 ================================================
 
+================================================
+Date: 2026-11-15
+Student: Maha Mohamed Gad
+Tool: ChatGPT
+Branch / Issue: feature/BLG-01-create-post / [#81](https://github.com/omar-shokrey/travel-planning/issues/81)
+Related Requirement: BLG-01
+Prompt:
+I asked ChatGPT to help me implement BLG-01, allowing a registered user to create a blog post with a required title and body, optional tags and images, and save it as Draft or Publish. I also asked it to review the existing project structure and guide the implementation and testing.
+How the output was used:
+ChatGPT helped me review the BLG-01 requirement and existing project structure, then guided the implementation of the BlogPost schema, DTO, service, controller, module, response mapper, validation, and focused tests.
+Accepted, changed, or rejected:
+I accepted the proposed implementation structure and validation approach. I changed the implementation to support optional tags and an optional status with Draft as the default, and added tests based on the project's existing validation setup and requirement details.
+================================================
