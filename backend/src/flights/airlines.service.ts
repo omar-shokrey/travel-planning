@@ -10,6 +10,8 @@ import { Model } from 'mongoose';
 import { Airline, AirlineDocument } from './models/airline.schema';
 import { CreateAirlineDto } from './dto/create-airline.dto';
 import { UpdateAirlineDto } from './dto/update-airline.dto';
+import { AirlineResponseDto } from './dto/airline-response.dto';
+import { toAirlineResponse } from './mappers/airline.mapper';
 import { UploadsService } from '../uploads/uploads.service';
 import type { ImageFile } from '../uploads/uploads.types';
 import { UsersService } from '../users/users.service';
@@ -27,7 +29,7 @@ export class AirlinesService {
   async create(
     dto: CreateAirlineDto,
     logo: ImageFile | undefined,
-  ): Promise<AirlineDocument> {
+  ): Promise<AirlineResponseDto> {
     const code = dto.code.trim().toUpperCase();
 
     const existing = await this.airlineModel.exists({ code });
@@ -40,8 +42,9 @@ export class AirlinesService {
 
     const storedLogo = await this.uploadsService.saveImage(logo);
 
+    let airline: AirlineDocument;
     try {
-      return await this.airlineModel.create({
+      airline = await this.airlineModel.create({
         name: dto.name,
         code,
         logo: storedLogo.filename,
@@ -55,9 +58,15 @@ export class AirlinesService {
 
       throw error;
     }
+
+    return toAirlineResponse(airline);
   }
 
-  async findById(id: string): Promise<AirlineDocument> {
+  async findById(id: string): Promise<AirlineResponseDto> {
+    return toAirlineResponse(await this.findEntityOrThrow(id));
+  }
+
+  async findEntityOrThrow(id: string): Promise<AirlineDocument> {
     const airline = await this.airlineModel.findById(id).exec();
 
     if (!airline) {
@@ -72,8 +81,8 @@ export class AirlinesService {
     userId: string,
     dto: UpdateAirlineDto,
     logo?: ImageFile,
-  ): Promise<AirlineDocument> {
-    const airline = await this.findById(id);
+  ): Promise<AirlineResponseDto> {
+    const airline = await this.findEntityOrThrow(id);
 
     const user = await this.usersService.findEntityById(userId);
 
@@ -147,6 +156,6 @@ export class AirlinesService {
       await this.uploadsService.deleteImage(airline.logo);
     }
 
-    return updatedAirline;
+    return toAirlineResponse(updatedAirline);
   }
 }

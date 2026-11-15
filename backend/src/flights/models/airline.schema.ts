@@ -14,6 +14,10 @@ export class Airline {
 
   @Prop({ default: true })
   active: boolean;
+
+  /** Written by Mongoose (`timestamps: true`). Declared here only for the types. */
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export type AirlineDocument = HydratedDocument<Airline>;

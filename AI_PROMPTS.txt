@@ -579,3 +579,19 @@ Accepted: the implementation structure, DTO validation, unique airline code inde
 Changed: the implementation was adapted to the existing project structure and conventions. I also corrected the airline update method's logo cleanup handling and formatted the affected files.
 Not yet verified: automated tests, lint, and manual Swagger endpoint testing.
 ================================================
+================================================
+Date: 2026-11-15
+Student: Khadija Hamdy
+Tool: ChatGPT
+Branch / Issue: feature/FLT-01-airline-profile / #24
+Related Requirement: FLT-01 (follow-up; also uses GEN-08)
+
+Prompt:
+I asked ChatGPT to continue the FLT-01 airline profile work one step at a time. The follow-up covered invalid airline ObjectId handling with the existing shared pipe, the airline response DTO and mapper, service response mapping, Swagger response and multipart request-body documentation, Mongoose timestamp typing, and airline service unit and E2E tests. I asked it to keep each step scoped, follow the project conventions, and wait for review between steps.
+
+How the output was used:
+I used the follow-up guidance to add the existing `ParseObjectIdPipe` to both airline ID routes; create `AirlineResponseDto`, `toAirlineResponse()` and its unit tests; map service results and add `findEntityOrThrow()`; document airline responses and multipart create/update bodies in Swagger; add type declarations for the Mongoose timestamps without changing persistence; and create airline service unit tests and airline E2E tests. The E2E tests use the existing `-test` database setup and a temporary upload directory, and track their own records and files for cleanup.
+
+Accepted, changed, or rejected:
+Accepted: the scoped implementation steps, the shared ObjectId pipe, the DTO/mapper response pattern, explicit multipart Swagger schemas at the controller level, and the timestamp type correction. The original FLT-01 entry's “Not yet verified” note records the status at that earlier point. Follow-up verification later passed: formatting; lint with zero warnings and errors; typecheck; unit tests (311 passed); E2E tests (117 passed); backend build; and the root format check. The E2E tests were added after implementation and were included in that later verification.
+================================================
