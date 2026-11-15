@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -17,11 +19,14 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
 import { Role } from '../common/enums/role.enum';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { AdminService } from './admin.service';
+import { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 
 /** The admin console (`/api/admin/*`). Every route is for administrators only. */
@@ -34,6 +39,26 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 @Controller('admin')
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
+
+  @Get('accounts')
+  @ApiOperation({
+    summary: 'List all accounts (ACC-14)',
+    description:
+      'Admin only. Every account (users, moderators and admins), newest first, 10 per page by default (GEN-05), with name, email, role, status and registration date (`createdAt`). `search` matches part of the name or the email in any letter case; `role` and `status` filter. All given filters must match. An empty result is `items: []`.',
+  })
+  @ApiPaginatedResponse(UserResponseDto)
+  @ApiBadRequestResponse({
+    description:
+      '`page`, `limit`, `search`, `role` or `status` is invalid, or the query has a parameter that is not allowed',
+  })
+  @ApiForbiddenResponse({
+    description: 'The caller is not an administrator, or is suspended',
+  })
+  listAccounts(
+    @Query() query: ListAccountsQueryDto,
+  ): Promise<PaginatedResponse<UserResponseDto>> {
+    return this.adminService.listAccounts(query);
+  }
 
   @Post('users/:id/reset-password')
   @HttpCode(HttpStatus.OK)

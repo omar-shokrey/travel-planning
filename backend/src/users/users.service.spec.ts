@@ -452,4 +452,96 @@ describe('UsersService', () => {
       ).toBeNull();
     });
   });
+
+  describe('listAccounts (ACC-14)', () => {
+    function setupList(found: object[] = [], total = 0) {
+      const exec = jest.fn().mockResolvedValue(found);
+      const limit = jest.fn(() => ({ exec }));
+      const skip = jest.fn(() => ({ limit }));
+      const sort = jest.fn(() => ({ skip }));
+      const countExec = jest.fn().mockResolvedValue(total);
+      const model = {
+        find: jest.fn(() => ({ sort })),
+        countDocuments: jest.fn(() => ({ exec: countExec })),
+      };
+      const service = new UsersService(model as unknown as Model<User>);
+      const filter = (): Record<string, unknown> =>
+        (model.find.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+      return { model, sort, skip, limit, service, filter };
+    }
+
+    const page = { skip: 20, limit: 10 };
+
+    /** The name condition of the search, as the RegExp MongoDB would apply. */
+    const asRegExp = (filter: Record<string, unknown>): RegExp => {
+      const [byName] = (
+        filter as { $or: { name: { $regex: string; $options: string } }[] }
+      ).$or;
+      return new RegExp(byName.name.$regex, byName.name.$options);
+    };
+
+    it('returns one page of accounts, newest first, and the total that matches', async () => {
+      const found = [{ _id: userObjectId }];
+      const { sort, skip, limit, service } = setupList(found, 21);
+
+      const result = await service.listAccounts({}, page);
+
+      expect(result).toEqual({ items: found, total: 21 });
+      expect(sort).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
+      expect(skip).toHaveBeenCalledWith(20);
+      expect(limit).toHaveBeenCalledWith(10);
+    });
+
+    it('lists every account when there is no search and no filter', async () => {
+      const { model, service, filter } = setupList();
+
+      await service.listAccounts({}, page);
+
+      expect(filter()).toEqual({});
+      expect(model.countDocuments).toHaveBeenCalledWith({});
+    });
+
+    it('filters by role and by status', async () => {
+      const { service, filter } = setupList();
+
+      await service.listAccounts(
+        { role: Role.AirlineModerator, status: UserStatus.Suspended },
+        page,
+      );
+
+      expect(filter()).toEqual({
+        role: Role.AirlineModerator,
+        status: UserStatus.Suspended,
+      });
+    });
+
+    it('searches the name or the email, ignoring letter case', async () => {
+      const { model, service, filter } = setupList();
+
+      await service.listAccounts({ search: 'Sara' }, page);
+
+      expect(filter()).toEqual({
+        $or: [
+          { name: { $regex: 'Sara', $options: 'i' } },
+          { email: { $regex: 'Sara', $options: 'i' } },
+        ],
+      });
+      const pattern = asRegExp(filter());
+      expect(pattern.test('Sara Ahmed')).toBe(true);
+      expect(pattern.test('my friend sara')).toBe(true);
+      expect(pattern.test('sara@example.com')).toBe(true);
+      expect(pattern.test('Omar')).toBe(false);
+      expect(model.countDocuments).toHaveBeenCalledWith(filter());
+    });
+
+    it('treats the search as plain text, not as a pattern', async () => {
+      const { service, filter } = setupList();
+
+      await service.listAccounts({ search: 'a.b+(c)' }, page);
+
+      const pattern = asRegExp(filter());
+      expect(pattern.test('xa.b+(c)y')).toBe(true);
+      expect(pattern.test('axbbc')).toBe(false);
+    });
+  });
 });

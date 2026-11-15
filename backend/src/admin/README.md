@@ -7,6 +7,7 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 | Route                                      | Requirement | Access |
 | ------------------------------------------ | ----------- | ------ |
 | `POST /api/admin/users/:id/reset-password` | ACC-07a     | Admin  |
+| `GET /api/admin/accounts`                  | ACC-14      | Admin  |
 
 ## Design decisions
 
@@ -23,3 +24,15 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **The status is not changed.** A suspended or deactivated account keeps its status; the reset only replaces the password. Suspension and reactivation are ACC-15 and ACC-16.
 - **Errors:** an id that is not an ObjectId answers 400 (`ParseObjectIdPipe`), an unknown account 404 "Account not found", a caller who is not an admin 403 (`RolesGuard`).
 - **Not built here:** the audit record of the reset (GEN-07, wave 3) and a notification to the owner. Other sessions of the account are not ended, because refresh tokens are not stored on the server yet (ACC-06).
+
+## Account list (ACC-14)
+
+`GET /api/admin/accounts?page=1&limit=10&search=sara&role=user&status=active`
+
+- **Every account is listed**, users, moderators and admins, in every status, because the requirement says "all accounts". Each item is the normal `UserResponseDto`: name, email, role, status and the registration date (`createdAt`), plus `mustChangePassword`. Nothing private is returned.
+- **Newest first**, by `createdAt` and then `_id`, so the order is stable when two accounts were created at the same moment.
+- **`search` matches part of the name or the email, in any letter case.** It is plain text: characters such as `.` or `*` are escaped, so a search can never be a pattern that matches everything or runs for long. A blank search means no search. It is limited to 254 characters (the longest email address).
+- **`role` and `status` filter**, and all given filters must match together. An unknown role or status, a page size over 50 or an unknown parameter answers 400 (the global `ValidationPipe`).
+- **Pagination follows GEN-05:** 10 per page by default, at most 50, `{ items, meta }`, and an empty page is `items: []`.
+- **The query is in `UsersService.listAccounts`**, which owns the collection and returns entities; `AdminService` maps them with `toUserResponse` and builds the page with `paginate`. Documents are not read with `lean()`, so schema defaults (such as `mustChangePassword: false`) apply to older accounts.
+- **The search uses the `$regex` string form** (`{ $regex, $options: 'i' }`), not a RegExp object. In our e2e runs against Atlas, a count with RegExp objects and the `i` flag inside `$or` never got an answer, while the string form always did. Both mean the same to MongoDB.

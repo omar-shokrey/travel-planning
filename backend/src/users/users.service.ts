@@ -1,13 +1,31 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { hash } from 'bcrypt';
-import { isValidObjectId, type Model, type Types } from 'mongoose';
+import {
+  isValidObjectId,
+  type Model,
+  type QueryFilter,
+  type Types,
+} from 'mongoose';
 import { PASSWORD_SALT_ROUNDS } from '../common/constants/password';
 import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import { User, type UserDocument } from './models/user.schema';
 
 export const EMAIL_TAKEN_MESSAGE = 'This email is already registered';
+
+/** What the admin account list (ACC-14) may filter on. Every field is optional. */
+export interface AccountListCriteria {
+  /** Part of the name or the email, in any letter case. Plain text, not a pattern. */
+  search?: string;
+  role?: Role;
+  status?: UserStatus;
+}
+
+/** Escapes the characters a regular expression gives a meaning to, so a search is plain text. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 /** What a caller gives to create a registered user. It cannot choose the role or the status. */
 export interface CreateUserInput {
@@ -111,6 +129,40 @@ export class UsersService {
         { returnDocument: 'after' },
       )
       .exec();
+  }
+
+  /**
+   * One page of accounts for the admin list (ACC-14), newest first, and the
+   * number of accounts that match. The search matches part of the name or
+   * the email, ignoring letter case. The entities are for the admin service,
+   * which maps them; the password hash is never read.
+   */
+  async listAccounts(
+    criteria: AccountListCriteria,
+    page: { skip: number; limit: number },
+  ): Promise<{ items: UserDocument[]; total: number }> {
+    const filter: QueryFilter<User> = {
+      ...(criteria.role && { role: criteria.role }),
+      ...(criteria.status && { status: criteria.status }),
+    };
+    if (criteria.search) {
+      // The `$regex` string form, not a RegExp object: in our e2e runs against
+      // Atlas, a count with RegExp objects and the `i` flag inside `$or` never
+      // got an answer, while this equivalent form always did.
+      const pattern = { $regex: escapeRegExp(criteria.search), $options: 'i' };
+      filter.$or = [{ name: pattern }, { email: pattern }];
+    }
+
+    const [items, total] = await Promise.all([
+      this.users
+        .find(filter)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(page.skip)
+        .limit(page.limit)
+        .exec(),
+      this.users.countDocuments(filter).exec(),
+    ]);
+    return { items, total };
   }
 
   /**
