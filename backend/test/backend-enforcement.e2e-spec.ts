@@ -111,7 +111,11 @@ describe('Backend enforcement and password storage (e2e, GEN-13)', () => {
       const body = JSON.stringify(response.body);
       expect(body).not.toContain(PASSWORD);
       expect(body).not.toContain('$2');
-      expect(body).not.toMatch(/password/i);
+      // No field holds a password. `mustChangePassword` (ACC-08) is only a flag.
+      expect(Object.keys(response.body)).not.toEqual(
+        expect.arrayContaining([expect.stringMatching(/^password(Hash)?$/i)]),
+      );
+      expect(response.body.mustChangePassword).toBe(false);
     });
 
     it('does not repeat a rejected password in the error', async () => {

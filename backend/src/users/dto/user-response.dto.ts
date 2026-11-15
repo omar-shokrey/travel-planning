@@ -24,6 +24,13 @@ export class UserResponseDto {
   status: UserStatus;
 
   @ApiProperty({
+    description:
+      'True while the account has a temporary password set by an admin (ACC-07a, ACC-13). The frontend then sends the user to change it (PATCH /api/auth/change-password, ACC-08), which sets it back to false.',
+    example: false,
+  })
+  mustChangePassword: boolean;
+
+  @ApiProperty({
     description: 'When the account was created, in UTC',
     example: '2026-11-05T11:00:00.000Z',
   })
