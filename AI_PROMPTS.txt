@@ -731,3 +731,29 @@ suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger, PAT
 /api/itineraries/{id} with visibility public answered 200 and the itinerary showed as public. I
 changed nothing and rejected nothing.
 ================================================
+
+Date: 2026-11-15
+Student: Asser
+Tool: GitHub Copilot
+Branch / Issue: feature/HTL-01-hotel-profile-management / #43
+Related Requirement: HTL-01
+
+Prompt:
+Implement HTL-01 hotel profile endpoints from my task instructions. Follow project rules and existing
+module patterns. Validate input, copy countryCode from reference cities, enforce moderator assignment
+ownership, add photo upload/removal using GEN-08, tests and module documentation. Do not read
+environment files or write to the shared database.
+
+How the output was used:
+Added the hotel schema, DTOs, mapper, service, controller, module wiring, README, and unit/e2e tests.
+Photo routes reuse UploadsService and atomically enforce the photo cap. The implementation was
+initially made on develop, then carried onto the feature branch based on latest develop.
+Verified on the latest develop base: npm run format, npm run lint, npm run typecheck, npm test --
+--runInBand (40 suites, 512 tests), npm run test:e2e -- --runInBand (11 suites, 188 tests, using
+the local travel-planning-htl01-test database), and npm run build. Swagger displayed all four hotel
+routes and schemas, but no live operation request was submitted.
+
+Accepted, changed, or rejected:
+Accepted: the proposed profile limits, routes from the prompt, and photo routes because photos are part
+of HTL-01. No secrets or environment values were used.
+================================================
