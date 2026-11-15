@@ -530,3 +530,16 @@ Accepted, changed, or rejected:
 Accepted: the finding that no production code was needed, and the test file as written. Changed:
 nothing. Rejected: nothing.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Maha
+Tool: ChatGPT
+Branch / Issue: feature/BLG-01-create-post / BLG-01
+Related Requirement: BLG-01
+Prompt:
+I asked ChatGPT to help me implement BLG-01 (allow a registered user to create a blog post with a required title and body, optional tags and images, and save it as Draft or Publish).
+
+How the output was used:
+ChatGPT helped me review the BLG-01 requirement and the existing project structure, then guided the implementation of the blog post status enum, BlogPost Mongoose schema, create-post DTO, response DTO, mapper, posts service, posts controller, and BlogModule registration. It also helped identify that tags needed to be included in the DTO because the project uses forbidNonWhitelisted validation. ChatGPT helped create focused unit tests for the service, controller, and DTO validation, including draft creation, published posts with tags, required fields, invalid status, invalid tags, and unknown fields. I ran the tests and project checks myself.
+================================================
