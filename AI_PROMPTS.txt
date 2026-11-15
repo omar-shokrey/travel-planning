@@ -561,3 +561,21 @@ end-to-end run failed on one test, because Claude had built the "rejected" passw
 UUID that contains digits, so the password rule accepted it; Claude replaced it with a fixed text
 without digits and the next run passed. Rejected: nothing.
 ================================================
+================================================
+Date: 2026-11-15
+Student: Khadija Hamdy
+Tool: ChatGPT
+Branch / Issue: feature/FLT-01-airline-profile / #24
+Related Requirement: FLT-01 (also uses GEN-08)
+
+Prompt:
+I asked ChatGPT to guide me step by step through implementing FLT-01 (Airline Profile Management). I asked it to inspect the existing NestJS backend architecture, authentication and authorization guards, user moderator assignments, Mongoose models, DTO conventions, and the shared image upload service. I asked for help implementing the airline schema, create and update DTOs, service methods, controller endpoints, validation, duplicate airline code handling, and moderator ownership checks. I also asked for guidance on merging the latest develop branch into my feature branch and preparing the pull request.
+
+How the output was used:
+I followed ChatGPT's guidance to implement the airline schema, DTOs, AirlinesService, and AirlinesController under backend/src/flights/. The implementation supports creating airline profiles with uploaded logos, retrieving an airline profile by ID, and updating an airline profile by its assigned airline moderator. I reused the existing UploadsService for logo handling and the existing authentication and role guards for authorization. I merged the latest origin/develop changes into my feature branch and pushed the updated branch to GitHub. I also installed the root development dependencies and formatted the six FLT-01 files with Prettier. The backend build completed successfully, and the Prettier checks passed.
+
+Accepted, changed, or rejected:
+Accepted: the implementation structure, DTO validation, unique airline code index, reuse of UploadsService, admin-only creation, and moderator assignment verification.
+Changed: the implementation was adapted to the existing project structure and conventions. I also corrected the airline update method's logo cleanup handling and formatted the affected files.
+Not yet verified: automated tests, lint, and manual Swagger endpoint testing.
+================================================
