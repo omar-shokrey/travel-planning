@@ -600,14 +600,134 @@ login, because Claude had used the option { new: true } in recordFailedLogin; Cl
 
 ================================================
 Date: 2026-11-15
-Student: Maha Mohamed Gad
-Tool: ChatGPT
-Branch / Issue: feature/BLG-01-create-post / [#81](https://github.com/omar-shokrey/travel-planning/issues/81)
-Related Requirement: BLG-01
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-01-itinerary-schemas / #66
+Related Requirement: ITN-01, ITN-05, ITN-09, ITN-10, ITN-14, ITN-16, ITN-20, ITN-21 (entities only)
 Prompt:
-I asked ChatGPT to help me implement BLG-01, allowing a registered user to create a blog post with a required title and body, optional tags and images, and save it as Draft or Publish. I also asked it to review the existing project structure and guide the implementation and testing.
+I gave Claude the development plan and my issue list and said I am member 8 (itineraries and
+currency). Claude offered to plan the schema pull request and ITN-01, and I asked it to do the work.
 How the output was used:
-ChatGPT helped me review the BLG-01 requirement and existing project structure, then guided the implementation of the BlogPost schema, DTO, service, controller, module, response mapper, validation, and focused tests.
+Claude read specs/travel-platform.md, the ITN rows of the workbook, AGENTS.md and the shared code in
+backend/src/common, then wrote the files of this branch: the Itinerary entity with its embedded day,
+activity, budget entry, transport cost and clone source, the enums and constants, the create, update
+and response DTOs, the module registration, the unit tests and the module README. Claude ran format,
+lint, typecheck, build and the unit tests in its own workspace. It has no connection string, so it
+did not run anything against our Atlas databases.
 Accepted, changed, or rejected:
-I accepted the proposed implementation structure and validation approach. I changed the implementation to support optional tags and an optional status with Draft as the default, and added tests based on the project's existing validation setup and requirement details.
+The design follows the data model in the spec: one document per itinerary, nothing derived stored
+except dayCount, dates as YYYY-MM-DD strings, money as whole minor units. Claude left out the
+exchange_rates entity (it comes with ITN-18) and kept the moderation enum inside the module, because
+a shared enum needs its own pull request.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. I also started the API against the
+shared database and it connected. I changed nothing and rejected nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-01-itinerary-crud / #66
+Related Requirement: ITN-01
+Prompt:
+In the same chat as the schema branch, I asked Claude to implement ITN-01 (create, edit and delete
+an itinerary) on top of the schemas.
+How the output was used:
+Claude wrote the mapper, the service (create, update, remove, findEntityOrThrow), the controller with
+its Swagger documentation, the module wiring, the unit tests and test/itineraries.e2e-spec.ts (19
+tests). It ran format, lint, typecheck, build and the unit tests in its own workspace. It has no
+connection string, so it ran the end-to-end file only against a local MongoDB-compatible stand-in
+(FerretDB), where the 19 tests passed. It did not run them on real MongoDB or try the routes in
+Swagger.
+Accepted, changed, or rejected:
+Changed by Claude after its own checks: (1) a PATCH that sent a field as null would have failed at
+save, so absent and null fields are now both left unchanged; (2) the first version was written
+before ACC-04 was merged and had a temporary 401 check in the controller and no logged-in
+end-to-end tests. After the authentication guard reached develop, Claude removed the check and
+rewrote the end-to-end tests to use a logged-in user.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger, POST /api/itineraries
+answered 401 before I logged in. After logging in it created an itinerary (201, private, owned by my
+account), PATCH with an empty title answered 400, DELETE answered 204 and opening the itinerary
+afterwards answered 404. I changed nothing and rejected nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-03-list-itineraries / #67
+Related Requirement: ITN-03
+Prompt:
+I told Claude that my goal for the day was to finish my wave 2 issues, and it continued in the same
+chat with ITN-03 (list my itineraries, open one).
+How the output was used:
+Claude wrote the day and detail response DTOs, the mapper functions that number and date the days,
+findMine and findOne in the service, the two GET routes with their Swagger documentation, and the
+unit and end-to-end tests. It ran format, lint, typecheck, build and the unit tests in its own
+workspace, and the end-to-end file against a local MongoDB-compatible stand-in (FerretDB), not real
+MongoDB.
+Accepted, changed, or rejected:
+Design choices by Claude: the list returns the summary without the days; the detail route is for the
+owner only, because reading a public itinerary of someone else is ITN-21; a second sort key (_id)
+keeps the page order fixed.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger, GET /api/itineraries
+returned my itinerary with meta total 1, and GET /api/itineraries/{id} returned it with its two
+days, numbered 1 and 2 and dated 2026-12-20 and 2026-12-21. Changed after my check: I noticed that
+the Swagger example of the detail response showed dayCount 0 next to a list with one day, and Claude
+corrected the example to 1. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-05-days-and-cities / #68
+Related Requirement: ITN-05
+Prompt:
+Continuing my wave 2 issues in the same chat, Claude implemented ITN-05 (add days to an itinerary
+and edit each day's city and notes, at most 60 days).
+How the output was used:
+Claude wrote the add-day and update-day DTOs, addDay and updateDay in the service, the two routes
+with their Swagger documentation, and the unit and end-to-end tests. It ran format, lint, typecheck,
+build and the unit tests in its own workspace, and the end-to-end file against a local
+MongoDB-compatible stand-in (FerretDB), not real MongoDB.
+Accepted, changed, or rejected:
+Design choices by Claude: a new day always goes at the end; adding a day is one conditional update
+($push and $inc where dayCount is below 60) so the limit holds under concurrent requests; a full
+itinerary answers 409; the city is checked against the cities collection but not against the
+itinerary's countries, because the workbook does not ask for it.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger I added two days in
+cairo (201 each, the second with notes), and edited the notes of day 1 with PATCH
+/api/itineraries/{id}/days/{dayId} (200; the city stayed and day 2 did not change). My login expired
+after 10 minutes during this check and the route answered 401 until I logged in again. I changed
+nothing and rejected nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-20-itinerary-visibility / #77
+Related Requirement: ITN-20
+Prompt:
+Continuing my wave 2 issues in the same chat, Claude implemented ITN-20 (set an itinerary's
+visibility to public or private).
+How the output was used:
+Claude added the visibility field to UpdateItineraryDto, applied it in the service's update method,
+updated the Swagger text of the PATCH route, and wrote the unit and end-to-end tests. It ran format,
+lint, typecheck, build and the unit tests in its own workspace, and the end-to-end file against a
+local MongoDB-compatible stand-in (FerretDB), not real MongoDB.
+Accepted, changed, or rejected:
+Design choices by Claude: visibility is part of PATCH /api/itineraries/:id as the endpoint table
+says, not a new route; only the update DTO has the field, so a new itinerary is always private.
+Changed by Claude after its own checks: the first version broke the type check of an existing DTO
+test, and Claude fixed the test helper's type.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger, PATCH
+/api/itineraries/{id} with visibility public answered 200 and the itinerary showed as public. I
+changed nothing and rejected nothing.
 ================================================
