@@ -699,6 +699,10 @@ Design choices by Claude: a new day always goes at the end; adding a day is one 
 ($push and $inc where dayCount is below 60) so the limit holds under concurrent requests; a full
 itinerary answers 409; the city is checked against the cities collection but not against the
 itinerary's countries, because the workbook does not ask for it.
-TO COMPLETE BY ME BEFORE THE PULL REQUEST: what I checked myself in Swagger and with the end-to-end
-tests on the test database, and what I changed or rejected after reading every line.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger I added two days in
+cairo (201 each, the second with notes), and edited the notes of day 1 with PATCH
+/api/itineraries/{id}/days/{dayId} (200; the city stayed and day 2 did not change). My login expired
+after 10 minutes during this check and the route answered 401 until I logged in again. I changed
+nothing and rejected nothing.
 ================================================
