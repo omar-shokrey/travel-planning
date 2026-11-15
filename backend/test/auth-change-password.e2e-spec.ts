@@ -6,6 +6,7 @@ import type { Model } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import './support/auth-env';
+import { deleteSessionsOf } from './support/delete-sessions';
 import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
 import {
@@ -15,7 +16,10 @@ import {
   LOGIN_REQUIRED_MESSAGE,
   SAME_PASSWORD_MESSAGE,
 } from './../src/auth/auth.constants';
-import { ACCESS_TOKEN_COOKIE } from './../src/common/constants/cookies';
+import {
+  ACCESS_TOKEN_COOKIE,
+  REFRESH_TOKEN_COOKIE,
+} from './../src/common/constants/cookies';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
 import { User } from './../src/users/models/user.schema';
@@ -87,6 +91,43 @@ describe('PATCH /api/auth/change-password (e2e, ACC-08)', () => {
     return cookie ? call.set('Cookie', cookie) : call;
   };
 
+  /** One login: the cookies a browser keeps for that session. */
+  interface Session {
+    access: string;
+    refresh: string;
+  }
+
+  /** Logs in with a real POST /api/auth/login, which starts a new session. */
+  const startSession = async (
+    email: string,
+    password = PASSWORD,
+  ): Promise<Session> => {
+    const response = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email, password });
+    expect(response.status).toBe(200);
+    return {
+      access: `${ACCESS_TOKEN_COOKIE}=${cookieValue(response, ACCESS_TOKEN_COOKIE)}`,
+      refresh: `${REFRESH_TOKEN_COOKIE}=${cookieValue(response, REFRESH_TOKEN_COOKIE)}`,
+    };
+  };
+
+  /** The status of GET /api/auth/me with an access cookie. */
+  const meStatus = async (access: string): Promise<number> =>
+    (
+      await request(app.getHttpServer())
+        .get('/api/auth/me')
+        .set('Cookie', access)
+    ).status;
+
+  /** The status of POST /api/auth/refresh with a refresh cookie. */
+  const refreshStatus = async (refresh: string): Promise<number> =>
+    (
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .set('Cookie', refresh)
+    ).status;
+
   const storedHash = async (id: string): Promise<string> => {
     const user = await users.findById(id).select('+passwordHash').lean();
     return user?.passwordHash ?? '';
@@ -108,6 +149,10 @@ describe('PATCH /api/auth/change-password (e2e, ACC-08)', () => {
   });
 
   afterAll(async () => {
+    // The logins made sessions (ACC-06): delete them first, one by one.
+    for (const id of createdIds) {
+      await deleteSessionsOf(app, id);
+    }
     for (const id of createdIds) {
       await users.findByIdAndDelete(id);
     }
@@ -208,6 +253,64 @@ describe('PATCH /api/auth/change-password (e2e, ACC-08)', () => {
         { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
         cookie,
       ).expect(200);
+    });
+  });
+
+  describe('the other sessions of the account (ACC-06)', () => {
+    it('ends every other session and keeps the one that changed the password', async () => {
+      const user = await createUser();
+      const sessionA = await startSession(user.email);
+      const sessionB = await startSession(user.email);
+
+      await changePassword(
+        { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+        sessionA.access,
+      ).expect(200);
+
+      expect(await meStatus(sessionA.access)).toBe(200);
+      expect(await meStatus(sessionB.access)).toBe(401);
+      expect(await refreshStatus(sessionB.refresh)).toBe(401);
+    });
+
+    it('keeps the refresh cookie of the session that changed the password working', async () => {
+      const user = await createUser();
+      const sessionA = await startSession(user.email);
+      await startSession(user.email);
+
+      await changePassword(
+        { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+        sessionA.access,
+      ).expect(200);
+
+      expect(await refreshStatus(sessionA.refresh)).toBe(200);
+    });
+
+    it('does not touch the sessions of another user', async () => {
+      const user = await createUser();
+      const other = await createUser();
+      const sessionA = await startSession(user.email);
+      const otherSession = await startSession(other.email);
+
+      await changePassword(
+        { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+        sessionA.access,
+      ).expect(200);
+
+      expect(await meStatus(otherSession.access)).toBe(200);
+      expect(await refreshStatus(otherSession.refresh)).toBe(200);
+    });
+
+    it('ends no session when the change is refused', async () => {
+      const user = await createUser();
+      const sessionA = await startSession(user.email);
+      const sessionB = await startSession(user.email);
+
+      await changePassword(
+        { currentPassword: 'Wr0ngPassword', newPassword: NEW_PASSWORD },
+        sessionA.access,
+      ).expect(400);
+
+      expect(await meStatus(sessionB.access)).toBe(200);
     });
   });
 

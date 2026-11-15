@@ -2,6 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
+import type { SessionsService } from '../auth/sessions.service';
 import type { UsersService } from '../users/users.service';
 import {
   ACCOUNT_NOT_FOUND_MESSAGE,
@@ -29,8 +30,12 @@ function setup(role: Role = Role.User) {
       .fn()
       .mockResolvedValue({ ...stored, mustChangePassword: true }),
   };
-  const service = new AdminService(usersService as unknown as UsersService);
-  return { usersService, service };
+  const sessions = { revokeAllOfUser: jest.fn().mockResolvedValue(undefined) };
+  const service = new AdminService(
+    usersService as unknown as UsersService,
+    sessions as unknown as SessionsService,
+  );
+  return { usersService, sessions, service };
 }
 
 describe('AdminService', () => {
@@ -85,6 +90,44 @@ describe('AdminService', () => {
         ADMIN_PASSWORD_RESET_FORBIDDEN_MESSAGE,
       );
       expect(usersService.setTemporaryPassword).not.toHaveBeenCalled();
+    });
+
+    it('ends every session of the account, after the password is saved', async () => {
+      const { usersService, sessions, service } = setup();
+
+      await service.resetPassword(accountId, { temporaryPassword });
+
+      expect(sessions.revokeAllOfUser).toHaveBeenCalledTimes(1);
+      expect(sessions.revokeAllOfUser).toHaveBeenCalledWith(
+        accountId,
+        expect.any(Date),
+      );
+      const saved =
+        usersService.setTemporaryPassword.mock.invocationCallOrder[0];
+      const ended = sessions.revokeAllOfUser.mock.invocationCallOrder[0];
+      expect(saved).toBeLessThan(ended);
+    });
+
+    it.each([
+      ['the account does not exist', 'missing'],
+      ['the account is an administrator', 'admin'],
+      ['the account is deleted before the password is saved', 'gone'],
+    ])('ends no session when %s', async (_name, scenario) => {
+      const { usersService, sessions, service } = setup(
+        scenario === 'admin' ? Role.Admin : Role.User,
+      );
+      if (scenario === 'missing') {
+        usersService.findEntityById.mockResolvedValue(null);
+      }
+      if (scenario === 'gone') {
+        usersService.setTemporaryPassword.mockResolvedValue(null);
+      }
+
+      await service
+        .resetPassword(accountId, { temporaryPassword })
+        .catch(() => undefined);
+
+      expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
     });
 
     it('answers 404 when the account is deleted before the password is saved', async () => {

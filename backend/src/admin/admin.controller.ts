@@ -40,7 +40,7 @@ export class AdminController {
   @ApiOperation({
     summary: "Reset a user's or moderator's password (ACC-07a)",
     description:
-      'Admin only. Sets the temporary password the admin chose; the admin gives it to the account owner. The account keeps its role and status, any login lockout (ACC-05) is cleared, and `mustChangePassword` becomes true: at the next login the owner must set a new password with PATCH /api/auth/change-password (ACC-08). The password of an administrator cannot be reset here.',
+      'Admin only. Sets the temporary password the admin chose; the admin gives it to the account owner. The account keeps its role and status, any login lockout (ACC-05) is cleared, every session of the account ends at once (its access and refresh cookies get 401), and `mustChangePassword` becomes true: at the next login the owner must set a new password with PATCH /api/auth/change-password (ACC-08). The password of an administrator cannot be reset here.',
   })
   @ApiParam({
     name: 'id',
