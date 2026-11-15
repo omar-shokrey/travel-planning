@@ -785,3 +785,30 @@ and passed with one Jest worker; no code changed. Run afterwards by Claude Code,
 test database, 14 tests passed, 6 of them in hotel-details.e2e-spec.ts. The branch is pushed only
 after I have read the diff.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Ahmed Rashad (Mado)
+Tool: Claude Code (VS Code extension)
+Branch / Issue: feature/HTL-09-check-in-out-times / #50
+Related Requirement: HTL-09
+Prompt:
+Continuing my wave 2 hotel issues in the same Claude Code session (the prompt is in my HTL-02
+entry), Claude Code implemented HTL-09 (the hotel moderator sets the standard check-in and
+check-out times, shown on the hotel page).
+How the output was used:
+Claude Code branched from my HTL-02 branch and added the embedded HotelPolicy schema, the request
+and response DTOs, a mapper, HotelPoliciesService, HotelPoliciesController (PUT
+/api/hotels/:id/policies), the policy on the hotel page, the unit tests, an end-to-end test file
+and a section in the hotels README. It ran format, lint, typecheck, build, the unit tests and the
+hotel end-to-end files on my laptop: 51 unit suites and 666 tests passed, the 3 hotel end-to-end
+files passed with 24 tests (10 of them in hotel-policies.e2e-spec.ts), lint reported 0 warnings,
+and the type check and the build were clean.
+Accepted, changed, or rejected:
+Design choices by Claude Code: the times are HH:mm strings and never a Date; PUT replaces the
+policies as a whole, so both times are required; a hotel without policies shows policy null and no
+default is invented; the hotel page returns a new HotelDetailsResponseDto and Asser's
+HotelResponseDto is unchanged. Change to Asser's HotelsService: one new public method,
+findManagedEntityOrThrow, which reuses his moderator check so the ownership rule stays in one
+place; it has its own unit tests. The branch is pushed only after I have read the diff.
+================================================
