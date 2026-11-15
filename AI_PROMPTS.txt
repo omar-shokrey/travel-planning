@@ -787,3 +787,29 @@ when the Jest workers were limited and recycled; no code changed. Not run yet: t
 tests, because my backend/.env was not in place. The branch is pushed only after I have read the
 diff.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Ahmed Rashad (Mado)
+Tool: Claude Code (VS Code extension)
+Branch / Issue: feature/BLG-07-edit-delete-comments / #87
+Related Requirement: BLG-07
+Prompt:
+Continuing my issues in the same Claude Code session (the prompt is in my BLG-05 entry), Claude
+Code implemented BLG-07 (edit and delete my own comments).
+How the output was used:
+Claude Code branched from my BLG-06 branch and added UpdateCommentDto, the update and remove
+methods of CommentsService, the PATCH and DELETE /api/comments/:id routes with their Swagger text,
+the unit tests, an end-to-end test file and a section in the module README. It ran format, lint,
+typecheck, build and the unit tests on my laptop: 47 suites and 533 tests passed, lint reported 0
+warnings, and the type check and the build were clean.
+Accepted, changed, or rejected:
+Design choices by Claude Code: ownership is checked in the service (403 for someone else's
+comment, 404 for a missing one); the author of a post cannot edit or delete other users' comments,
+because that is moderation (GEN-10); the update DTO requires the text instead of using PartialType,
+because a comment has no other field; delete answers 204 and lowers the post's commentCount with
+one guarded update. Changed by Claude Code after its own checks: one unit test run crashed an
+unrelated suite with "JavaScript heap out of memory" on my laptop, and the run passed when the
+Jest workers were recycled earlier; no code changed. Not run yet: the end-to-end tests, because my
+backend/.env was not in place. The branch is pushed only after I have read the diff.
+================================================
