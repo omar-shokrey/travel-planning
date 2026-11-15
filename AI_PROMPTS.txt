@@ -757,3 +757,31 @@ Accepted, changed, or rejected:
 Accepted: the proposed profile limits, routes from the prompt, and photo routes because photos are part
 of HTL-01. No secrets or environment values were used.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Ahmed Rashad (Mado)
+Tool: Claude Code (VS Code extension)
+Branch / Issue: feature/HTL-02-hotel-details / #44
+Related Requirement: HTL-02
+Prompt:
+In the same Claude Code session as my blog issues, I asked it to continue with my wave 2 hotel
+issues (HTL-02, HTL-05, HTL-09), following the same rules: one branch per issue, the checks before
+every pull request, and never opening or committing the .env file.
+How the output was used:
+Claude Code branched from Asser's HTL-01 branch, merged develop into it, and added the public
+route GET /api/hotels/:id in its own HotelDetailsController and HotelDetailsService, with unit
+tests, an end-to-end test file and a section in the hotels README. It ran format, lint, typecheck,
+build and the unit tests on my laptop: 46 suites and 566 tests passed, lint reported 0 warnings,
+and the type check and the build were clean.
+Accepted, changed, or rejected:
+Design choices by Claude Code: the route is public; a deactivated hotel answers 404 like a missing
+one; the details controller is separate and registered last, so a fixed path such as
+/hotels/search is matched before /hotels/:id; the response reuses Asser's HotelResponseDto.
+Left to other issues, and written in the README: the policy fields (HTL-09, HTL-10), the reviews
+(HTL-24) and the rooms free for chosen dates (HTL-15). Changed by Claude Code after its own checks:
+the unit test run crashed four unrelated suites with "JavaScript heap out of memory" on my laptop
+and passed with one Jest worker; no code changed. Not run yet: the end-to-end tests, because my
+laptop had no internet connection to the database at that time. The branch is pushed only after I
+have read the diff.
+================================================
