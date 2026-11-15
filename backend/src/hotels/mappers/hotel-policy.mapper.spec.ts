@@ -22,10 +22,44 @@ const hotel = {
 };
 
 describe('toHotelPolicyResponse', () => {
-  it('returns the check-in and check-out times', () => {
+  it('returns the times and the cancellation tiers', () => {
+    expect(
+      toHotelPolicyResponse({
+        checkInTime: '14:00',
+        checkOutTime: '12:00',
+        cancellationTiers: [{ daysBefore: 7, refundPercent: 50 }],
+      }),
+    ).toEqual({
+      checkInTime: '14:00',
+      checkOutTime: '12:00',
+      cancellationTiers: [{ daysBefore: 7, refundPercent: 50 }],
+    });
+  });
+
+  it('lists the tiers with the highest threshold first', () => {
+    const response = toHotelPolicyResponse({
+      checkInTime: '14:00',
+      checkOutTime: '12:00',
+      cancellationTiers: [
+        { daysBefore: 1, refundPercent: 10 },
+        { daysBefore: 30, refundPercent: 100 },
+        { daysBefore: 7, refundPercent: 50 },
+      ],
+    });
+
+    expect(response?.cancellationTiers.map((t) => t.daysBefore)).toEqual([
+      30, 7, 1,
+    ]);
+  });
+
+  it('shows an empty tier list for a policy saved without tiers', () => {
     expect(
       toHotelPolicyResponse({ checkInTime: '14:00', checkOutTime: '12:00' }),
-    ).toEqual({ checkInTime: '14:00', checkOutTime: '12:00' });
+    ).toEqual({
+      checkInTime: '14:00',
+      checkOutTime: '12:00',
+      cancellationTiers: [],
+    });
   });
 
   it('returns null when the hotel has no policies yet', () => {
@@ -37,12 +71,16 @@ describe('toHotelPolicyResponse', () => {
     const stored = {
       checkInTime: '14:00',
       checkOutTime: '12:00',
+      cancellationTiers: [
+        { daysBefore: 7, refundPercent: 50, internalNote: 'hidden' },
+      ],
       internalNote: 'not for the client',
     };
 
     expect(toHotelPolicyResponse(stored)).toEqual({
       checkInTime: '14:00',
       checkOutTime: '12:00',
+      cancellationTiers: [{ daysBefore: 7, refundPercent: 50 }],
     });
   });
 });
@@ -51,13 +89,21 @@ describe('toHotelDetailsResponse', () => {
   it('adds the policies to the hotel profile', () => {
     const details = toHotelDetailsResponse({
       ...hotel,
-      policy: { checkInTime: '15:00', checkOutTime: '11:00' },
+      policy: {
+        checkInTime: '15:00',
+        checkOutTime: '11:00',
+        cancellationTiers: [{ daysBefore: 3, refundPercent: 25 }],
+      },
     });
 
     expect(details).toMatchObject({
       id: '6740f1c2a4b5c6d7e8f90123',
       name: 'Cairo Garden Hotel',
-      policy: { checkInTime: '15:00', checkOutTime: '11:00' },
+      policy: {
+        checkInTime: '15:00',
+        checkOutTime: '11:00',
+        cancellationTiers: [{ daysBefore: 3, refundPercent: 25 }],
+      },
     });
   });
 
