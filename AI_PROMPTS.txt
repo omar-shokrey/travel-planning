@@ -597,3 +597,29 @@ tests. Changed: my first end-to-end run printed a Mongoose deprecation warning f
 login, because Claude had used the option { new: true } in recordFailedLogin; Claude changed it to
 { returnDocument: 'after' } and I ran the checks again. Rejected: nothing.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/ITN-01-itinerary-schemas / #66
+Related Requirement: ITN-01, ITN-05, ITN-09, ITN-10, ITN-14, ITN-16, ITN-20, ITN-21 (entities only)
+Prompt:
+I gave Claude the development plan and my issue list and said I am member 8 (itineraries and
+currency). Claude offered to plan the schema pull request and ITN-01, and I asked it to do the work.
+How the output was used:
+Claude read specs/travel-platform.md, the ITN rows of the workbook, AGENTS.md and the shared code in
+backend/src/common, then wrote the files of this branch: the Itinerary entity with its embedded day,
+activity, budget entry, transport cost and clone source, the enums and constants, the create, update
+and response DTOs, the module registration, the unit tests and the module README. Claude ran format,
+lint, typecheck, build and the unit tests in its own workspace. It has no connection string, so it
+did not run anything against our Atlas databases.
+Accepted, changed, or rejected:
+The design follows the data model in the spec: one document per itinerary, nothing derived stored
+except dayCount, dates as YYYY-MM-DD strings, money as whole minor units. Claude left out the
+exchange_rates entity (it comes with ITN-18) and kept the moderation enum inside the module, because
+a shared enum needs its own pull request.
+Checked by me: I applied the commits on my laptop and ran npm run test:e2e on the test database: 9
+suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. I also started the API against the
+shared database and it connected. I changed nothing and rejected nothing.
+================================================
