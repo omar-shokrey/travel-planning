@@ -48,8 +48,8 @@ describe('PostsService', () => {
       publishedAt: undefined,
       tags: [],
       images: [],
-      createdAt: new Date('2026-11-15T10:00:00.000Z'),
-      updatedAt: new Date('2026-11-15T10:00:00.000Z'),
+      createdAt: '2026-11-15T10:00:00.000Z',
+      updatedAt: '2026-11-15T10:00:00.000Z',
     });
   });
 
@@ -104,11 +104,11 @@ describe('PostsService', () => {
       title: 'Best places in Cairo',
       body: 'Here are some of my favorite places in Cairo.',
       status: PostStatus.Published,
-      publishedAt,
+      publishedAt: '2026-11-15T10:00:00.000Z',
       tags: ['cairo', 'egypt'],
       images: [],
-      createdAt,
-      updatedAt,
+      createdAt: '2026-11-15T10:00:00.000Z',
+      updatedAt: '2026-11-15T10:00:00.000Z',
     });
   });
 });

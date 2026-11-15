@@ -5,7 +5,11 @@ import {
 } from '@nestjs/common';
 import type { FieldError } from '../../common/interfaces/error-response.interface';
 import { validationExceptionFactory } from '../../common/pipes/validation-exception.factory';
-import { CreatePostDto } from './create-post.dto';
+import {
+  CreatePostDto,
+  POST_BODY_MAX_LENGTH,
+  POST_TITLE_MAX_LENGTH,
+} from './create-post.dto';
 import { PostStatus } from '../models/post-status.enum';
 
 const pipe = new ValidationPipe({
@@ -155,4 +159,48 @@ describe('CreatePostDto (BLG-01)', () => {
       }),
     ).toEqual(['unknownField']);
   });
+
+  it('accepts a title and a body exactly at their limits', async () => {
+    expect(
+      await invalidFields({
+        ...valid,
+        title: 'a'.repeat(POST_TITLE_MAX_LENGTH),
+        body: 'b'.repeat(POST_BODY_MAX_LENGTH),
+      }),
+    ).toEqual([]);
+  });
+
+  it('rejects a title longer than the limit', async () => {
+    expect(
+      await invalidFields({
+        ...valid,
+        title: 'a'.repeat(POST_TITLE_MAX_LENGTH + 1),
+      }),
+    ).toEqual(['title']);
+  });
+
+  it('rejects a body longer than the limit', async () => {
+    expect(
+      await invalidFields({
+        ...valid,
+        body: 'b'.repeat(POST_BODY_MAX_LENGTH + 1),
+      }),
+    ).toEqual(['body']);
+  });
+
+  it('counts the limit after trimming, so outer spaces do not count', async () => {
+    const dto = await parse({
+      ...valid,
+      title: `  ${'a'.repeat(POST_TITLE_MAX_LENGTH)}  `,
+    });
+
+    expect(dto.title).toHaveLength(POST_TITLE_MAX_LENGTH);
+  });
+
+  it.each(['authorId', 'images', 'publishedAt', 'likeCount'])(
+    'rejects %s, which the server sets',
+    async (field) => {
+      expect(await invalidFields({ ...valid, [field]: 'x' })).toEqual([field]);
+    },
+  );
 });

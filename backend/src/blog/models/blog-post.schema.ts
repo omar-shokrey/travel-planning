@@ -1,5 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { SchemaTypes, type HydratedDocument, type Types } from 'mongoose';
+import {
+  POST_BODY_MAX_LENGTH,
+  POST_TITLE_MAX_LENGTH,
+} from '../dto/create-post.dto';
 import { PostStatus } from './post-status.enum';
 
 @Schema({ collection: 'posts', timestamps: true })
@@ -12,10 +16,10 @@ export class BlogPost {
   })
   authorId: Types.ObjectId;
 
-  @Prop({ required: true, trim: true })
+  @Prop({ required: true, trim: true, maxlength: POST_TITLE_MAX_LENGTH })
   title: string;
 
-  @Prop({ required: true, trim: true })
+  @Prop({ required: true, trim: true, maxlength: POST_BODY_MAX_LENGTH })
   body: string;
 
   @Prop({

@@ -8,10 +8,11 @@ export function toPostResponse(post: BlogPostDocument): PostResponseDto {
     title: post.title,
     body: post.body,
     status: post.status,
-    publishedAt: post.publishedAt,
+    // Moments leave the API as UTC ISO strings (AGENTS.md).
+    publishedAt: post.publishedAt?.toISOString(),
     tags: post.tags,
     images: post.images,
-    createdAt: post.createdAt,
-    updatedAt: post.updatedAt,
+    createdAt: post.createdAt.toISOString(),
+    updatedAt: post.updatedAt.toISOString(),
   };
 }

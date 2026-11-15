@@ -9,10 +9,15 @@ import request from 'supertest';
 import './support/auth-env';
 
 import { AppModule } from './../src/app.module';
+import { deleteSessionsOf } from './support/delete-sessions';
 import { configureApp, setupSwagger } from './../src/app.setup';
 import { ACCESS_TOKEN_COOKIE } from './../src/common/constants/cookies';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
+import {
+  POST_BODY_MAX_LENGTH,
+  POST_TITLE_MAX_LENGTH,
+} from './../src/blog/dto/create-post.dto';
 import { BlogPost } from './../src/blog/models/blog-post.schema';
 import { PostStatus } from './../src/blog/models/post-status.enum';
 import { User } from './../src/users/models/user.schema';
@@ -107,6 +112,11 @@ describe('POST /api/posts (e2e, BLG-01)', () => {
   afterAll(async () => {
     for (const id of createdPostIds) {
       await posts.findByIdAndDelete(id);
+    }
+
+    // The logins made sessions (ACC-06): delete them, one by one, first.
+    for (const id of createdUserIds) {
+      await deleteSessionsOf(app, id);
     }
 
     for (const id of createdUserIds) {
@@ -320,5 +330,89 @@ describe('POST /api/posts (e2e, BLG-01)', () => {
     expect(response.body.authorId).toBe(user.id);
 
     createdPostIds.push(response.body.id);
+  });
+
+  it('returns every moment as a UTC ISO string', async () => {
+    const user = await createUser();
+    const cookie = await loginAs(user);
+
+    const response = await createPost(
+      { title: 'Dates', body: 'Body', status: 'published' },
+      cookie,
+    );
+
+    expect(response.status).toBe(201);
+    createdPostIds.push(response.body.id as string);
+    const iso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+    expect(response.body.createdAt).toMatch(iso);
+    expect(response.body.updatedAt).toMatch(iso);
+    expect(response.body.publishedAt).toMatch(iso);
+  });
+
+  it.each([
+    [
+      'a title',
+      { title: 'a'.repeat(POST_TITLE_MAX_LENGTH + 1), body: 'Body' },
+      'title',
+    ],
+    [
+      'a body',
+      { title: 'Title', body: 'b'.repeat(POST_BODY_MAX_LENGTH + 1) },
+      'body',
+    ],
+  ])('rejects %s longer than the limit', async (_name, body, field) => {
+    const user = await createUser();
+    const cookie = await loginAs(user);
+
+    const response = await createPost(body, cookie);
+
+    expect(response.status).toBe(400);
+    expect(
+      (response.body.errors as { field: string }[]).map((error) => error.field),
+    ).toEqual([field]);
+  });
+
+  describe('roles that do not write posts', () => {
+    const roles = [Role.AirlineModerator, Role.HotelModerator, Role.Admin];
+    const accounts = new Map<Role, { id: string; cookie: string }>();
+
+    beforeAll(async () => {
+      // One insertMany for the three accounts: single creates in a row have
+      // stalled against the Atlas test database (see the ACC-14 e2e test).
+      const inserted = await users.insertMany(
+        roles.map((role) => ({
+          name: 'BLG-01 Test User',
+          email: uniqueEmail(),
+          passwordHash,
+          role,
+          status: UserStatus.Active,
+          consentAcceptedAt: new Date(),
+        })),
+      );
+      for (const user of inserted) {
+        const id = user._id.toString();
+        createdUserIds.push(id);
+        accounts.set(user.role, {
+          id,
+          cookie: await loginAs({ id, email: user.email }),
+        });
+      }
+    });
+
+    it.each(roles)(
+      'refuses a %s, because only registered users write posts',
+      async (role) => {
+        const account = accounts.get(role);
+        expect(account).toBeDefined();
+
+        const response = await createPost(
+          { title: 'Not allowed', body: 'Body' },
+          account?.cookie,
+        );
+
+        expect(response.status).toBe(403);
+        expect(await posts.countDocuments({ authorId: account?.id })).toBe(0);
+      },
+    );
   });
 });
