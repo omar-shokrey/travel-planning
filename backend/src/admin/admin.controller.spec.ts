@@ -4,13 +4,19 @@ import { Role } from '../common/enums/role.enum';
 import type { UserResponseDto } from '../users/dto/user-response.dto';
 import { AdminController } from './admin.controller';
 import type { AdminService } from './admin.service';
+import { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
 
 describe('AdminController', () => {
   const account = { id: '6740f1c2a4b5c6d7e8f90123' } as UserResponseDto;
+  const page = {
+    items: [account],
+    meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+  };
 
   function setup() {
     const adminService = {
       resetPassword: jest.fn().mockResolvedValue(account),
+      listAccounts: jest.fn().mockResolvedValue(page),
     };
     const controller = new AdminController(
       adminService as unknown as AdminService,
@@ -31,6 +37,16 @@ describe('AdminController', () => {
 
       expect(await controller.resetPassword(account.id, body)).toBe(account);
       expect(adminService.resetPassword).toHaveBeenCalledWith(account.id, body);
+    });
+  });
+
+  describe('listAccounts (ACC-14)', () => {
+    it('gives the service the query and returns its page', async () => {
+      const { adminService, controller } = setup();
+      const query = new ListAccountsQueryDto();
+
+      expect(await controller.listAccounts(query)).toBe(page);
+      expect(adminService.listAccounts).toHaveBeenCalledWith(query);
     });
   });
 });
