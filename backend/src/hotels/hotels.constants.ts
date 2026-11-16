@@ -10,3 +10,6 @@ export const ROOM_DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /** HTL-10: a hotel has at most this many cancellation tiers. */
 export const HOTEL_CANCELLATION_TIERS_MAX_COUNT = 10;
+
+/** HTL-05: a room has at most this many availability ranges. */
+export const ROOM_AVAILABILITY_RANGES_MAX_COUNT = 100;
