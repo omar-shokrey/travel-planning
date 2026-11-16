@@ -33,6 +33,7 @@ import { AddDayDto } from './dto/add-day.dto';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
 import { ItineraryResponseDto } from './dto/itinerary-response.dto';
+import { MoveDayDto } from './dto/move-day.dto';
 import { UpdateDayDto } from './dto/update-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { ItinerariesService } from './itineraries.service';
@@ -165,6 +166,37 @@ export class ItinerariesController {
     @CurrentUser('id') userId: string,
   ): Promise<ItineraryDetailResponseDto> {
     return this.itineraries.addDay(id, dto, userId);
+  }
+
+  // Declared before ':id/days/:dayId', or "reorder" would be taken for a day id.
+  @Patch(':id/days/reorder')
+  @ApiOperation({
+    summary: 'Move a day',
+    description:
+      'ITN-08. Move a day of your own itinerary to a new position (1 is the first day). The days in between shift by one place, and every day number, date and city group follows the new order. Returns the itinerary with its days in the new order.',
+  })
+  @ApiParam({ name: 'id', description: 'Itinerary id' })
+  @ApiOkResponse({ type: ItineraryDetailResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'The id or a field is invalid, an unknown field was sent, or the position is after the last day',
+  })
+  @ApiForbiddenResponse({
+    description: 'The itinerary belongs to another user',
+  })
+  @ApiNotFoundResponse({
+    description: 'No itinerary has this id, or it has no day with this id',
+  })
+  @ApiConflictResponse({
+    description:
+      'The itinerary was changed by another request at the same time',
+  })
+  moveDay(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: MoveDayDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    return this.itineraries.moveDay(id, dto, userId);
   }
 
   @Patch(':id/days/:dayId')
