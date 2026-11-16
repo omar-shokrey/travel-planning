@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { RoomAvailabilityResponseDto } from './room-availability-response.dto';
 
 export class RoomResponseDto {
   @ApiProperty({ example: '6740f1c2a4b5c6d7e8f90123' })
@@ -28,6 +29,12 @@ export class RoomResponseDto {
 
   @ApiProperty({ example: true })
   active: boolean;
+
+  @ApiProperty({
+    type: [RoomAvailabilityResponseDto],
+    example: [{ from: '2026-12-01', to: '2026-12-08' }],
+  })
+  availability: RoomAvailabilityResponseDto[];
 
   @ApiProperty({ example: '2026-11-05T11:00:00.000Z' })
   createdAt: string;

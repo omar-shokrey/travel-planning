@@ -32,7 +32,19 @@ hotel before its file is removed.
 - The DTO accepts only `number`, `type`, `beds`, `maxOccupancy` and
   `pricePerNight`. It trims the text fields and requires positive whole-number
   beds, occupancy and price (minor units). The server sets `hotelId` and
-  `active`; availability and booking behavior are left to later requirements.
+  `active`.
 - The real-AppModule e2e coverage is in `hotels-rooms.e2e-spec.ts`; it creates
   its own hotels and users, explicitly awaits the room indexes before testing
   hotel-scoped uniqueness, and removes its fixtures at the end.
+
+## Room availability (HTL-04)
+
+- `POST /api/hotels/:id/rooms/:roomId/availability` is limited to the moderator
+  assigned to the hotel and returns the updated room with its availability.
+- Availability ranges are embedded on the room as `from` and `to` date-only
+  strings. Ranges use `[from, to)` semantics: the first night is included and
+  the checkout boundary is excluded, so adjacent ranges can meet without
+  overlapping.
+- The service adds a range with a conditional atomic update that checks for
+  overlap and appends only when none exists. Concurrent requests therefore
+  cannot both add overlapping ranges.

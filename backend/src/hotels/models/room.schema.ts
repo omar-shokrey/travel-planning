@@ -1,6 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { SchemaTypes, type HydratedDocument, type Types } from 'mongoose';
 import { Hotel } from './hotel.schema';
+import {
+  RoomAvailability,
+  RoomAvailabilitySchema,
+} from './room-availability.schema';
 
 @Schema({ collection: 'rooms', timestamps: true })
 export class Room {
@@ -48,6 +52,9 @@ export class Room {
 
   @Prop({ type: Boolean, required: true, default: true })
   active: boolean;
+
+  @Prop({ type: [RoomAvailabilitySchema], default: [] })
+  availability: RoomAvailability[];
 
   createdAt: Date;
   updatedAt: Date;

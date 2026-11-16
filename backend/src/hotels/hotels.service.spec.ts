@@ -11,6 +11,7 @@ import { City } from '../reference/models/city.schema';
 import { UploadsService } from '../uploads/uploads.service';
 import { UsersService } from '../users/users.service';
 import type { CreateHotelDto } from './dto/create-hotel.dto';
+import type { CreateRoomAvailabilityDto } from './dto/create-room-availability.dto';
 import type { CreateRoomDto } from './dto/create-room.dto';
 import { HotelsService } from './hotels.service';
 import { Hotel, type HotelDocument } from './models/hotel.schema';
@@ -19,6 +20,7 @@ import type { UpdateHotelDto } from './dto/update-hotel.dto';
 
 const HOTEL_ID = '6740f1c2a4b5c6d7e8f90123';
 const USER_ID = '6740f1c2a4b5c6d7e8f90124';
+const ROOM_ID = '6740f1c2a4b5c6d7e8f90125';
 
 function makeHotel(overrides: Partial<Hotel> = {}): HotelDocument {
   const hotel = {
@@ -44,7 +46,7 @@ function makeHotel(overrides: Partial<Hotel> = {}): HotelDocument {
 
 function makeRoom(overrides: Partial<Room> = {}): RoomDocument {
   const room = {
-    _id: new Types.ObjectId('6740f1c2a4b5c6d7e8f90125'),
+    _id: new Types.ObjectId(ROOM_ID),
     hotelId: new Types.ObjectId(HOTEL_ID),
     number: '101',
     type: 'Double',
@@ -52,6 +54,7 @@ function makeRoom(overrides: Partial<Room> = {}): RoomDocument {
     maxOccupancy: 3,
     pricePerNight: 12500,
     active: true,
+    availability: [],
     createdAt: new Date('2026-11-05T11:00:00.000Z'),
     updatedAt: new Date('2026-11-05T11:00:00.000Z'),
     ...overrides,
@@ -71,7 +74,8 @@ function moderator(providerType = ProviderType.Hotel, providerId = HOTEL_ID) {
 function setup(
   options: {
     hotel?: HotelDocument | null;
-    room?: RoomDocument;
+    room?: RoomDocument | null;
+    updatedRoom?: RoomDocument | null;
     user?: object | null;
     city?: { countryCode: string } | null;
     updatedHotel?: HotelDocument | null;
@@ -89,9 +93,14 @@ function setup(
   const updatedHotel =
     options.updatedHotel === undefined ? hotel : options.updatedHotel;
   const room = options.room ?? makeRoom();
+  const roomFound = options.room === undefined ? room : options.room;
+  const updatedRoom =
+    options.updatedRoom === undefined ? room : options.updatedRoom;
   const cityExec = jest.fn().mockResolvedValue(city);
   const hotelExec = jest.fn().mockResolvedValue(hotel);
   const updateExec = jest.fn().mockResolvedValue(updatedHotel);
+  const roomExec = jest.fn().mockResolvedValue(roomFound);
+  const roomUpdateExec = jest.fn().mockResolvedValue(updatedRoom);
   const hotelsModel = {
     create: jest.fn().mockResolvedValue(hotel),
     findById: jest.fn(() => ({ exec: hotelExec })),
@@ -99,6 +108,8 @@ function setup(
   };
   const roomsModel = {
     create: jest.fn().mockResolvedValue(room),
+    findOne: jest.fn(() => ({ exec: roomExec })),
+    findOneAndUpdate: jest.fn(() => ({ exec: roomUpdateExec })),
   };
   const citiesModel = {
     findById: jest.fn(() => ({ select: jest.fn(() => ({ exec: cityExec })) })),
@@ -135,6 +146,8 @@ function setup(
     hotelExec,
     hotelsModel,
     room,
+    roomExec,
+    roomUpdateExec,
     roomsModel,
     service,
     updateExec,
@@ -159,6 +172,11 @@ const createRoomDto: CreateRoomDto = {
   beds: 2,
   maxOccupancy: 3,
   pricePerNight: 12500,
+};
+
+const createRoomAvailabilityDto: CreateRoomAvailabilityDto = {
+  from: '2026-12-01',
+  to: '2026-12-08',
 };
 
 describe('HotelsService (HTL-01)', () => {
@@ -213,6 +231,108 @@ describe('HotelsService (HTL-01)', () => {
         hotelId: HOTEL_ID,
         number: '101',
         active: true,
+      });
+    });
+
+    describe('addRoomAvailability (HTL-04)', () => {
+      it('adds a non-overlapping date range with an atomic conditional update', async () => {
+        const room = makeRoom();
+        const updatedRoom = makeRoom({
+          availability: [createRoomAvailabilityDto],
+        });
+        const { hotel, roomsModel, service } = setup({
+          room,
+          updatedRoom,
+        });
+
+        const response = await service.addRoomAvailability(
+          HOTEL_ID,
+          ROOM_ID,
+          createRoomAvailabilityDto,
+          USER_ID,
+        );
+
+        expect(roomsModel.findOne).toHaveBeenCalledWith({
+          _id: ROOM_ID,
+          hotelId: hotel?._id,
+        });
+        expect(roomsModel.findOneAndUpdate).toHaveBeenCalledWith(
+          {
+            _id: room._id,
+            hotelId: hotel?._id,
+            availability: {
+              $not: {
+                $elemMatch: {
+                  from: { $lt: createRoomAvailabilityDto.to },
+                  to: { $gt: createRoomAvailabilityDto.from },
+                },
+              },
+            },
+          },
+          {
+            $push: { availability: createRoomAvailabilityDto },
+          },
+          { returnDocument: 'after', runValidators: true },
+        );
+        expect(response.availability).toEqual([createRoomAvailabilityDto]);
+      });
+
+      it('returns 404 when the hotel does not exist', async () => {
+        const { roomsModel, service, usersService } = setup({ hotel: null });
+
+        await expect(
+          service.addRoomAvailability(
+            HOTEL_ID,
+            ROOM_ID,
+            createRoomAvailabilityDto,
+            USER_ID,
+          ),
+        ).rejects.toBeInstanceOf(NotFoundException);
+        expect(usersService.findEntityById).not.toHaveBeenCalled();
+        expect(roomsModel.findOne).not.toHaveBeenCalled();
+      });
+
+      it('checks hotel assignment before loading the room', async () => {
+        const user = moderator(ProviderType.Airline, HOTEL_ID);
+        const { roomsModel, service } = setup({ user });
+
+        await expect(
+          service.addRoomAvailability(
+            HOTEL_ID,
+            ROOM_ID,
+            createRoomAvailabilityDto,
+            USER_ID,
+          ),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        expect(roomsModel.findOne).not.toHaveBeenCalled();
+      });
+
+      it('returns 404 when the room does not belong to the hotel', async () => {
+        const { roomsModel, service } = setup({ room: null });
+
+        await expect(
+          service.addRoomAvailability(
+            HOTEL_ID,
+            ROOM_ID,
+            createRoomAvailabilityDto,
+            USER_ID,
+          ),
+        ).rejects.toBeInstanceOf(NotFoundException);
+        expect(roomsModel.findOneAndUpdate).not.toHaveBeenCalled();
+      });
+
+      it('returns 409 when an overlapping range already exists', async () => {
+        const { roomsModel, service } = setup({ updatedRoom: null });
+
+        await expect(
+          service.addRoomAvailability(
+            HOTEL_ID,
+            ROOM_ID,
+            createRoomAvailabilityDto,
+            USER_ID,
+          ),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(roomsModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
       });
     });
 
