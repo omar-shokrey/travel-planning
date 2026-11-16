@@ -7,6 +7,10 @@ import { Types } from 'mongoose';
 import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import type { SessionsService } from '../auth/sessions.service';
+import type { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/enums/audit-action.enum';
+import { AuditTargetType } from '../audit/enums/audit-target-type.enum';
+import { ListAuditLogsQueryDto } from './dto/list-audit-logs-query.dto';
 import type { UsersService } from '../users/users.service';
 import {
   ACCOUNT_NOT_FOUND_MESSAGE,
@@ -20,6 +24,7 @@ import { ProviderType } from '../common/enums/provider-type.enum';
 import { PROVIDER_NOT_FOUND_MESSAGE } from './admin.constants';
 
 const accountId = '6740f1c2a4b5c6d7e8f90123';
+const adminId = '6740f1c2a4b5c6d7e8f90001';
 const accountObjectId = new Types.ObjectId(accountId);
 const temporaryPassword = 'Temp0rary1';
 const providerId = '6740f1c2a4b5c6d7e8f90abc';
@@ -59,13 +64,19 @@ function setup(role: Role = Role.User) {
   const hotels = {
     findEntityOrThrow: jest.fn().mockResolvedValue({ _id: providerObjectId }),
   };
+  // The audit log (GEN-07): record never throws; list returns one page.
+  const audit = {
+    record: jest.fn().mockResolvedValue(undefined),
+    list: jest.fn().mockResolvedValue({ items: [], total: 0 }),
+  };
   const service = new AdminService(
     usersService as unknown as UsersService,
     sessions as unknown as SessionsService,
     airlines as unknown as AirlinesService,
     hotels as unknown as HotelsService,
+    audit as unknown as AuditService,
   );
-  return { usersService, sessions, airlines, hotels, service };
+  return { usersService, sessions, airlines, hotels, audit, service };
 }
 
 describe('AdminService', () => {
@@ -75,7 +86,7 @@ describe('AdminService', () => {
       async (role) => {
         const { usersService, service } = setup(role);
 
-        await service.resetPassword(accountId, { temporaryPassword });
+        await service.resetPassword(accountId, { temporaryPassword }, adminId);
 
         expect(usersService.findEntityById).toHaveBeenCalledWith(accountId);
         expect(usersService.setTemporaryPassword).toHaveBeenCalledWith(
@@ -88,9 +99,11 @@ describe('AdminService', () => {
     it('returns the public account, without the password hash', async () => {
       const { service } = setup();
 
-      const account = await service.resetPassword(accountId, {
-        temporaryPassword,
-      });
+      const account = await service.resetPassword(
+        accountId,
+        { temporaryPassword },
+        adminId,
+      );
 
       expect(account).toMatchObject({
         id: accountId,
@@ -103,7 +116,11 @@ describe('AdminService', () => {
       const { usersService, service } = setup();
       usersService.findEntityById.mockResolvedValue(null);
 
-      const attempt = service.resetPassword(accountId, { temporaryPassword });
+      const attempt = service.resetPassword(
+        accountId,
+        { temporaryPassword },
+        adminId,
+      );
 
       await expect(attempt).rejects.toBeInstanceOf(NotFoundException);
       await expect(attempt).rejects.toThrow(ACCOUNT_NOT_FOUND_MESSAGE);
@@ -113,7 +130,11 @@ describe('AdminService', () => {
     it('refuses to reset the password of an administrator', async () => {
       const { usersService, service } = setup(Role.Admin);
 
-      const attempt = service.resetPassword(accountId, { temporaryPassword });
+      const attempt = service.resetPassword(
+        accountId,
+        { temporaryPassword },
+        adminId,
+      );
 
       await expect(attempt).rejects.toBeInstanceOf(ForbiddenException);
       await expect(attempt).rejects.toThrow(
@@ -125,7 +146,7 @@ describe('AdminService', () => {
     it('ends every session of the account, after the password is saved', async () => {
       const { usersService, sessions, service } = setup();
 
-      await service.resetPassword(accountId, { temporaryPassword });
+      await service.resetPassword(accountId, { temporaryPassword }, adminId);
 
       expect(sessions.revokeAllOfUser).toHaveBeenCalledTimes(1);
       expect(sessions.revokeAllOfUser).toHaveBeenCalledWith(
@@ -154,10 +175,53 @@ describe('AdminService', () => {
       }
 
       await service
-        .resetPassword(accountId, { temporaryPassword })
+        .resetPassword(accountId, { temporaryPassword }, adminId)
         .catch(() => undefined);
 
       expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+    });
+
+    it('records the reset in the audit log, with the admin and the account, without the password', async () => {
+      const { audit, sessions, service } = setup();
+
+      await service.resetPassword(accountId, { temporaryPassword }, adminId);
+
+      expect(audit.record).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledWith({
+        adminId,
+        action: AuditAction.ResetPassword,
+        targetType: AuditTargetType.User,
+        targetId: accountObjectId,
+      });
+      expect(JSON.stringify(audit.record.mock.calls)).not.toContain(
+        temporaryPassword,
+      );
+      // Only once the reset is complete.
+      expect(sessions.revokeAllOfUser.mock.invocationCallOrder[0]).toBeLessThan(
+        audit.record.mock.invocationCallOrder[0],
+      );
+    });
+
+    it.each([
+      ['the account does not exist', 'missing'],
+      ['the account is an administrator', 'admin'],
+      ['the account is deleted before the password is saved', 'gone'],
+    ])('records nothing when %s', async (_name, scenario) => {
+      const { usersService, audit, service } = setup(
+        scenario === 'admin' ? Role.Admin : Role.User,
+      );
+      if (scenario === 'missing') {
+        usersService.findEntityById.mockResolvedValue(null);
+      }
+      if (scenario === 'gone') {
+        usersService.setTemporaryPassword.mockResolvedValue(null);
+      }
+
+      await service
+        .resetPassword(accountId, { temporaryPassword }, adminId)
+        .catch(() => undefined);
+
+      expect(audit.record).not.toHaveBeenCalled();
     });
 
     it('answers 404 when the account is deleted before the password is saved', async () => {
@@ -165,7 +229,7 @@ describe('AdminService', () => {
       usersService.setTemporaryPassword.mockResolvedValue(null);
 
       await expect(
-        service.resetPassword(accountId, { temporaryPassword }),
+        service.resetPassword(accountId, { temporaryPassword }, adminId),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
@@ -252,7 +316,7 @@ describe('AdminService', () => {
       async (role, providerType, checked, notChecked) => {
         const mocks = setup();
 
-        await mocks.service.createModerator({ ...body, role });
+        await mocks.service.createModerator({ ...body, role }, adminId);
 
         expect(mocks[checked].findEntityOrThrow).toHaveBeenCalledWith(
           providerId,
@@ -272,7 +336,7 @@ describe('AdminService', () => {
     it('returns the public account with its assignment, never the password', async () => {
       const { service } = setup();
 
-      const account = await service.createModerator(body);
+      const account = await service.createModerator(body, adminId);
 
       expect(account).toMatchObject({
         role: 'hotel_moderator',
@@ -282,13 +346,40 @@ describe('AdminService', () => {
       expect(JSON.stringify(account)).not.toContain(temporaryPassword);
     });
 
+    it('records the creation in the audit log, with the admin, the new account and its provider', async () => {
+      const { audit, service } = setup();
+
+      await service.createModerator(body, adminId);
+
+      expect(audit.record).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledWith({
+        adminId,
+        action: AuditAction.CreateModerator,
+        targetType: AuditTargetType.User,
+        targetId: accountObjectId,
+        details: `hotel_moderator of hotel ${providerId}`,
+      });
+      expect(JSON.stringify(audit.record.mock.calls)).not.toContain(
+        temporaryPassword,
+      );
+    });
+
+    it('records nothing when the moderator is not created', async () => {
+      const { usersService, audit, service } = setup();
+      usersService.createModerator.mockRejectedValue(new Error('conflict'));
+
+      await service.createModerator(body, adminId).catch(() => undefined);
+
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
     it('refuses a provider that does not exist with 400 on providerId, and creates nothing', async () => {
       const { hotels, usersService, service } = setup();
       hotels.findEntityOrThrow.mockRejectedValue(
         new NotFoundException('Hotel not found'),
       );
 
-      const attempt = service.createModerator(body);
+      const attempt = service.createModerator(body, adminId);
 
       await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
       const error = (await attempt.catch(
@@ -309,7 +400,10 @@ describe('AdminService', () => {
       airlines.findEntityOrThrow.mockRejectedValue(failure);
 
       await expect(
-        service.createModerator({ ...body, role: Role.AirlineModerator }),
+        service.createModerator(
+          { ...body, role: Role.AirlineModerator },
+          adminId,
+        ),
       ).rejects.toBe(failure);
     });
 
@@ -318,7 +412,66 @@ describe('AdminService', () => {
       const conflict = new Error('This email is already registered');
       usersService.createModerator.mockRejectedValue(conflict);
 
-      await expect(service.createModerator(body)).rejects.toBe(conflict);
+      await expect(service.createModerator(body, adminId)).rejects.toBe(
+        conflict,
+      );
+    });
+  });
+
+  describe('listAuditLogs (GEN-07)', () => {
+    const stored = {
+      _id: new Types.ObjectId('6741c0ffee0123456789abcd'),
+      adminId: new Types.ObjectId(adminId),
+      action: AuditAction.ResetPassword,
+      targetType: AuditTargetType.User,
+      targetId: accountId,
+      createdAt: new Date('2026-11-16T09:30:00.000Z'),
+    };
+
+    it('passes the filters and the page to the audit service', async () => {
+      const { audit, service } = setup();
+      const query = Object.assign(new ListAuditLogsQueryDto(), {
+        page: 2,
+        limit: 5,
+        action: AuditAction.ResetPassword,
+        adminId,
+        targetType: AuditTargetType.User,
+        targetId: accountId,
+      });
+
+      await service.listAuditLogs(query);
+
+      expect(audit.list).toHaveBeenCalledWith(
+        {
+          action: AuditAction.ResetPassword,
+          adminId,
+          targetType: AuditTargetType.User,
+          targetId: accountId,
+        },
+        { skip: 5, limit: 5 },
+      );
+    });
+
+    it('returns the mapped records with the page information', async () => {
+      const { audit, service } = setup();
+      audit.list.mockResolvedValue({ items: [stored], total: 11 });
+
+      const result = await service.listAuditLogs(new ListAuditLogsQueryDto());
+
+      expect(result).toEqual({
+        items: [
+          {
+            id: '6741c0ffee0123456789abcd',
+            adminId,
+            action: 'reset_password',
+            targetType: 'user',
+            targetId: accountId,
+            details: null,
+            createdAt: '2026-11-16T09:30:00.000Z',
+          },
+        ],
+        meta: { page: 1, limit: 10, total: 11, totalPages: 2 },
+      });
     });
   });
 });

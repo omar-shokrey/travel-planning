@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { FlightsModule } from '../flights/flights.module';
 import { HotelsModule } from '../hotels/hotels.module';
@@ -11,7 +12,8 @@ import { AdminService } from './admin.service';
   // the account (ACC-07a). AuthModule does not import AdminModule.
   // FlightsModule and HotelsModule to check that a new moderator's airline
   // or hotel exists (ACC-13). Neither imports AdminModule.
-  imports: [AuthModule, FlightsModule, HotelsModule, UsersModule],
+  // AuditModule to record admin actions and read the audit log (GEN-07).
+  imports: [AuditModule, AuthModule, FlightsModule, HotelsModule, UsersModule],
   controllers: [AdminController],
   providers: [AdminService],
 })

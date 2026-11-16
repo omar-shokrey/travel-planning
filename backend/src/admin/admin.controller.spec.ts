@@ -5,8 +5,10 @@ import type { UserResponseDto } from '../users/dto/user-response.dto';
 import { AdminController } from './admin.controller';
 import type { AdminService } from './admin.service';
 import { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
+import { ListAuditLogsQueryDto } from './dto/list-audit-logs-query.dto';
 
 describe('AdminController', () => {
+  const adminId = '6740f1c2a4b5c6d7e8f90001';
   const account = { id: '6740f1c2a4b5c6d7e8f90123' } as UserResponseDto;
   const page = {
     items: [account],
@@ -15,6 +17,7 @@ describe('AdminController', () => {
 
   function setup() {
     const adminService = {
+      listAuditLogs: jest.fn().mockResolvedValue(page),
       resetPassword: jest.fn().mockResolvedValue(account),
       listAccounts: jest.fn().mockResolvedValue(page),
       createModerator: jest.fn().mockResolvedValue(account),
@@ -32,12 +35,18 @@ describe('AdminController', () => {
   });
 
   describe('resetPassword (ACC-07a)', () => {
-    it('gives the service the account id and the body, and returns its answer', async () => {
+    it('gives the service the account id, the body and the admin id, and returns its answer', async () => {
       const { adminService, controller } = setup();
       const body = { temporaryPassword: 'Temp0rary1' };
 
-      expect(await controller.resetPassword(account.id, body)).toBe(account);
-      expect(adminService.resetPassword).toHaveBeenCalledWith(account.id, body);
+      expect(await controller.resetPassword(account.id, body, adminId)).toBe(
+        account,
+      );
+      expect(adminService.resetPassword).toHaveBeenCalledWith(
+        account.id,
+        body,
+        adminId,
+      );
     });
   });
 
@@ -51,8 +60,18 @@ describe('AdminController', () => {
     });
   });
 
+  describe('listAuditLogs (GEN-07)', () => {
+    it('gives the service the query and returns its page', async () => {
+      const { adminService, controller } = setup();
+      const query = new ListAuditLogsQueryDto();
+
+      expect(await controller.listAuditLogs(query)).toBe(page);
+      expect(adminService.listAuditLogs).toHaveBeenCalledWith(query);
+    });
+  });
+
   describe('createModerator (ACC-13)', () => {
-    it('gives the service the body and returns the new account', async () => {
+    it('gives the service the body and the admin id, and returns the new account', async () => {
       const { adminService, controller } = setup();
       const body = {
         name: 'Mona Hotel',
@@ -62,8 +81,8 @@ describe('AdminController', () => {
         temporaryPassword: 'Temp0rary1',
       };
 
-      expect(await controller.createModerator(body)).toBe(account);
-      expect(adminService.createModerator).toHaveBeenCalledWith(body);
+      expect(await controller.createModerator(body, adminId)).toBe(account);
+      expect(adminService.createModerator).toHaveBeenCalledWith(body, adminId);
     });
   });
 });

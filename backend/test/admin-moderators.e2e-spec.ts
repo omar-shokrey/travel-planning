@@ -16,6 +16,7 @@ import { UserStatus } from './../src/common/enums/user-status.enum';
 import { Airline } from './../src/flights/models/airline.schema';
 import { Hotel } from './../src/hotels/models/hotel.schema';
 import { User } from './../src/users/models/user.schema';
+import { deleteAuditLogsOf } from './support/delete-audit-logs';
 import { deleteSessionsOf } from './support/delete-sessions';
 
 const PASSWORD = 'Passw0rdOK';
@@ -144,6 +145,8 @@ describe('POST /api/admin/moderators (e2e, ACC-13)', () => {
     for (const id of createdUserIds) {
       await deleteSessionsOf(app, id);
     }
+    // Each creation wrote an audit record (GEN-07).
+    await deleteAuditLogsOf(app, createdUserIds);
     for (const id of createdUserIds) {
       await users.findByIdAndDelete(id);
     }
