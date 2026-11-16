@@ -46,17 +46,17 @@ export const ACCOUNT_DEACTIVATED_MESSAGE =
 export const ADMIN_STATUS_FORBIDDEN_MESSAGE =
   'An administrator account cannot be suspended or reactivated';
 
+/**
+ * ACC-16 / GEN-01: the in-app notification of a suspended account, user or
+ * moderator (ACC-15). The account cannot log in while suspended, so it is
+ * read after the reactivation.
+ */
+export const ACCOUNT_SUSPENDED_NOTIFICATION =
+  'Your account was suspended by an administrator.';
+
 /** ACC-16: another request changed the status between the check and the update. */
 export const ACCOUNT_STATUS_CHANGED_MESSAGE =
   'The account status was changed by another request. Reload it and try again';
-
-/**
- * ACC-15: the in-app notification a moderator gets when an admin suspends
- * the account. It is read after a reactivation, since a suspended account
- * cannot log in.
- */
-export const MODERATOR_SUSPENDED_NOTIFICATION =
-  'Your moderator account was suspended by an administrator.';
 
 /** ACC-15: `:type` of the provider routes is not `hotel` or `airline`. */
 export const PROVIDER_TYPE_MESSAGE = 'type must be one of: hotel, airline';

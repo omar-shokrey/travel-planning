@@ -12,12 +12,13 @@ import { AdminService } from './admin.service';
   // the account (ACC-07a). AuthModule does not import AdminModule.
   // FlightsModule and HotelsModule to check that a new moderator's airline
   // or hotel exists (ACC-13), and to deactivate it (ACC-15). Neither imports
-  // AdminModule. NotificationsModule tells moderators about a suspension or
-  // a deactivated provider (ACC-15).
+  // AdminModule.
   imports: [
     AuthModule,
     FlightsModule,
     HotelsModule,
+    // NotificationsService: a suspended account (ACC-16, ACC-15) and the
+    // moderators of a deactivated provider (ACC-15) are notified (GEN-01).
     NotificationsModule,
     UsersModule,
   ],

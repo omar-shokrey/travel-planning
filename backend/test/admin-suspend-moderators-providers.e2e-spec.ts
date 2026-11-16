@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import './support/auth-env';
 import {
-  MODERATOR_SUSPENDED_NOTIFICATION,
+  ACCOUNT_SUSPENDED_NOTIFICATION,
   PROVIDER_ALREADY_DEACTIVATED_MESSAGE,
   PROVIDER_NOT_DEACTIVATED_MESSAGE,
   PROVIDER_TYPE_MESSAGE,
@@ -233,7 +233,7 @@ describe('Suspend moderators and deactivate providers (e2e, ACC-15)', () => {
         expect(told).toHaveLength(1);
         expect(told[0]).toMatchObject({
           type: 'account_suspended',
-          message: MODERATOR_SUSPENDED_NOTIFICATION,
+          message: ACCOUNT_SUSPENDED_NOTIFICATION,
         });
       },
     );

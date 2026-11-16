@@ -12,6 +12,8 @@ import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import { AirlinesService } from '../flights/airlines.service';
 import { HotelsService } from '../hotels/hotels.service';
+import { NotificationType } from '../notifications/enums/notification-type.enum';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   paginate,
   type PaginatedResponse,
@@ -25,9 +27,9 @@ import {
   ACCOUNT_NOT_FOUND_MESSAGE,
   ACCOUNT_NOT_SUSPENDED_MESSAGE,
   ACCOUNT_STATUS_CHANGED_MESSAGE,
+  ACCOUNT_SUSPENDED_NOTIFICATION,
   ADMIN_PASSWORD_RESET_FORBIDDEN_MESSAGE,
   ADMIN_STATUS_FORBIDDEN_MESSAGE,
-  MODERATOR_SUSPENDED_NOTIFICATION,
   PROVIDER_ALREADY_DEACTIVATED_MESSAGE,
   PROVIDER_NOT_DEACTIVATED_MESSAGE,
   PROVIDER_NOT_FOUND_MESSAGE,
@@ -40,8 +42,6 @@ import type { ResetPasswordDto } from './dto/reset-password.dto';
 import type { ProviderStatusResponseDto } from './dto/provider-status-response.dto';
 import { toProviderStatusResponse } from './mappers/provider-status.mapper';
 import { NotificationLinkType } from '../notifications/enums/notification-link-type.enum';
-import { NotificationType } from '../notifications/enums/notification-type.enum';
-import { NotificationsService } from '../notifications/notifications.service';
 
 /**
  * Account management by an administrator. It never writes to the `users`
@@ -159,55 +159,81 @@ export class AdminService {
   /**
    * Suspends a registered user (ACC-16) or a moderator (ACC-15). A suspended
    * account cannot log in or refresh (403 "Your account is suspended"), and
-   * every session of the account ends at once, so reactivating later does not
-   * bring old logins back. Bookings stay valid and content stays visible:
-   * nothing else changes. A moderator also gets a notification (ACC-15).
+   * every session of the account ends at once. The account gets an
+   * `account_suspended` notification (GEN-01), read after a reactivation.
+   * Bookings stay valid and content stays visible: nothing else changes.
    */
   async suspend(accountId: string): Promise<UserResponseDto> {
-    const account = await this.findUserForStatusChange(accountId);
-    if (account.status === UserStatus.Deactivated) {
-      throw new ConflictException(ACCOUNT_DEACTIVATED_MESSAGE);
-    }
-    if (account.status === UserStatus.Suspended) {
-      throw new ConflictException(ACCOUNT_ALREADY_SUSPENDED_MESSAGE);
-    }
-
-    const updated = await this.usersService.changeStatus(
-      account._id,
-      UserStatus.Active,
-      UserStatus.Suspended,
-    );
-    if (!updated) {
-      throw new ConflictException(ACCOUNT_STATUS_CHANGED_MESSAGE);
-    }
+    const updated = await this.changeUserStatus(accountId, {
+      from: UserStatus.Active,
+      to: UserStatus.Suspended,
+      wrongStatusMessage: ACCOUNT_ALREADY_SUSPENDED_MESSAGE,
+    });
     // After the status, so a failure here never leaves the account active.
+    // A session this misses (a failure, or a login racing the suspension) is
+    // refused by the guard while suspended and ended by `reactivate`.
     await this.sessions.revokeAllOfUser(accountId, new Date());
-    await this.notifySuspendedModerator(updated.role, updated._id);
+    // `notify` never throws.
+    await this.notifications.notify(
+      updated._id,
+      NotificationType.AccountSuspended,
+      ACCOUNT_SUSPENDED_NOTIFICATION,
+    );
     return toUserResponse(updated);
   }
 
   /**
    * Reactivates a suspended user (ACC-16) or moderator (ACC-15): the account
-   * can log in again.
+   * can log in again, with a new login. Every session of the account ends
+   * first, while it is still suspended, so no old session comes back,
+   * including one a failed or racing suspension missed. If ending them fails,
+   * the account stays suspended and the admin can retry.
    */
   async reactivate(accountId: string): Promise<UserResponseDto> {
+    const updated = await this.changeUserStatus(accountId, {
+      from: UserStatus.Suspended,
+      to: UserStatus.Active,
+      wrongStatusMessage: ACCOUNT_NOT_SUSPENDED_MESSAGE,
+      beforeChange: () => this.sessions.revokeAllOfUser(accountId, new Date()),
+    });
+    return toUserResponse(updated);
+  }
+
+  /**
+   * The rules both status changes share (ACC-16, ACC-15): the account must
+   * exist, be a registered user or a moderator, not be deactivated (ACC-12)
+   * and have the `from`
+   * status; the change is one conditional update, so two admins at once
+   * cannot both win. `beforeChange` runs after the checks and before the
+   * update.
+   */
+  private async changeUserStatus(
+    accountId: string,
+    change: {
+      from: UserStatus;
+      to: UserStatus;
+      wrongStatusMessage: string;
+      beforeChange?: () => Promise<void>;
+    },
+  ) {
     const account = await this.findUserForStatusChange(accountId);
     if (account.status === UserStatus.Deactivated) {
       throw new ConflictException(ACCOUNT_DEACTIVATED_MESSAGE);
     }
-    if (account.status === UserStatus.Active) {
-      throw new ConflictException(ACCOUNT_NOT_SUSPENDED_MESSAGE);
+    if (account.status !== change.from) {
+      throw new ConflictException(change.wrongStatusMessage);
     }
 
+    await change.beforeChange?.();
     const updated = await this.usersService.changeStatus(
       account._id,
-      UserStatus.Suspended,
-      UserStatus.Active,
+      change.from,
+      change.to,
     );
     if (!updated) {
       throw new ConflictException(ACCOUNT_STATUS_CHANGED_MESSAGE);
     }
-    return toUserResponse(updated);
+    return updated;
   }
 
   /**
@@ -227,23 +253,6 @@ export class AdminService {
   }
 
   // ---- Moderator suspension and provider status (ACC-15) ----
-
-  /**
-   * A suspended moderator gets an in-app notification, read after a
-   * reactivation. A registered user (ACC-16) does not. `notify` never throws.
-   */
-  private async notifySuspendedModerator(
-    role: Role,
-    accountId: Types.ObjectId,
-  ): Promise<void> {
-    if (role === Role.AirlineModerator || role === Role.HotelModerator) {
-      await this.notifications.notify(
-        accountId,
-        NotificationType.AccountSuspended,
-        MODERATOR_SUSPENDED_NOTIFICATION,
-      );
-    }
-  }
 
   /**
    * Deactivates a hotel or airline (ACC-15): it is hidden from search and

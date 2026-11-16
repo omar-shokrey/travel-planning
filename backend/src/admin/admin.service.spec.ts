@@ -10,8 +10,18 @@ import { UserStatus } from '../common/enums/user-status.enum';
 import type { SessionsService } from '../auth/sessions.service';
 import type { UsersService } from '../users/users.service';
 import {
+  ACCOUNT_ALREADY_SUSPENDED_MESSAGE,
+  ACCOUNT_DEACTIVATED_MESSAGE,
   ACCOUNT_NOT_FOUND_MESSAGE,
+  ACCOUNT_NOT_SUSPENDED_MESSAGE,
+  ACCOUNT_SUSPENDED_NOTIFICATION,
   ADMIN_PASSWORD_RESET_FORBIDDEN_MESSAGE,
+  ADMIN_STATUS_FORBIDDEN_MESSAGE,
+  PROVIDER_ALREADY_DEACTIVATED_MESSAGE,
+  PROVIDER_NOT_DEACTIVATED_MESSAGE,
+  PROVIDER_NOT_FOUND_MESSAGE,
+  PROVIDER_STATUS_CHANGED_MESSAGE,
+  providerDeactivatedNotification,
 } from './admin.constants';
 import { AdminService } from './admin.service';
 import { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
@@ -21,18 +31,6 @@ import { NotificationLinkType } from '../notifications/enums/notification-link-t
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import type { NotificationsService } from '../notifications/notifications.service';
 import { ProviderType } from '../common/enums/provider-type.enum';
-import { PROVIDER_NOT_FOUND_MESSAGE } from './admin.constants';
-import {
-  ACCOUNT_ALREADY_SUSPENDED_MESSAGE,
-  ACCOUNT_DEACTIVATED_MESSAGE,
-  ACCOUNT_NOT_SUSPENDED_MESSAGE,
-  ADMIN_STATUS_FORBIDDEN_MESSAGE,
-  MODERATOR_SUSPENDED_NOTIFICATION,
-  PROVIDER_ALREADY_DEACTIVATED_MESSAGE,
-  PROVIDER_NOT_DEACTIVATED_MESSAGE,
-  PROVIDER_STATUS_CHANGED_MESSAGE,
-  providerDeactivatedNotification,
-} from './admin.constants';
 
 const accountId = '6740f1c2a4b5c6d7e8f90123';
 const accountObjectId = new Types.ObjectId(accountId);
@@ -369,21 +367,56 @@ describe('AdminService', () => {
       expect(account.status).toBe('suspended');
     });
 
-    it('reactivates a suspended user without touching sessions', async () => {
-      const { usersService, sessions, service } = setup(
+    it('sends the user an account_suspended notification, after the status change', async () => {
+      const { usersService, notifications, service } = setup();
+
+      await service.suspend(accountId);
+
+      expect(notifications.notify).toHaveBeenCalledTimes(1);
+      expect(notifications.notify).toHaveBeenCalledWith(
+        accountObjectId,
+        NotificationType.AccountSuspended,
+        ACCOUNT_SUSPENDED_NOTIFICATION,
+      );
+      const changed = usersService.changeStatus.mock.invocationCallOrder[0];
+      const notified = notifications.notify.mock.invocationCallOrder[0];
+      expect(changed).toBeLessThan(notified);
+    });
+
+    it('ends every session of the account before it reactivates it, so none comes back', async () => {
+      const { usersService, sessions, notifications, service } = setup(
         Role.User,
         UserStatus.Suspended,
       );
 
       const account = await service.reactivate(accountId);
 
+      expect(sessions.revokeAllOfUser).toHaveBeenCalledWith(
+        accountId,
+        expect.any(Date),
+      );
       expect(usersService.changeStatus).toHaveBeenCalledWith(
         accountObjectId,
         UserStatus.Suspended,
         UserStatus.Active,
       );
-      expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+      const ended = sessions.revokeAllOfUser.mock.invocationCallOrder[0];
+      const changed = usersService.changeStatus.mock.invocationCallOrder[0];
+      expect(ended).toBeLessThan(changed);
+      expect(notifications.notify).not.toHaveBeenCalled();
       expect(account.status).toBe('active');
+    });
+
+    it('leaves the account suspended when ending its sessions fails, so a retry works', async () => {
+      const { usersService, sessions, service } = setup(
+        Role.User,
+        UserStatus.Suspended,
+      );
+      const failure = new Error('database down');
+      sessions.revokeAllOfUser.mockRejectedValue(failure);
+
+      await expect(service.reactivate(accountId)).rejects.toBe(failure);
+      expect(usersService.changeStatus).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -394,7 +427,10 @@ describe('AdminService', () => {
     ] as const)(
       'answers 409 to %s on a %s account, and changes nothing',
       async (action, status, message) => {
-        const { usersService, sessions, service } = setup(Role.User, status);
+        const { usersService, sessions, notifications, service } = setup(
+          Role.User,
+          status,
+        );
 
         const attempt = service[action](accountId);
 
@@ -402,6 +438,7 @@ describe('AdminService', () => {
         await expect(attempt).rejects.toThrow(message);
         expect(usersService.changeStatus).not.toHaveBeenCalled();
         expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+        expect(notifications.notify).not.toHaveBeenCalled();
       },
     );
 
@@ -416,14 +453,6 @@ describe('AdminService', () => {
         expect(usersService.changeStatus).not.toHaveBeenCalled();
       },
     );
-
-    it('does not notify a registered user (ACC-16)', async () => {
-      const { notifications, service } = setup();
-
-      await service.suspend(accountId);
-
-      expect(notifications.notify).not.toHaveBeenCalled();
-    });
 
     it('answers 404 for an account that does not exist', async () => {
       const { usersService, service } = setup();
@@ -465,7 +494,7 @@ describe('AdminService', () => {
         expect(notifications.notify).toHaveBeenCalledWith(
           accountObjectId,
           NotificationType.AccountSuspended,
-          MODERATOR_SUSPENDED_NOTIFICATION,
+          ACCOUNT_SUSPENDED_NOTIFICATION,
         );
         const ended = sessions.revokeAllOfUser.mock.invocationCallOrder[0];
         const told = notifications.notify.mock.invocationCallOrder[0];
@@ -489,7 +518,9 @@ describe('AdminService', () => {
           UserStatus.Suspended,
           UserStatus.Active,
         );
-        expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+        const ended = sessions.revokeAllOfUser.mock.invocationCallOrder[0];
+        const changed = usersService.changeStatus.mock.invocationCallOrder[0];
+        expect(ended).toBeLessThan(changed);
         expect(notifications.notify).not.toHaveBeenCalled();
         expect(account.status).toBe('active');
       },
