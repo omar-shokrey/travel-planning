@@ -828,3 +828,38 @@ EUR transport cost on day 2, the cairo group subtotal was [2500 EGP, 45000 EUR];
 transport cost to day 3 it showed under the paris group. Claude then deleted its test itineraries
 one by one by id. I changed nothing and rejected nothing.
 ================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository and my laptop)
+Branch / Issue: feature/ITN-10-day-activities / #72
+Related Requirement: ITN-10
+Prompt:
+Continuing my wave 3 issues in the same chat, I asked Claude to implement ITN-10, open its pull
+request, and test it in Swagger on my laptop.
+How the output was used:
+Claude wrote the DTOs, the service and controller, the unit and e2e tests and the README section. It
+ran format, lint, typecheck, build and the unit tests in its own workspace, and the end-to-end tests
+against a local MongoDB-compatible stand-in (FerretDB). I applied its commits with a script so they
+carry my name.
+Accepted, changed, or rejected:
+Design choices by Claude: A separate `ActivitiesService` and `ActivitiesController`, so the
+itinerary service does not grow with each list. They reuse the ownership, day and currency checks of
+`ItinerariesService`. A cost and its currency go together (400 otherwise). The cost is whole minor
+units, 0 or more; the currency must be one of the seeded countries' currencies. Limits not in the
+workbook: name up to 100 characters, description up to 1000. `null` in an edit answers 400, as in
+the hotel edit (HTL-01); an empty description or time removes it. An activity is found by its id
+inside the days: 404 if no itinerary has it, then 403 if the itinerary is not yours. Every change
+has a version check, so a change that races with a day delete or move answers 409. Images (ITN-12)
+are not part of this pull request.
+Checked: on my laptop the checks script ran format (no changes), lint (0 warnings and 0 errors),
+typecheck, build, npm test (60 suites, 825 tests passed) and npm run test:e2e on the test database
+(26 suites, 439 tests passed). Claude tested it in Swagger in the Claude app's browser while I was
+logged in, with the API on the ITN-21 branch, which contains this branch; it sent the requests from
+the Swagger page. Adding "Egyptian Museum" at 10:00 costing 2000 EGP to day 1 answered 201; editing
+the cost to 2500 answered 200; a cost without a currency answered 400; currency ABC answered 400
+"Unsupported currency: ABC"; a null name answered 400 "name must not be null"; deleting an activity
+answered 200 and the day's list was empty. Claude then deleted its test itineraries one by one by
+id. I changed nothing and rejected nothing.
+================================================
