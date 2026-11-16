@@ -863,3 +863,36 @@ the cost to 2500 answered 200; a cost without a currency answered 400; currency 
 answered 200 and the day's list was empty. Claude then deleted its test itineraries one by one by
 id. I changed nothing and rejected nothing.
 ================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository and my laptop)
+Branch / Issue: feature/ITN-16-transport-costs / #75
+Related Requirement: ITN-16
+Prompt:
+Continuing my wave 3 issues in the same chat, I asked Claude to implement ITN-16, open its pull
+request, and test it in Swagger on my laptop.
+How the output was used:
+Claude wrote the DTOs, the service and controller, the unit and e2e tests and the README section. It
+ran format, lint, typecheck, build and the unit tests in its own workspace, and the end-to-end tests
+against a local MongoDB-compatible stand-in (FerretDB). I applied its commits with a script so they
+carry my name.
+Accepted, changed, or rejected:
+Design choices by Claude: `mode` is free text up to 50 characters (train, bus, flight...), because
+the workbook gives no fixed list. Both cities must exist and must differ, since this is intercity
+transport. An edit that changes one city is checked against the city it keeps. A transport cost
+belongs to one day, so it counts in that day's city group subtotal (ITN-09) and leaves with the day
+if the day is deleted. `PATCH` with a new `dayId` moves it and keeps its id. Same design and money
+rules as activities (ITN-10): a separate service and controller, 404 then 403, `null` answers 400,
+version check (409).
+Checked: on my laptop the checks script ran format (no changes), lint (0 warnings and 0 errors),
+typecheck, build, npm test (61 suites, 843 tests passed) and npm run test:e2e on the test database
+(27 suites, 458 tests passed). Claude tested it in Swagger in the Claude app's browser while I was
+logged in, with the API on the ITN-21 branch, which contains this branch; it sent the requests from
+the Swagger page. Adding a cairo to paris flight of 45000 EUR on day 2 answered 201; cairo to cairo
+answered 400 "fromCityId and toCityId must be different cities"; moving it to day 3 with the amount
+42000 answered 200, kept its id and moved it to the paris group's subtotal; deleting it answered
+200. Claude then deleted its test itineraries one by one by id. I changed nothing and rejected
+nothing.
+================================================
