@@ -9,6 +9,8 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 | `POST /api/admin/users/:id/reset-password` | ACC-07a     | Admin  |
 | `GET /api/admin/accounts`                  | ACC-14      | Admin  |
 | `POST /api/admin/moderators`               | ACC-13      | Admin  |
+| `PATCH /api/admin/accounts/:id/suspend`    | ACC-16      | Admin  |
+| `PATCH /api/admin/accounts/:id/reactivate` | ACC-16      | Admin  |
 
 ## Design decisions
 
@@ -51,3 +53,17 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **An email that is already registered answers 409**, checked first and again by the unique index, as in registration.
 - **The response is `UserResponseDto` with `assignment`** (`providerType`, `providerId` as a string). It is left out for accounts that are not moderators, so other responses keep their shape.
 - **The client cannot set** the status (always active), `mustChangePassword` or the assignment directly; those fields answer 400.
+
+## Suspend and reactivate users (ACC-16)
+
+`PATCH /api/admin/accounts/:id/suspend` and `PATCH /api/admin/accounts/:id/reactivate` answer 200 with the account.
+
+- **Registered users only, for now.** These routes are shared with ACC-15, which suspends moderators. Until ACC-15 extends them, a moderator answers 400 ("Only registered user accounts can be suspended or reactivated here"). An administrator answers 403.
+- **What suspension does.** Login and refresh already refuse a suspended account with 403 "Your account is suspended", and the authentication guard refuses its requests. Suspending also ends every session of the account (`SessionsService.revokeAllOfUser`), so its old cookies stop at once (the access cookie gets 401, because the session is checked first) and the user logs in again after a reactivation. The status changes first and the sessions end second, so a failure in between never leaves the account active.
+- **Reactivating ends every session again, first.** Two cases leave a session alive through a suspension: ending the sessions failed after the status changed (a retry then answers 409 "already suspended"), or a login that read `active` saved its session just after the suspension ended the others. The guard refuses such a session while the account is suspended, but it would work again after a reactivation. So `reactivate` ends every session of the account while it is still suspended (no new login can happen then), and only then changes the status. If that fails, the account stays suspended and the admin retries.
+- **The user is notified (GEN-01).** After the status change, the user gets an `account_suspended` in-app notification ("Your account was suspended by an administrator."). They cannot log in while suspended, so they read it after a reactivation. `notify` never throws, so it cannot fail the suspension. Reactivating sends nothing.
+- **One helper for both changes.** `changeUserStatus` holds the shared rules (exists, registered user, not deactivated, expected status, conditional update); `suspend` and `reactivate` only add their session and notification steps.
+- **What it does not change.** Bookings stay valid and the user's posts, comments, reviews and itineraries stay visible, as the requirement says. Hiding content is GEN-10.
+- **Status rules.** Suspending a suspended account or reactivating an active one answers 409. A deactivated account (closed by its owner, ACC-12) answers 409 to both: an admin does not reopen it.
+- **Two admins at once.** `UsersService.changeStatus(id, from, to)` changes the status only if it still is `from`, in one `findOneAndUpdate`. The request that loses answers 409 ("changed by another request") and ends no session.
+- **Not here:** the audit record (GEN-07), added after GEN-07 merges.
