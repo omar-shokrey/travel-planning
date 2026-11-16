@@ -25,6 +25,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Role } from '../common/enums/role.enum';
+import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { CreatePostDto } from './dto/create-post.dto';
 import { MyPostResponseDto } from './dto/my-post-response.dto';
 import { PostResponseDto } from './dto/post-response.dto';
@@ -111,7 +112,7 @@ export class PostsController {
   })
   @ApiBadRequestResponse({
     description:
-      'A field is invalid, such as an empty title or body, a title over 200 characters, a body over 20,000 characters, or an unknown status.',
+      'The post id is malformed, or a field is invalid, such as an empty title or body, a title over 200 characters, a body over 20,000 characters, or an unknown status.',
   })
   @ApiUnauthorizedResponse({
     description: 'Not logged in, or the access token is invalid or expired',
@@ -124,7 +125,7 @@ export class PostsController {
     description: 'The requested post does not exist.',
   })
   update(
-    @Param('id') id: string,
+    @Param('id', ParseObjectIdPipe) id: string,
     @Body() dto: UpdatePostDto,
     @CurrentUser('id') userId: string,
   ): Promise<PostResponseDto> {
@@ -141,6 +142,9 @@ export class PostsController {
     status: 200,
     description: 'The post was deleted successfully.',
   })
+  @ApiBadRequestResponse({
+    description: 'The post id is not a valid MongoDB ObjectId.',
+  })
   @ApiUnauthorizedResponse({
     description: 'Not logged in, or the access token is invalid or expired',
   })
@@ -152,7 +156,7 @@ export class PostsController {
     description: 'The requested post does not exist.',
   })
   async remove(
-    @Param('id') id: string,
+    @Param('id', ParseObjectIdPipe) id: string,
     @CurrentUser('id') userId: string,
   ): Promise<void> {
     await this.posts.remove(id, userId);

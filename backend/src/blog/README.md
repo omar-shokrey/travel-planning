@@ -17,3 +17,11 @@
 - Post images are stored as uploaded file names (`images`). Creating a post takes no images: they are added afterwards with `POST /api/posts/:id/images` (BLG-10), under the shared upload rules (GEN-08).
 - API responses use a mapper and response DTO rather than exposing the Mongoose document directly.
 - Creating posts is restricted to authenticated registered users with the `User` role.
+
+## BLG-04 — Edit and delete own posts
+
+- An author may edit only their own post. They may change the `title`, `body`, and `status`. Tags and images are managed by their dedicated requirements (BLG-08 and BLG-10).
+- If the post does not exist, the API returns `404 Not Found`. If the post exists but belongs to another user, the API returns `403 Forbidden`.
+- When changing a post to `published`, the server sets `publishedAt` if it does not already exist. Editing an already published post keeps its existing `publishedAt`. Changing a published post back to `draft` clears `publishedAt`.
+- `DELETE /api/posts/:id` returns `200 OK` when the author's post is successfully deleted.
+- Once BLG-05 (comments) and BLG-06 (likes) are merged, deleting a post must also delete its associated comments and likes so no orphaned records remain.
