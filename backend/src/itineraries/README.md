@@ -54,3 +54,10 @@ Owner: Ali Ghayesh (M8). Requirements: ITN-01 to ITN-26. Routes: `/api/itinerari
 - **A change by position that loses the race answers 409** "The itinerary was changed by another request". `saveOrConflict()` turns the Mongoose `VersionError` into that answer, and the day edit (ITN-05) uses it now.
 - **Everything inside the day goes with it**: its activities, budget entries and transport costs. When activity images exist (ITN-12), deleting a day must also delete their files.
 - **The e2e tests share `test/support/itinerary-fixture.ts`**, which adds a test country and two test cities, makes users with a live session, and deletes everything by id at the end.
+
+## ITN-08: move a day
+
+- **`PATCH /api/itineraries/:id/days/reorder` takes `{ dayId, position }`**: the day to move and its new day number (1 is the first day). The days in between shift by one. It returns the itinerary in the new order, since every number, date and city group can change.
+- **The route is declared before `PATCH :id/days/:dayId`**, or Nest would read `reorder` as a day id.
+- **A position after the last day answers 400** with the allowed range. Moving a day to where it already is changes nothing and writes nothing.
+- **Same versioned write as ITN-07.** `writeDays()` replaces the days in one update that only applies at the version that was read. A move and a delete at the same moment can each apply or answer 409, but never half apply, and `dayCount` always equals the number of days. This relies on MongoDB applying a single-document update atomically.
