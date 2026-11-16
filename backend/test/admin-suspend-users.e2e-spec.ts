@@ -26,7 +26,9 @@ import { ProviderType } from './../src/common/enums/provider-type.enum';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
 import { User } from './../src/users/models/user.schema';
+import { Notification } from './../src/notifications/models/notification.schema';
 import { deleteSessionsOf } from './support/delete-sessions';
+import { sessionCookieFor } from './support/session-cookie';
 
 const PASSWORD = 'Passw0rdOK';
 
@@ -133,6 +135,19 @@ describe('Suspend and reactivate users (e2e, ACC-16)', () => {
   });
 
   afterAll(async () => {
+    // The notifications the suspensions sent, one by one by id.
+    const notifications = app.get<Model<Notification>>(
+      getModelToken(Notification.name),
+    );
+    for (const id of createdUserIds) {
+      const sent = await notifications
+        .find({ userId: new Types.ObjectId(id) })
+        .select('_id')
+        .lean();
+      for (const { _id } of sent) {
+        await notifications.findByIdAndDelete(_id);
+      }
+    }
     for (const id of createdUserIds) {
       await deleteSessionsOf(app, id);
     }
@@ -182,6 +197,11 @@ describe('Suspend and reactivate users (e2e, ACC-16)', () => {
     });
 
     it('reactivates the user, who can log in again; old sessions stay ended', async () => {
+      // A session the suspension did not end: one saved by a login that raced
+      // the suspension, or left alive by a failure. It exists while the
+      // account is suspended; reactivating must end it too.
+      const missed = await sessionCookieFor(app, idOf('target'));
+
       const response = await act('reactivate', idOf('target'));
 
       expect(response.status).toBe(200);
@@ -191,6 +211,21 @@ describe('Suspend and reactivate users (e2e, ACC-16)', () => {
         .post('/api/auth/refresh')
         .set('Cookie', before.refresh);
       expect(oldRefresh.status).toBe(401);
+      const me = await server().get('/api/auth/me').set('Cookie', missed);
+      expect(me.status).toBe(401);
+    });
+
+    it('left the user an account_suspended notification to read after reactivation', async () => {
+      const session = await startSession('target');
+
+      const response = await server()
+        .get('/api/notifications')
+        .set('Cookie', session.access);
+
+      expect(response.status).toBe(200);
+      expect(
+        (response.body.items as { type: string }[]).map((item) => item.type),
+      ).toContain('account_suspended');
     });
 
     it('answers 409 to reactivating a user that is not suspended', async () => {

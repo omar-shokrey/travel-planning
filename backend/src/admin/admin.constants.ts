@@ -51,6 +51,13 @@ export const ADMIN_STATUS_FORBIDDEN_MESSAGE =
 export const ONLY_USER_STATUS_MESSAGE =
   'Only registered user accounts can be suspended or reactivated here';
 
+/**
+ * ACC-16 / GEN-01: the in-app notification of a suspended account. The user
+ * cannot log in while suspended, so it is read after the reactivation.
+ */
+export const ACCOUNT_SUSPENDED_NOTIFICATION =
+  'Your account was suspended by an administrator.';
+
 /** ACC-16: another request changed the status between the check and the update. */
 export const ACCOUNT_STATUS_CHANGED_MESSAGE =
   'The account status was changed by another request. Reload it and try again';
