@@ -14,10 +14,15 @@ import { UploadsService } from '../uploads/uploads.service';
 import type { ImageFile } from '../uploads/uploads.types';
 import { UsersService } from '../users/users.service';
 import type { CreateHotelDto } from './dto/create-hotel.dto';
+import type { CreateRoomAvailabilityDto } from './dto/create-room-availability.dto';
+import type { CreateRoomDto } from './dto/create-room.dto';
 import type { HotelResponseDto } from './dto/hotel-response.dto';
+import type { RoomResponseDto } from './dto/room-response.dto';
 import { nullFieldsOf, type UpdateHotelDto } from './dto/update-hotel.dto';
 import { toHotelResponse } from './mappers/hotel.mapper';
+import { toRoomResponse } from './mappers/room.mapper';
 import { Hotel, type HotelDocument } from './models/hotel.schema';
+import { Room } from './models/room.schema';
 
 const HOTEL_NOT_FOUND_MESSAGE = 'Hotel not found';
 const CITY_NOT_FOUND_MESSAGE = 'City not found';
@@ -25,11 +30,15 @@ const HOTEL_ACCESS_DENIED_MESSAGE = 'You do not manage this hotel';
 const USER_REQUIRED_MESSAGE = 'You must log in to do this';
 const HOTEL_PHOTO_CONFLICT_MESSAGE =
   'The hotel photos changed while this upload was processing. Please retry.';
+const ROOM_NOT_FOUND_MESSAGE = 'Room not found';
+const ROOM_AVAILABILITY_CONFLICT_MESSAGE =
+  'The room availability range overlaps an existing range';
 
 @Injectable()
 export class HotelsService {
   constructor(
     @InjectModel(Hotel.name) private readonly hotels: Model<Hotel>,
+    @InjectModel(Room.name) private readonly rooms: Model<Room>,
     @InjectModel(City.name) private readonly cities: Model<City>,
     private readonly usersService: UsersService,
     private readonly uploads: UploadsService,
@@ -58,6 +67,74 @@ export class HotelsService {
       averageRating: 0,
     });
     return toHotelResponse(hotel);
+  }
+
+  async createRoom(
+    hotelId: string,
+    dto: CreateRoomDto,
+    userId: string | undefined,
+  ): Promise<RoomResponseDto> {
+    const hotel = await this.findHotelOrThrow(hotelId);
+    await this.assertHotelModerator(hotel, userId);
+
+    const room = await this.rooms.create({
+      hotelId: hotel._id,
+      number: dto.number,
+      type: dto.type,
+      beds: dto.beds,
+      maxOccupancy: dto.maxOccupancy,
+      pricePerNight: dto.pricePerNight,
+      active: true,
+    });
+    return toRoomResponse(room);
+  }
+
+  async addRoomAvailability(
+    hotelId: string,
+    roomId: string,
+    dto: CreateRoomAvailabilityDto,
+    userId: string | undefined,
+  ): Promise<RoomResponseDto> {
+    const hotel = await this.findHotelOrThrow(hotelId);
+    await this.assertHotelModerator(hotel, userId);
+
+    const room = await this.rooms
+      .findOne({ _id: roomId, hotelId: hotel._id })
+      .exec();
+    if (!room) {
+      throw new NotFoundException(ROOM_NOT_FOUND_MESSAGE);
+    }
+
+    const updated = await this.rooms
+      .findOneAndUpdate(
+        {
+          _id: room._id,
+          hotelId: hotel._id,
+          availability: {
+            $not: {
+              $elemMatch: {
+                from: { $lt: dto.to },
+                to: { $gt: dto.from },
+              },
+            },
+          },
+        },
+        {
+          $push: {
+            availability: {
+              $each: [{ from: dto.from, to: dto.to }],
+              $sort: { from: 1 },
+            },
+          },
+        },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
+    if (!updated) {
+      throw new ConflictException(ROOM_AVAILABILITY_CONFLICT_MESSAGE);
+    }
+
+    return toRoomResponse(updated);
   }
 
   async update(
