@@ -13,6 +13,7 @@ import { UsersService } from '../users/users.service';
 import type { CreateHotelDto } from './dto/create-hotel.dto';
 import { HotelsService } from './hotels.service';
 import { Hotel, type HotelDocument } from './models/hotel.schema';
+import type { UpdateHotelDto } from './dto/update-hotel.dto';
 
 const HOTEL_ID = '6740f1c2a4b5c6d7e8f90123';
 const USER_ID = '6740f1c2a4b5c6d7e8f90124';
@@ -186,6 +187,56 @@ describe('HotelsService (HTL-01)', () => {
       expect(hotel.countryCode).toBe('US');
     });
 
+    it.each([
+      ['name'],
+      ['addressLine'],
+      ['cityId'],
+      ['description'],
+      ['starClass'],
+      ['amenities'],
+    ])(
+      'refuses %s sent as null with 400, before reading or saving anything',
+      async (field) => {
+        const hotel = makeHotel();
+        const { hotelsModel, service } = setup({ hotel });
+
+        const attempt = service.update(
+          HOTEL_ID,
+          { [field]: null } as unknown as UpdateHotelDto,
+          USER_ID,
+        );
+
+        await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
+        const error = (await attempt.catch(
+          (e: unknown) => e,
+        )) as BadRequestException;
+        expect(error.getResponse()).toEqual({
+          message: 'Validation failed',
+          errors: [{ field, messages: [`${field} must not be null`] }],
+        });
+        expect(hotelsModel.findById).not.toHaveBeenCalled();
+        expect(hotel.save).not.toHaveBeenCalled();
+      },
+    );
+
+    it('lists every field sent as null', async () => {
+      const { service } = setup({ hotel: makeHotel() });
+
+      const error = (await service
+        .update(
+          HOTEL_ID,
+          { name: null, amenities: null } as unknown as UpdateHotelDto,
+          USER_ID,
+        )
+        .catch((e: unknown) => e)) as BadRequestException;
+
+      expect(
+        (error.getResponse() as { errors: { field: string }[] }).errors.map(
+          ({ field }) => field,
+        ),
+      ).toEqual(['amenities', 'name']);
+    });
+
     it('returns 404 before checking the moderator when the hotel is missing', async () => {
       const { service, usersService } = setup({ hotel: null });
 
@@ -241,6 +292,24 @@ describe('HotelsService (HTL-01)', () => {
     });
   });
 
+  describe('findEntityOrThrow (for ACC-13)', () => {
+    it('returns the stored hotel', async () => {
+      const hotel = makeHotel();
+      const { hotelsModel, service } = setup({ hotel });
+
+      expect(await service.findEntityOrThrow(HOTEL_ID)).toBe(hotel);
+      expect(hotelsModel.findById).toHaveBeenCalledWith(HOTEL_ID);
+    });
+
+    it('answers 404 when there is no such hotel', async () => {
+      const { service } = setup({ hotel: null });
+
+      await expect(service.findEntityOrThrow(HOTEL_ID)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+  });
+
   describe('addPhotos', () => {
     it('checks the limit before saving and atomically appends filenames', async () => {
       const hotel = makeHotel({ photos: ['existing.jpg'] });
@@ -263,7 +332,7 @@ describe('HotelsService (HTL-01)', () => {
       expect(hotelsModel.findOneAndUpdate).toHaveBeenCalledWith(
         { _id: hotel._id, photos: { $size: 1 } },
         { $push: { photos: { $each: ['new-photo.png'] } } },
-        { new: true },
+        { returnDocument: 'after' },
       );
       expect(updateExec).toHaveBeenCalledTimes(1);
     });
@@ -306,7 +375,7 @@ describe('HotelsService (HTL-01)', () => {
       expect(hotelsModel.findOneAndUpdate).toHaveBeenCalledWith(
         { _id: hotel._id, photos: 'old-photo.jpg' },
         { $pull: { photos: 'old-photo.jpg' } },
-        { new: true },
+        { returnDocument: 'after' },
       );
       expect(updateExec.mock.invocationCallOrder[0]).toBeLessThan(
         uploads.deleteImage.mock.invocationCallOrder[0],

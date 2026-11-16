@@ -10,6 +10,7 @@ import {
   type CreateUserInput,
   type LockoutPolicy,
 } from './users.service';
+import { ProviderType } from '../common/enums/provider-type.enum';
 
 const input: CreateUserInput = {
   name: 'Sara Ahmed',
@@ -136,6 +137,47 @@ describe('UsersService', () => {
     });
   });
 
+  describe('createModerator (ACC-13)', () => {
+    const moderator = {
+      name: 'Mona Hotel',
+      email: ' Mona@Example.com ',
+      password: 'Temp0rary1',
+      role: Role.HotelModerator,
+      providerType: ProviderType.Hotel,
+      providerId: new Types.ObjectId('6740f1c2a4b5c6d7e8f90abc'),
+    } as const;
+
+    it('stores an active moderator linked to its provider, who must change the password', async () => {
+      const { service, storedFields } = setup();
+
+      await service.createModerator(moderator);
+
+      const { passwordHash, ...others } = storedFields();
+      expect(others).toEqual({
+        name: 'Mona Hotel',
+        email: 'mona@example.com',
+        role: Role.HotelModerator,
+        status: UserStatus.Active,
+        mustChangePassword: true,
+        assignment: {
+          providerType: ProviderType.Hotel,
+          providerId: moderator.providerId,
+        },
+      });
+      expect(await compare('Temp0rary1', passwordHash as string)).toBe(true);
+    });
+
+    it('refuses an email that is already registered and stores nothing', async () => {
+      const { model, service } = setup({ _id: 'someone' });
+
+      const attempt = service.createModerator(moderator);
+
+      await expect(attempt).rejects.toBeInstanceOf(ConflictException);
+      await expect(attempt).rejects.toThrow(EMAIL_TAKEN_MESSAGE);
+      expect(model.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('findEntityByEmailWithPasswordHash (ACC-04)', () => {
     it('finds the account by its trimmed, lowercased email', async () => {
       const { model, service } = setup();
@@ -192,6 +234,78 @@ describe('UsersService', () => {
 
       expect(await service.findEntityById('not-an-id')).toBeNull();
       expect(model.findById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateProfile (ACC-09)', () => {
+    function setupProfile(updated: object | null = { _id: userObjectId }) {
+      const exec = jest.fn().mockResolvedValue(updated);
+      const model = {
+        findByIdAndUpdate: jest.fn(() => ({ exec })),
+        findById: jest.fn(() => ({ exec })),
+      };
+      const service = new UsersService(model as unknown as Model<User>);
+      const update = () =>
+        (model.findByIdAndUpdate.mock.calls[0] as unknown[])[1] as Record<
+          string,
+          Record<string, unknown>
+        >;
+      return { model, service, update };
+    }
+
+    it('sets the fields that were given, in one update, and returns the account', async () => {
+      const updated = { _id: userObjectId, name: 'Sara A.' };
+      const { model, service, update } = setupProfile(updated);
+
+      const result = await service.updateProfile(userObjectId.toString(), {
+        name: 'Sara A.',
+        phone: '+20 10 1234 5678',
+        preferredCurrency: 'EGP',
+      });
+
+      expect(result).toBe(updated);
+      expect(model.findByIdAndUpdate).toHaveBeenCalledTimes(1);
+      expect(model.findByIdAndUpdate).toHaveBeenCalledWith(
+        userObjectId.toString(),
+        expect.anything(),
+        { returnDocument: 'after', runValidators: true },
+      );
+      expect(update()).toEqual({
+        $set: {
+          name: 'Sara A.',
+          phone: '+20 10 1234 5678',
+          preferredCurrency: 'EGP',
+        },
+      });
+    });
+
+    it('removes the phone or the currency given as null, and leaves out the others', async () => {
+      const { service, update } = setupProfile();
+
+      await service.updateProfile(userObjectId.toString(), {
+        phone: null,
+        preferredCurrency: null,
+      });
+
+      expect(update()).toEqual({ $unset: { phone: 1, preferredCurrency: 1 } });
+    });
+
+    it('only reads the account when nothing is to change', async () => {
+      const found = { _id: userObjectId };
+      const { model, service } = setupProfile(found);
+
+      expect(await service.updateProfile(userObjectId.toString(), {})).toBe(
+        found,
+      );
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+      expect(model.findById).toHaveBeenCalledWith(userObjectId.toString());
+    });
+
+    it('returns null for an id that cannot be one, without asking the database', async () => {
+      const { model, service } = setupProfile();
+
+      expect(await service.updateProfile('nope', { name: 'Sara' })).toBeNull();
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
     });
   });
 
@@ -450,6 +564,98 @@ describe('UsersService', () => {
           'Temp0rary1',
         ),
       ).toBeNull();
+    });
+  });
+
+  describe('listAccounts (ACC-14)', () => {
+    function setupList(found: object[] = [], total = 0) {
+      const exec = jest.fn().mockResolvedValue(found);
+      const limit = jest.fn(() => ({ exec }));
+      const skip = jest.fn(() => ({ limit }));
+      const sort = jest.fn(() => ({ skip }));
+      const countExec = jest.fn().mockResolvedValue(total);
+      const model = {
+        find: jest.fn(() => ({ sort })),
+        countDocuments: jest.fn(() => ({ exec: countExec })),
+      };
+      const service = new UsersService(model as unknown as Model<User>);
+      const filter = (): Record<string, unknown> =>
+        (model.find.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+      return { model, sort, skip, limit, service, filter };
+    }
+
+    const page = { skip: 20, limit: 10 };
+
+    /** The name condition of the search, as the RegExp MongoDB would apply. */
+    const asRegExp = (filter: Record<string, unknown>): RegExp => {
+      const [byName] = (
+        filter as { $or: { name: { $regex: string; $options: string } }[] }
+      ).$or;
+      return new RegExp(byName.name.$regex, byName.name.$options);
+    };
+
+    it('returns one page of accounts, newest first, and the total that matches', async () => {
+      const found = [{ _id: userObjectId }];
+      const { sort, skip, limit, service } = setupList(found, 21);
+
+      const result = await service.listAccounts({}, page);
+
+      expect(result).toEqual({ items: found, total: 21 });
+      expect(sort).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
+      expect(skip).toHaveBeenCalledWith(20);
+      expect(limit).toHaveBeenCalledWith(10);
+    });
+
+    it('lists every account when there is no search and no filter', async () => {
+      const { model, service, filter } = setupList();
+
+      await service.listAccounts({}, page);
+
+      expect(filter()).toEqual({});
+      expect(model.countDocuments).toHaveBeenCalledWith({});
+    });
+
+    it('filters by role and by status', async () => {
+      const { service, filter } = setupList();
+
+      await service.listAccounts(
+        { role: Role.AirlineModerator, status: UserStatus.Suspended },
+        page,
+      );
+
+      expect(filter()).toEqual({
+        role: Role.AirlineModerator,
+        status: UserStatus.Suspended,
+      });
+    });
+
+    it('searches the name or the email, ignoring letter case', async () => {
+      const { model, service, filter } = setupList();
+
+      await service.listAccounts({ search: 'Sara' }, page);
+
+      expect(filter()).toEqual({
+        $or: [
+          { name: { $regex: 'Sara', $options: 'i' } },
+          { email: { $regex: 'Sara', $options: 'i' } },
+        ],
+      });
+      const pattern = asRegExp(filter());
+      expect(pattern.test('Sara Ahmed')).toBe(true);
+      expect(pattern.test('my friend sara')).toBe(true);
+      expect(pattern.test('sara@example.com')).toBe(true);
+      expect(pattern.test('Omar')).toBe(false);
+      expect(model.countDocuments).toHaveBeenCalledWith(filter());
+    });
+
+    it('treats the search as plain text, not as a pattern', async () => {
+      const { service, filter } = setupList();
+
+      await service.listAccounts({ search: 'a.b+(c)' }, page);
+
+      const pattern = asRegExp(filter());
+      expect(pattern.test('xa.b+(c)y')).toBe(true);
+      expect(pattern.test('axbbc')).toBe(false);
     });
   });
 });

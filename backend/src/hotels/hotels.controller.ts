@@ -80,7 +80,7 @@ export class HotelsController {
   })
   @ApiBadRequestResponse({
     description:
-      'The profile is invalid, the id is malformed, or the city does not exist.',
+      'A field is invalid or sent as null (every field may be left out, none may be null), the id is malformed, or the city does not exist. `errors` names each field.',
   })
   @ApiUnauthorizedResponse({ description: 'You must log in to do this.' })
   @ApiForbiddenResponse({

@@ -85,7 +85,10 @@ describe('CreateHotelDto (HTL-01)', () => {
 
   it('rejects more than 30 amenities and an empty amenity', async () => {
     expect(
-      await invalidFields({ ...valid, amenities: Array(31).fill('wifi') }),
+      await invalidFields({
+        ...valid,
+        amenities: Array.from({ length: 31 }, (_, i) => `amenity ${i}`),
+      }),
     ).toContain('amenities');
     expect(
       await invalidFields({ ...valid, amenities: ['wifi', ' '] }),
@@ -113,5 +116,20 @@ describe('CreateHotelDto (HTL-01)', () => {
     expect(dto).toBeInstanceOf(UpdateHotelDto);
     expect(dto).toMatchObject({ name: 'Updated name' });
     expect(await invalidFields({}, UpdateHotelDto)).toEqual([]);
+  });
+
+  it('removes duplicate amenities after trimming, keeping the first', async () => {
+    const dto = (await pipe.transform(
+      { ...valid, amenities: ['wifi', ' pool', 'wifi ', 'pool', 'gym'] },
+      { type: 'body', metatype: CreateHotelDto },
+    )) as CreateHotelDto;
+
+    expect(dto.amenities).toEqual(['wifi', 'pool', 'gym']);
+  });
+
+  it('counts the 30-amenity limit after removing duplicates', async () => {
+    expect(
+      await invalidFields({ ...valid, amenities: Array(31).fill('wifi') }),
+    ).toEqual([]);
   });
 });

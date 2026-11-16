@@ -116,6 +116,7 @@ function setup(
     create: jest.fn().mockResolvedValue(undefined),
     rotate: jest.fn().mockResolvedValue(true),
     revoke: jest.fn().mockResolvedValue(undefined),
+    revokeAllOfUser: jest.fn().mockResolvedValue(undefined),
   };
   const service = new AuthService(
     usersService as unknown as UsersService,
@@ -811,6 +812,8 @@ describe('AuthService', () => {
 
   describe('changePassword (ACC-08)', () => {
     const userId = '6740f1c2a4b5c6d7e8f90123';
+    /** The access cookie of the request; the mock reads its claims as `claims`. */
+    const ACCESS_TOKEN = 'the-access-token';
     const change: ChangePasswordDto = {
       currentPassword: 'Passw0rdOK',
       newPassword: 'N3wPassword',
@@ -819,7 +822,7 @@ describe('AuthService', () => {
     it('checks the current password of the logged-in user and saves the new one', async () => {
       const { usersService, service } = setup();
 
-      await service.changePassword(userId, change);
+      await service.changePassword(userId, ACCESS_TOKEN, change);
 
       expect(usersService.findEntityByIdWithPasswordHash).toHaveBeenCalledWith(
         userId,
@@ -833,7 +836,7 @@ describe('AuthService', () => {
     it('returns the public user, which no longer has to change the password', async () => {
       const { service } = setup({ mustChangePassword: true });
 
-      const user = await service.changePassword(userId, change);
+      const user = await service.changePassword(userId, ACCESS_TOKEN, change);
 
       expect(user).toMatchObject({ id: userId, mustChangePassword: false });
       expect(user).not.toHaveProperty('passwordHash');
@@ -842,7 +845,7 @@ describe('AuthService', () => {
     it('refuses a wrong current password with 400 and saves nothing', async () => {
       const { usersService, service } = setup();
 
-      const attempt = service.changePassword(userId, {
+      const attempt = service.changePassword(userId, ACCESS_TOKEN, {
         ...change,
         currentPassword: 'Wr0ngPassword',
       });
@@ -855,7 +858,7 @@ describe('AuthService', () => {
     it('refuses a new password that is the same as the current one', async () => {
       const { usersService, service } = setup();
 
-      const attempt = service.changePassword(userId, {
+      const attempt = service.changePassword(userId, ACCESS_TOKEN, {
         ...change,
         newPassword: change.currentPassword,
       });
@@ -869,7 +872,7 @@ describe('AuthService', () => {
       const { service } = setup();
 
       // Someone who does not know the password learns nothing from this answer.
-      const attempt = service.changePassword(userId, {
+      const attempt = service.changePassword(userId, ACCESS_TOKEN, {
         currentPassword: 'Wr0ngPassword',
         newPassword: 'Wr0ngPassword',
       });
@@ -881,7 +884,7 @@ describe('AuthService', () => {
       const { usersService, service } = setup();
       usersService.findEntityByIdWithPasswordHash.mockResolvedValue(null);
 
-      const attempt = service.changePassword(userId, change);
+      const attempt = service.changePassword(userId, ACCESS_TOKEN, change);
 
       await expect(attempt).rejects.toBeInstanceOf(UnauthorizedException);
       expect(usersService.updatePassword).not.toHaveBeenCalled();
@@ -891,9 +894,80 @@ describe('AuthService', () => {
       const { usersService, service } = setup();
       usersService.updatePassword.mockResolvedValue(null);
 
-      await expect(service.changePassword(userId, change)).rejects.toThrow(
-        LOGIN_REQUIRED_MESSAGE,
+      await expect(
+        service.changePassword(userId, ACCESS_TOKEN, change),
+      ).rejects.toThrow(LOGIN_REQUIRED_MESSAGE);
+    });
+
+    it('ends the other sessions of the user and keeps the one that made the change', async () => {
+      const { tokens, sessions, service } = setup();
+
+      await service.changePassword(userId, ACCESS_TOKEN, change);
+
+      expect(tokens.readClaims).toHaveBeenCalledWith(ACCESS_TOKEN, 'access');
+      expect(sessions.revokeAllOfUser).toHaveBeenCalledWith(
+        userId,
+        expect.any(Date),
+        claims.sessionId,
       );
+    });
+
+    it('saves the password first, then ends the other sessions', async () => {
+      const { usersService, sessions, service } = setup();
+
+      await service.changePassword(userId, ACCESS_TOKEN, change);
+
+      const saved = usersService.updatePassword.mock.invocationCallOrder[0];
+      const ended = sessions.revokeAllOfUser.mock.invocationCallOrder[0];
+      expect(saved).toBeLessThan(ended);
+    });
+
+    it('answers 401 and changes nothing when the claims of the access cookie cannot be read', async () => {
+      const { tokens, usersService, sessions, service } = setup();
+      tokens.readClaims.mockResolvedValue(null);
+
+      const attempt = service.changePassword(userId, ACCESS_TOKEN, change);
+
+      await expect(attempt).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(attempt).rejects.toThrow(LOGIN_REQUIRED_MESSAGE);
+      expect(usersService.updatePassword).not.toHaveBeenCalled();
+      expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+    });
+
+    it('answers 401 and changes nothing when there is no access cookie', async () => {
+      const { usersService, sessions, service } = setup();
+
+      const attempt = service.changePassword(userId, undefined, change);
+
+      await expect(attempt).rejects.toThrow(LOGIN_REQUIRED_MESSAGE);
+      expect(usersService.updatePassword).not.toHaveBeenCalled();
+      expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+    });
+
+    it('answers 401 when the access cookie belongs to another user', async () => {
+      const { tokens, usersService, service } = setup();
+      tokens.readClaims.mockResolvedValue({
+        ...claims,
+        userId: '6740f1c2a4b5c6d7e8f90999',
+      });
+
+      await expect(
+        service.changePassword(userId, ACCESS_TOKEN, change),
+      ).rejects.toThrow(LOGIN_REQUIRED_MESSAGE);
+      expect(usersService.updatePassword).not.toHaveBeenCalled();
+    });
+
+    it('ends no session when the password is not changed', async () => {
+      const { sessions, service } = setup();
+
+      await service
+        .changePassword(userId, ACCESS_TOKEN, {
+          ...change,
+          currentPassword: 'Wr0ngPassword',
+        })
+        .catch(() => undefined);
+
+      expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
     });
   });
 });
