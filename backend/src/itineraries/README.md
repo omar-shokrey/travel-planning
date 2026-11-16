@@ -61,3 +61,10 @@ Owner: Ali Ghayesh (M8). Requirements: ITN-01 to ITN-26. Routes: `/api/itinerari
 - **The route is declared before `PATCH :id/days/:dayId`**, or Nest would read `reorder` as a day id.
 - **A position after the last day answers 400** with the allowed range. Moving a day to where it already is changes nothing and writes nothing.
 - **Same versioned write as ITN-07.** `writeDays()` replaces the days in one update that only applies at the version that was read. A move and a delete at the same moment can each apply or answer 409, but never half apply, and `dayCount` always equals the number of days. This relies on MongoDB applying a single-document update atomically.
+
+## ITN-09: city groups
+
+- **Every day has a city.** ITN-05 already requires `cityId` on a day and checks it against the city list; this issue relies on that.
+- **`cityGroups` is part of the itinerary detail** (`GET /api/itineraries/:id` and every route that returns the itinerary with its days). Consecutive days in the same city form one group with `firstDayNumber`, `lastDayNumber`, `startDate`, `endDate`, `dayCount` and `budgetSubtotal`. A city visited twice with other days in between gives two groups.
+- **Computed when read, never stored**, so adding, editing, moving (ITN-08) or deleting (ITN-07) a day regroups at once. Hotel search for a group (ITN-25) can use `startDate` and the day after `endDate` as check-in and check-out.
+- **The subtotal is one amount per currency.** It adds activity costs (ITN-10), budget entries (ITN-14) and transport costs (ITN-16) of the group's days, sorted by currency code. Entries keep their own currency; one total in the user's currency comes with ITN-18. An activity without a cost adds nothing.
