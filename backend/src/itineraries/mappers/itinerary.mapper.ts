@@ -5,8 +5,10 @@ import type { ItineraryDayResponseDto } from '../dto/itinerary-day-response.dto'
 import type { ItineraryDetailResponseDto } from '../dto/itinerary-detail-response.dto';
 import type { ItineraryResponseDto } from '../dto/itinerary-response.dto';
 import type { MoneyResponseDto } from '../dto/money-response.dto';
+import type { TransportCostResponseDto } from '../dto/transport-cost-response.dto';
 import type { Activity } from '../models/activity.schema';
 import type { ItineraryDay } from '../models/itinerary-day.schema';
+import type { TransportCost } from '../models/transport-cost.schema';
 import type { ItineraryDocument } from '../models/itinerary.schema';
 
 /** Turns a stored itinerary into what the API returns. */
@@ -48,6 +50,21 @@ export function toItineraryDayResponse(
     cityId: day.cityId,
     ...(day.notes ? { notes: day.notes } : {}),
     activities: (day.activities ?? []).map(toActivityResponse),
+    transportCosts: (day.transportCosts ?? []).map(toTransportCostResponse),
+  };
+}
+
+/** ITN-16: a transport cost with its id. */
+export function toTransportCostResponse(
+  cost: TransportCost,
+): TransportCostResponseDto {
+  return {
+    id: cost._id.toString(),
+    mode: cost.mode,
+    fromCityId: cost.fromCityId,
+    toCityId: cost.toCityId,
+    amount: cost.amount,
+    currency: cost.currency,
   };
 }
 
