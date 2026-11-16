@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
@@ -18,6 +19,13 @@ import type { AirlinesService } from '../flights/airlines.service';
 import type { HotelsService } from '../hotels/hotels.service';
 import { ProviderType } from '../common/enums/provider-type.enum';
 import { PROVIDER_NOT_FOUND_MESSAGE } from './admin.constants';
+import {
+  ACCOUNT_ALREADY_SUSPENDED_MESSAGE,
+  ACCOUNT_DEACTIVATED_MESSAGE,
+  ACCOUNT_NOT_SUSPENDED_MESSAGE,
+  ADMIN_STATUS_FORBIDDEN_MESSAGE,
+  ONLY_USER_STATUS_MESSAGE,
+} from './admin.constants';
 
 const accountId = '6740f1c2a4b5c6d7e8f90123';
 const accountObjectId = new Types.ObjectId(accountId);
@@ -25,13 +33,13 @@ const temporaryPassword = 'Temp0rary1';
 const providerId = '6740f1c2a4b5c6d7e8f90abc';
 const providerObjectId = new Types.ObjectId(providerId);
 
-function setup(role: Role = Role.User) {
+function setup(role: Role = Role.User, status: UserStatus = UserStatus.Active) {
   const stored = {
     _id: accountObjectId,
     name: 'Sara Ahmed',
     email: 'sara@example.com',
     role,
-    status: UserStatus.Active,
+    status,
     mustChangePassword: false,
     createdAt: new Date('2026-11-14T10:00:00.000Z'),
   };
@@ -41,6 +49,11 @@ function setup(role: Role = Role.User) {
       .fn()
       .mockResolvedValue({ ...stored, mustChangePassword: true }),
     listAccounts: jest.fn().mockResolvedValue({ items: [stored], total: 21 }),
+    changeStatus: jest
+      .fn()
+      .mockImplementation((_id: unknown, _from: UserStatus, to: UserStatus) =>
+        Promise.resolve({ ...stored, status: to }),
+      ),
     createModerator: jest.fn().mockResolvedValue({
       ...stored,
       role: Role.HotelModerator,
@@ -319,6 +332,108 @@ describe('AdminService', () => {
       usersService.createModerator.mockRejectedValue(conflict);
 
       await expect(service.createModerator(body)).rejects.toBe(conflict);
+    });
+  });
+
+  describe('suspend and reactivate (ACC-16)', () => {
+    it('suspends an active user and ends every session of the account', async () => {
+      const { usersService, sessions, service } = setup();
+
+      const account = await service.suspend(accountId);
+
+      expect(usersService.changeStatus).toHaveBeenCalledWith(
+        accountObjectId,
+        UserStatus.Active,
+        UserStatus.Suspended,
+      );
+      expect(sessions.revokeAllOfUser).toHaveBeenCalledWith(
+        accountId,
+        expect.any(Date),
+      );
+      const changed = usersService.changeStatus.mock.invocationCallOrder[0];
+      const ended = sessions.revokeAllOfUser.mock.invocationCallOrder[0];
+      expect(changed).toBeLessThan(ended);
+      expect(account.status).toBe('suspended');
+    });
+
+    it('reactivates a suspended user without touching sessions', async () => {
+      const { usersService, sessions, service } = setup(
+        Role.User,
+        UserStatus.Suspended,
+      );
+
+      const account = await service.reactivate(accountId);
+
+      expect(usersService.changeStatus).toHaveBeenCalledWith(
+        accountObjectId,
+        UserStatus.Suspended,
+        UserStatus.Active,
+      );
+      expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+      expect(account.status).toBe('active');
+    });
+
+    it.each([
+      ['suspend', UserStatus.Suspended, ACCOUNT_ALREADY_SUSPENDED_MESSAGE],
+      ['reactivate', UserStatus.Active, ACCOUNT_NOT_SUSPENDED_MESSAGE],
+      ['suspend', UserStatus.Deactivated, ACCOUNT_DEACTIVATED_MESSAGE],
+      ['reactivate', UserStatus.Deactivated, ACCOUNT_DEACTIVATED_MESSAGE],
+    ] as const)(
+      'answers 409 to %s on a %s account, and changes nothing',
+      async (action, status, message) => {
+        const { usersService, sessions, service } = setup(Role.User, status);
+
+        const attempt = service[action](accountId);
+
+        await expect(attempt).rejects.toBeInstanceOf(ConflictException);
+        await expect(attempt).rejects.toThrow(message);
+        expect(usersService.changeStatus).not.toHaveBeenCalled();
+        expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['suspend', 'reactivate'] as const)(
+      'refuses to %s an administrator with 403',
+      async (action) => {
+        const { usersService, service } = setup(Role.Admin);
+
+        await expect(service[action](accountId)).rejects.toThrow(
+          ADMIN_STATUS_FORBIDDEN_MESSAGE,
+        );
+        expect(usersService.changeStatus).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([Role.AirlineModerator, Role.HotelModerator])(
+      'refuses a %s with 400: moderators are handled by ACC-15',
+      async (role) => {
+        const { usersService, service } = setup(role);
+
+        const attempt = service.suspend(accountId);
+
+        await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
+        await expect(attempt).rejects.toThrow(ONLY_USER_STATUS_MESSAGE);
+        expect(usersService.changeStatus).not.toHaveBeenCalled();
+      },
+    );
+
+    it('answers 404 for an account that does not exist', async () => {
+      const { usersService, service } = setup();
+      usersService.findEntityById.mockResolvedValue(null);
+
+      await expect(service.suspend(accountId)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('answers 409 when another request changed the status first', async () => {
+      const { usersService, sessions, service } = setup();
+      usersService.changeStatus.mockResolvedValue(null);
+
+      await expect(service.suspend(accountId)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
     });
   });
 });

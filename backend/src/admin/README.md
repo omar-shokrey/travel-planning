@@ -9,6 +9,8 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 | `POST /api/admin/users/:id/reset-password` | ACC-07a     | Admin  |
 | `GET /api/admin/accounts`                  | ACC-14      | Admin  |
 | `POST /api/admin/moderators`               | ACC-13      | Admin  |
+| `PATCH /api/admin/accounts/:id/suspend`    | ACC-16      | Admin  |
+| `PATCH /api/admin/accounts/:id/reactivate` | ACC-16      | Admin  |
 
 ## Design decisions
 
@@ -51,3 +53,14 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **An email that is already registered answers 409**, checked first and again by the unique index, as in registration.
 - **The response is `UserResponseDto` with `assignment`** (`providerType`, `providerId` as a string). It is left out for accounts that are not moderators, so other responses keep their shape.
 - **The client cannot set** the status (always active), `mustChangePassword` or the assignment directly; those fields answer 400.
+
+## Suspend and reactivate users (ACC-16)
+
+`PATCH /api/admin/accounts/:id/suspend` and `PATCH /api/admin/accounts/:id/reactivate` answer 200 with the account.
+
+- **Registered users only, for now.** These routes are shared with ACC-15, which suspends moderators. Until ACC-15 extends them, a moderator answers 400 ("Only registered user accounts can be suspended or reactivated here"). An administrator answers 403.
+- **What suspension does.** Login and refresh already refuse a suspended account with 403 "Your account is suspended", and the authentication guard refuses its requests. Suspending also ends every session of the account (`SessionsService.revokeAllOfUser`), so its old cookies stop at once (the access cookie gets 401, because the session is checked first) and reactivating does not bring them back: the user logs in again. The status changes first and the sessions end second, so a failure in between never leaves the account active.
+- **What it does not change.** Bookings stay valid and the user's posts, comments, reviews and itineraries stay visible, as the requirement says. Hiding content is GEN-10.
+- **Status rules.** Suspending a suspended account or reactivating an active one answers 409. A deactivated account (closed by its owner, ACC-12) answers 409 to both: an admin does not reopen it.
+- **Two admins at once.** `UsersService.changeStatus(id, from, to)` changes the status only if it still is `from`, in one `findOneAndUpdate`. The request that loses answers 409 ("changed by another request") and ends no session.
+- **Not here:** the audit record (GEN-07) and a notification to the user, who cannot log in to read it.

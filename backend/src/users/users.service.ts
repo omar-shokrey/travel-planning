@@ -134,6 +134,25 @@ export class UsersService {
   }
 
   /**
+   * Moves an account from one status to another (ACC-16), only if it still
+   * has the `from` status: two admins acting at the same moment cannot both
+   * win, and the loser gets `null`. It returns the account after the change.
+   */
+  changeStatus(
+    id: Types.ObjectId,
+    from: UserStatus,
+    to: UserStatus,
+  ): Promise<UserDocument | null> {
+    return this.users
+      .findOneAndUpdate(
+        { _id: id, status: from },
+        { $set: { status: to } },
+        { returnDocument: 'after' },
+      )
+      .exec();
+  }
+
+  /**
    * Finds an account by email for the login check (ACC-04). It is the only
    * lookup that reads `passwordHash`, which the schema hides by default. The
    * entity is for the auth service: it never leaves the API.
