@@ -182,7 +182,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Change my password (ACC-08)',
     description:
-      'Any logged-in user. Send the current password and a new one that meets the password rule (8 or more characters with a letter and a digit) and differs from the current one. It also ends a temporary password set by an admin: the account is returned with `mustChangePassword: false`. The user stays logged in.',
+      'Any logged-in user. Send the current password and a new one that meets the password rule (8 or more characters with a letter and a digit) and differs from the current one. It also ends a temporary password set by an admin: the account is returned with `mustChangePassword: false`. This session stays logged in; every other session of the account (another browser or device) ends at once, so its access and refresh cookies get 401.',
   })
   @ApiOkResponse({
     description: 'The password was changed',
@@ -198,8 +198,13 @@ export class AuthController {
   @ApiForbiddenResponse({ description: 'Your account is suspended' })
   changePassword(
     @CurrentUser('id') userId: string,
+    @Req() request: Request,
     @Body() dto: ChangePasswordDto,
   ): Promise<UserResponseDto> {
-    return this.authService.changePassword(userId, dto);
+    return this.authService.changePassword(
+      userId,
+      this.authCookies.readAccessToken(request),
+      dto,
+    );
   }
 }

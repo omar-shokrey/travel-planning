@@ -19,6 +19,7 @@ function setup(matched = 1, minutes = 30) {
   const model = {
     create: jest.fn().mockResolvedValue({}),
     updateOne: jest.fn(() => ({ exec })),
+    updateMany: jest.fn(() => ({ exec })),
   };
   const config = {
     getOrThrow: jest.fn((name: string) => {
@@ -203,6 +204,64 @@ describe('SessionsService', () => {
 
       await expect(
         service.revoke(SESSION_ID, USER_ID, now),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('revokeAllOfUser (ACC-08, ACC-07a)', () => {
+    const OTHER_SESSION_ID = '6740f1c2a4b5c6d7e8f90def';
+
+    /** The filter and the change of the one `updateMany` call. */
+    const updateManyCall = (model: { updateMany: jest.Mock }) =>
+      model.updateMany.mock.calls[0] as unknown as [
+        Record<string, unknown>,
+        Record<string, unknown>,
+      ];
+
+    it('revokes every live session of that one user, in one update', async () => {
+      const { model, service } = setup();
+
+      await service.revokeAllOfUser(USER_ID, now);
+
+      expect(model.updateMany).toHaveBeenCalledTimes(1);
+      const [filter, change] = updateManyCall(model);
+      expect(filter).toEqual({ userId: USER_ID, revokedAt: null });
+      expect(change).toEqual({ $set: { revokedAt: now } });
+      expect(model.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('keeps the session it is told to keep', async () => {
+      const { model, service } = setup();
+
+      await service.revokeAllOfUser(USER_ID, now, OTHER_SESSION_ID);
+
+      const [filter, change] = updateManyCall(model);
+      expect(filter).toEqual({
+        userId: USER_ID,
+        revokedAt: null,
+        _id: { $ne: OTHER_SESSION_ID },
+      });
+      expect(change).toEqual({ $set: { revokedAt: now } });
+    });
+
+    it('always names the user, so it never touches the sessions of anyone else', async () => {
+      const { model, service } = setup();
+
+      await service.revokeAllOfUser(USER_ID, now);
+      await service.revokeAllOfUser(USER_ID, now, OTHER_SESSION_ID);
+
+      for (const [filter] of model.updateMany.mock.calls as unknown as [
+        Record<string, unknown>,
+      ][]) {
+        expect(filter.userId).toBe(USER_ID);
+      }
+    });
+
+    it('does not fail when the user has no live session', async () => {
+      const { service } = setup(0);
+
+      await expect(
+        service.revokeAllOfUser(USER_ID, now),
       ).resolves.toBeUndefined();
     });
   });
