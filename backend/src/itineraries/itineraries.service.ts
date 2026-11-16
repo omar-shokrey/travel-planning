@@ -313,8 +313,11 @@ export class ItinerariesService {
     return itinerary;
   }
 
-  /** Loads an itinerary and checks that the caller owns it: 404, then 403. */
-  private async findOwnedOrThrow(
+  /**
+   * Loads an itinerary and checks that the caller owns it: 404, then 403.
+   * Also used by the activity and transport cost services of this module.
+   */
+  async findOwnedOrThrow(
     id: string,
     userId: string,
     forbiddenMessage = 'You can only change your own itineraries',
@@ -342,8 +345,19 @@ export class ItinerariesService {
     }
   }
 
-  /** ITN-05: a day's city comes from the seeded city list (GEN-12). */
-  private async assertCityExists(cityId: string): Promise<void> {
+  /**
+   * ITN-10, ITN-14, ITN-16: money in an itinerary uses a supported currency,
+   * one of the currency codes in the seeded country list (GEN-12).
+   */
+  async assertCurrencySupported(currency: string): Promise<void> {
+    const country = await this.countries.exists({ currency });
+    if (!country) {
+      throw new BadRequestException(`Unsupported currency: ${currency}`);
+    }
+  }
+
+  /** ITN-05, ITN-16: a city comes from the seeded city list (GEN-12). */
+  async assertCityExists(cityId: string): Promise<void> {
     const city = await this.cities.exists({ _id: cityId });
     if (!city) {
       throw new BadRequestException(`Unknown city id: ${cityId}`);
