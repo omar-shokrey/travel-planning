@@ -20,6 +20,20 @@ export class PostsService {
     private readonly posts: Model<BlogPost>,
   ) {}
 
+  /**
+   * For other services (reports, GEN-09): the author id of a published post,
+   * or null when the post is missing or a draft, so a draft is never revealed
+   * to anyone but its author. Not exposed by a controller.
+   */
+  async findPublishedAuthorId(postId: string): Promise<string | null> {
+    const post = await this.posts
+      .findOne({ _id: postId, status: PostStatus.Published })
+      .select('authorId')
+      .lean()
+      .exec();
+    return post ? post.authorId.toString() : null;
+  }
+
   async create(dto: CreatePostDto, userId: string): Promise<PostResponseDto> {
     const post = await this.posts.create({
       ...dto,

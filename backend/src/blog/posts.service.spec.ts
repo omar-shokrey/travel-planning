@@ -3,6 +3,39 @@ import { PostStatus } from './models/post-status.enum';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 describe('PostsService', () => {
+  describe('findPublishedAuthorId (GEN-09)', () => {
+    const lookup = (found: unknown) => {
+      const query = {
+        select: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue(found),
+      };
+      const posts = { findOne: jest.fn().mockReturnValue(query) };
+      return { service: new PostsService(posts as never), posts, query };
+    };
+
+    it('returns the author id of a published post', async () => {
+      const { service, posts, query } = lookup({
+        authorId: { toString: () => '507f1f77bcf86cd799439011' },
+      });
+
+      expect(await service.findPublishedAuthorId('post-1')).toBe(
+        '507f1f77bcf86cd799439011',
+      );
+      expect(posts.findOne).toHaveBeenCalledWith({
+        _id: 'post-1',
+        status: PostStatus.Published,
+      });
+      expect(query.select).toHaveBeenCalledWith('authorId');
+    });
+
+    it('returns null for a missing post or a draft', async () => {
+      const { service } = lookup(null);
+
+      expect(await service.findPublishedAuthorId('post-1')).toBeNull();
+    });
+  });
+
   it('creates a draft post for the authenticated user', async () => {
     const createdPost = {
       _id: { toString: () => 'post-1' },
