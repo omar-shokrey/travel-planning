@@ -4,6 +4,7 @@ import { BlogModule } from '../blog/blog.module';
 import { FlightsModule } from '../flights/flights.module';
 import { HotelsModule } from '../hotels/hotels.module';
 import { ItinerariesModule } from '../itineraries/itineraries.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { ReportsModule } from '../reports/reports.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { UsersModule } from '../users/users.module';
@@ -26,6 +27,8 @@ import { AdminService } from './admin.service';
     FlightsModule,
     HotelsModule,
     ItinerariesModule,
+    // NotificationsService: a suspended user is notified (ACC-16, GEN-01).
+    NotificationsModule,
     ReportsModule,
     UploadsModule,
     UsersModule,

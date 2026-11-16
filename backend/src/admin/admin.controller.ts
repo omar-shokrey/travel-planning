@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -83,6 +84,74 @@ export class AdminController {
   })
   createModerator(@Body() dto: CreateModeratorDto): Promise<UserResponseDto> {
     return this.adminService.createModerator(dto);
+  }
+
+  @Patch('accounts/:id/suspend')
+  @ApiOperation({
+    summary: 'Suspend a registered user (ACC-16)',
+    description:
+      'Admin only. Suspends an active `user` account: it cannot log in or refresh (403 "Your account is suspended"), and every session of the account ends at once. Its bookings stay valid and its content stays visible (hiding content is GEN-10). Moderators are suspended under ACC-15; an administrator cannot be suspended.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'The id of the account',
+    example: '6740f1c2a4b5c6d7e8f90123',
+  })
+  @ApiOkResponse({
+    description: 'The account is suspended',
+    type: UserResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'The id is not a valid id, or the account is a moderator (ACC-15)',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The caller is not an administrator or is suspended, or the account is an administrator',
+  })
+  @ApiNotFoundResponse({ description: 'Account not found' })
+  @ApiConflictResponse({
+    description:
+      'The account is already suspended, is deactivated (ACC-12), or was changed by another request',
+  })
+  suspend(
+    @Param('id', ParseObjectIdPipe) id: string,
+  ): Promise<UserResponseDto> {
+    return this.adminService.suspend(id);
+  }
+
+  @Patch('accounts/:id/reactivate')
+  @ApiOperation({
+    summary: 'Reactivate a suspended user (ACC-16)',
+    description:
+      'Admin only. Makes a suspended `user` account active again, so it can log in. Sessions ended by the suspension stay ended: the user logs in again.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'The id of the account',
+    example: '6740f1c2a4b5c6d7e8f90123',
+  })
+  @ApiOkResponse({
+    description: 'The account is active again',
+    type: UserResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'The id is not a valid id, or the account is a moderator (ACC-15)',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The caller is not an administrator or is suspended, or the account is an administrator',
+  })
+  @ApiNotFoundResponse({ description: 'Account not found' })
+  @ApiConflictResponse({
+    description:
+      'The account is not suspended, is deactivated (ACC-12), or was changed by another request',
+  })
+  reactivate(
+    @Param('id', ParseObjectIdPipe) id: string,
+  ): Promise<UserResponseDto> {
+    return this.adminService.reactivate(id);
   }
 
   @Post('users/:id/reset-password')

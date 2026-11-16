@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -8,8 +9,11 @@ import { Types } from 'mongoose';
 import { SessionsService } from '../auth/sessions.service';
 import { ProviderType } from '../common/enums/provider-type.enum';
 import { Role } from '../common/enums/role.enum';
+import { UserStatus } from '../common/enums/user-status.enum';
 import { AirlinesService } from '../flights/airlines.service';
 import { HotelsService } from '../hotels/hotels.service';
+import { NotificationType } from '../notifications/enums/notification-type.enum';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   paginate,
   type PaginatedResponse,
@@ -18,8 +22,15 @@ import type { UserResponseDto } from '../users/dto/user-response.dto';
 import { toUserResponse } from '../users/mappers/user.mapper';
 import { UsersService } from '../users/users.service';
 import {
+  ACCOUNT_ALREADY_SUSPENDED_MESSAGE,
+  ACCOUNT_DEACTIVATED_MESSAGE,
   ACCOUNT_NOT_FOUND_MESSAGE,
+  ACCOUNT_NOT_SUSPENDED_MESSAGE,
+  ACCOUNT_STATUS_CHANGED_MESSAGE,
+  ACCOUNT_SUSPENDED_NOTIFICATION,
   ADMIN_PASSWORD_RESET_FORBIDDEN_MESSAGE,
+  ADMIN_STATUS_FORBIDDEN_MESSAGE,
+  ONLY_USER_STATUS_MESSAGE,
   PROVIDER_NOT_FOUND_MESSAGE,
 } from './admin.constants';
 import type { CreateModeratorDto } from './dto/create-moderator.dto';
@@ -37,6 +48,7 @@ export class AdminService {
     private readonly sessions: SessionsService,
     private readonly airlines: AirlinesService,
     private readonly hotels: HotelsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /**
@@ -136,5 +148,102 @@ export class AdminService {
     // place.
     await this.sessions.revokeAllOfUser(accountId, new Date());
     return toUserResponse(updated);
+  }
+
+  /**
+   * Suspends a registered user (ACC-16). A suspended user cannot log in or
+   * refresh (403 "Your account is suspended"), and every session of the
+   * account ends at once. The user gets an `account_suspended` notification
+   * (GEN-01), read after a reactivation. Bookings stay valid and content
+   * stays visible: nothing else changes.
+   */
+  async suspend(accountId: string): Promise<UserResponseDto> {
+    const updated = await this.changeUserStatus(accountId, {
+      from: UserStatus.Active,
+      to: UserStatus.Suspended,
+      wrongStatusMessage: ACCOUNT_ALREADY_SUSPENDED_MESSAGE,
+    });
+    // After the status, so a failure here never leaves the account active.
+    // A session this misses (a failure, or a login racing the suspension) is
+    // refused by the guard while suspended and ended by `reactivate`.
+    await this.sessions.revokeAllOfUser(accountId, new Date());
+    // `notify` never throws.
+    await this.notifications.notify(
+      updated._id,
+      NotificationType.AccountSuspended,
+      ACCOUNT_SUSPENDED_NOTIFICATION,
+    );
+    return toUserResponse(updated);
+  }
+
+  /**
+   * Reactivates a suspended user (ACC-16): the user can log in again, with a
+   * new login. Every session of the account ends first, while it is still
+   * suspended, so no old session comes back, including one a failed or racing
+   * suspension missed. If ending them fails, the account stays suspended and
+   * the admin can retry.
+   */
+  async reactivate(accountId: string): Promise<UserResponseDto> {
+    const updated = await this.changeUserStatus(accountId, {
+      from: UserStatus.Suspended,
+      to: UserStatus.Active,
+      wrongStatusMessage: ACCOUNT_NOT_SUSPENDED_MESSAGE,
+      beforeChange: () => this.sessions.revokeAllOfUser(accountId, new Date()),
+    });
+    return toUserResponse(updated);
+  }
+
+  /**
+   * The rules both status changes share (ACC-16): the account must exist, be
+   * a registered user, not be deactivated (ACC-12) and have the `from`
+   * status; the change is one conditional update, so two admins at once
+   * cannot both win. `beforeChange` runs after the checks and before the
+   * update.
+   */
+  private async changeUserStatus(
+    accountId: string,
+    change: {
+      from: UserStatus;
+      to: UserStatus;
+      wrongStatusMessage: string;
+      beforeChange?: () => Promise<void>;
+    },
+  ) {
+    const account = await this.findUserForStatusChange(accountId);
+    if (account.status === UserStatus.Deactivated) {
+      throw new ConflictException(ACCOUNT_DEACTIVATED_MESSAGE);
+    }
+    if (account.status !== change.from) {
+      throw new ConflictException(change.wrongStatusMessage);
+    }
+
+    await change.beforeChange?.();
+    const updated = await this.usersService.changeStatus(
+      account._id,
+      change.from,
+      change.to,
+    );
+    if (!updated) {
+      throw new ConflictException(ACCOUNT_STATUS_CHANGED_MESSAGE);
+    }
+    return updated;
+  }
+
+  /**
+   * The account whose status an admin changes (ACC-16): 404 when it does not
+   * exist, 403 for an administrator, 400 for a moderator (ACC-15).
+   */
+  private async findUserForStatusChange(accountId: string) {
+    const account = await this.usersService.findEntityById(accountId);
+    if (!account) {
+      throw new NotFoundException(ACCOUNT_NOT_FOUND_MESSAGE);
+    }
+    if (account.role === Role.Admin) {
+      throw new ForbiddenException(ADMIN_STATUS_FORBIDDEN_MESSAGE);
+    }
+    if (account.role !== Role.User) {
+      throw new BadRequestException(ONLY_USER_STATUS_MESSAGE);
+    }
+    return account;
   }
 }
