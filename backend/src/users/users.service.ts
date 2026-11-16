@@ -1,13 +1,32 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { hash } from 'bcrypt';
-import { isValidObjectId, type Model, type Types } from 'mongoose';
+import {
+  isValidObjectId,
+  type Model,
+  type QueryFilter,
+  type Types,
+} from 'mongoose';
 import { PASSWORD_SALT_ROUNDS } from '../common/constants/password';
+import { ProviderType } from '../common/enums/provider-type.enum';
 import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import { User, type UserDocument } from './models/user.schema';
 
 export const EMAIL_TAKEN_MESSAGE = 'This email is already registered';
+
+/** What the admin account list (ACC-14) may filter on. Every field is optional. */
+export interface AccountListCriteria {
+  /** Part of the name or the email, in any letter case. Plain text, not a pattern. */
+  search?: string;
+  role?: Role;
+  status?: UserStatus;
+}
+
+/** Escapes the characters a regular expression gives a meaning to, so a search is plain text. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 /** What a caller gives to create a registered user. It cannot choose the role or the status. */
 export interface CreateUserInput {
@@ -19,12 +38,37 @@ export interface CreateUserInput {
   consentAcceptedAt: Date;
 }
 
+/**
+ * What the admin gives to create a moderator account (ACC-13). The status and
+ * the password-change flag are not here: every moderator starts active and
+ * must change the temporary password.
+ */
+export interface CreateModeratorInput {
+  name: string;
+  email: string;
+  /** The temporary password. It is hashed here and never stored or logged. */
+  password: string;
+  role: Role.AirlineModerator | Role.HotelModerator;
+  providerType: ProviderType;
+  providerId: Types.ObjectId;
+}
+
 /** When a run of failed logins locks an account (ACC-05). */
 export interface LockoutPolicy {
   /** The number of failed logins in a row that locks the account. */
   maxAttempts: number;
   /** How long the lock lasts, in milliseconds. */
   lockMs: number;
+}
+
+/**
+ * The profile fields of ACC-09. `undefined` keeps a field, `null` removes the
+ * phone or the preferred currency. The name can be changed, never removed.
+ */
+export interface ProfileChanges {
+  name?: string;
+  phone?: string | null;
+  preferredCurrency?: string | null;
 }
 
 /**
@@ -61,6 +105,54 @@ export class UsersService {
   }
 
   /**
+   * Creates a moderator account linked to exactly one airline or hotel
+   * (ACC-13). It starts active, with `mustChangePassword` set, so the
+   * moderator replaces the temporary password at the first login (ACC-08).
+   * The caller has checked that the provider exists.
+   */
+  async createModerator(input: CreateModeratorInput): Promise<UserDocument> {
+    const email = input.email.trim().toLowerCase();
+    if (await this.users.exists({ email })) {
+      throw new ConflictException(EMAIL_TAKEN_MESSAGE);
+    }
+
+    const passwordHash = await hash(input.password, PASSWORD_SALT_ROUNDS);
+    // As in createRegisteredUser, the unique index on `email` catches two
+    // requests that pass the check at the same moment (409 via the filter).
+    return this.users.create({
+      name: input.name,
+      email,
+      passwordHash,
+      role: input.role,
+      status: UserStatus.Active,
+      mustChangePassword: true,
+      assignment: {
+        providerType: input.providerType,
+        providerId: input.providerId,
+      },
+    });
+  }
+
+  /**
+   * Moves an account from one status to another (ACC-16), only if it still
+   * has the `from` status: two admins acting at the same moment cannot both
+   * win, and the loser gets `null`. It returns the account after the change.
+   */
+  changeStatus(
+    id: Types.ObjectId,
+    from: UserStatus,
+    to: UserStatus,
+  ): Promise<UserDocument | null> {
+    return this.users
+      .findOneAndUpdate(
+        { _id: id, status: from },
+        { $set: { status: to } },
+        { returnDocument: 'after' },
+      )
+      .exec();
+  }
+
+  /**
    * Finds an account by email for the login check (ACC-04). It is the only
    * lookup that reads `passwordHash`, which the schema hides by default. The
    * entity is for the auth service: it never leaves the API.
@@ -80,6 +172,42 @@ export class UsersService {
       return Promise.resolve(null);
     }
     return this.users.findById(id).exec();
+  }
+
+  /**
+   * Saves the profile fields of an account in one update (ACC-09), so either
+   * every change is saved or none is. A field given as `null` is removed. It
+   * returns the account after the change, or `null` when there is none.
+   */
+  updateProfile(
+    id: string,
+    changes: ProfileChanges,
+  ): Promise<UserDocument | null> {
+    if (!isValidObjectId(id)) {
+      return Promise.resolve(null);
+    }
+    const $set: Record<string, string> = {};
+    const $unset: Record<string, 1> = {};
+    for (const [field, value] of Object.entries(changes)) {
+      if (value === null) {
+        $unset[field] = 1;
+      } else if (value !== undefined) {
+        $set[field] = value as string;
+      }
+    }
+    if (Object.keys($set).length === 0 && Object.keys($unset).length === 0) {
+      return this.users.findById(id).exec();
+    }
+    return this.users
+      .findByIdAndUpdate(
+        id,
+        {
+          ...(Object.keys($set).length > 0 && { $set }),
+          ...(Object.keys($unset).length > 0 && { $unset }),
+        },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
   }
 
   /**
@@ -111,6 +239,40 @@ export class UsersService {
         { returnDocument: 'after' },
       )
       .exec();
+  }
+
+  /**
+   * One page of accounts for the admin list (ACC-14), newest first, and the
+   * number of accounts that match. The search matches part of the name or
+   * the email, ignoring letter case. The entities are for the admin service,
+   * which maps them; the password hash is never read.
+   */
+  async listAccounts(
+    criteria: AccountListCriteria,
+    page: { skip: number; limit: number },
+  ): Promise<{ items: UserDocument[]; total: number }> {
+    const filter: QueryFilter<User> = {
+      ...(criteria.role && { role: criteria.role }),
+      ...(criteria.status && { status: criteria.status }),
+    };
+    if (criteria.search) {
+      // The `$regex` string form, not a RegExp object: in our e2e runs against
+      // Atlas, a count with RegExp objects and the `i` flag inside `$or` never
+      // got an answer, while this equivalent form always did.
+      const pattern = { $regex: escapeRegExp(criteria.search), $options: 'i' };
+      filter.$or = [{ name: pattern }, { email: pattern }];
+    }
+
+    const [items, total] = await Promise.all([
+      this.users
+        .find(filter)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(page.skip)
+        .limit(page.limit)
+        .exec(),
+      this.users.countDocuments(filter).exec(),
+    ]);
+    return { items, total };
   }
 
   /**

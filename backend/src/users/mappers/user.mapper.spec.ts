@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import { Role } from '../../common/enums/role.enum';
 import { UserStatus } from '../../common/enums/user-status.enum';
 import { toUserResponse, type UserSource } from './user.mapper';
+import { ProviderType } from '../../common/enums/provider-type.enum';
 
 const source: UserSource = {
   _id: new Types.ObjectId('6740f1c2a4b5c6d7e8f90123'),
@@ -30,6 +31,44 @@ describe('toUserResponse', () => {
     expect(
       toUserResponse({ ...source, mustChangePassword: true }),
     ).toMatchObject({ mustChangePassword: true });
+  });
+
+  it('adds the phone and the preferred currency when the account has them (ACC-09)', () => {
+    expect(
+      toUserResponse({
+        ...source,
+        phone: '+20 10 1234 5678',
+        preferredCurrency: 'EGP',
+      }),
+    ).toMatchObject({ phone: '+20 10 1234 5678', preferredCurrency: 'EGP' });
+  });
+
+  it('leaves out the phone and the preferred currency when the account has none', () => {
+    const response = toUserResponse(source);
+
+    expect(response).not.toHaveProperty('phone');
+    expect(response).not.toHaveProperty('preferredCurrency');
+  });
+
+  it('adds the assignment of a moderator, with a string provider id (ACC-13)', () => {
+    const providerId = new Types.ObjectId('6740f1c2a4b5c6d7e8f90abc');
+
+    expect(
+      toUserResponse({
+        ...source,
+        role: Role.AirlineModerator,
+        assignment: { providerType: ProviderType.Airline, providerId },
+      }),
+    ).toMatchObject({
+      assignment: {
+        providerType: 'airline',
+        providerId: '6740f1c2a4b5c6d7e8f90abc',
+      },
+    });
+  });
+
+  it('leaves out the assignment of an account that has none', () => {
+    expect(toUserResponse(source)).not.toHaveProperty('assignment');
   });
 
   it('leaves out the password hash and every other private field', () => {
