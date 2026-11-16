@@ -704,7 +704,7 @@ describe('ItinerariesService', () => {
           $inc: Record<string, number>;
         },
       ];
-      expect(filter).toEqual({ _id: itinerary.id, __v: 4 });
+      expect(filter).toEqual({ _id: itinerary._id, __v: 4 });
       expect(update.$set.days.map((day) => day._id.toString())).toEqual([
         dayIds[0],
         dayIds[2],
@@ -742,6 +742,156 @@ describe('ItinerariesService', () => {
 
       await expect(
         service.removeDay(itinerary.id as string, dayIds[0], ownerId),
+      ).rejects.toThrow(ForbiddenException);
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('moveDay', () => {
+    /** An itinerary with days in cairo, dubai and london, in that order. */
+    const withThreeDays = (owner = ownerId) => {
+      const itinerary = stored(owner);
+      itinerary.days.push(
+        { cityId: 'cairo' } as never,
+        { cityId: 'dubai' } as never,
+        { cityId: 'london' } as never,
+      );
+      itinerary.dayCount = 3;
+      return {
+        itinerary,
+        dayIds: itinerary.days.map((day) => day._id.toString()),
+      };
+    };
+    const withUpdate = (itinerary: ItineraryDocument | null) =>
+      jest.spyOn(ItineraryModel, 'findOneAndUpdate').mockImplementation(((
+        _filter: unknown,
+        update: { $set: { days: unknown[] } },
+      ) => {
+        if (itinerary) itinerary.set('days', update.$set.days);
+        return Promise.resolve(itinerary);
+      }) as never);
+    const cities = (response: { days: { cityId: string }[] }) =>
+      response.days.map((day) => day.cityId);
+
+    it('moves the last day to the front and renumbers and redates every day', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      withUpdate(itinerary);
+
+      const response = await service.moveDay(
+        itinerary.id as string,
+        { dayId: dayIds[2], position: 1 },
+        ownerId,
+      );
+
+      expect(cities(response)).toEqual(['london', 'cairo', 'dubai']);
+      expect(response.days.map((day) => [day.dayNumber, day.date])).toEqual([
+        [1, '2026-12-20'],
+        [2, '2026-12-21'],
+        [3, '2026-12-22'],
+      ]);
+      expect(response.days[0].id).toBe(dayIds[2]);
+    });
+
+    it('moves the first day to the end', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      withUpdate(itinerary);
+
+      const response = await service.moveDay(
+        itinerary.id as string,
+        { dayId: dayIds[0], position: 3 },
+        ownerId,
+      );
+
+      expect(cities(response)).toEqual(['dubai', 'london', 'cairo']);
+    });
+
+    it('writes the new order at the version it read and keeps the day count', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      itinerary.__v = 7;
+      const updateSpy = withUpdate(itinerary);
+
+      await service.moveDay(
+        itinerary.id as string,
+        { dayId: dayIds[1], position: 3 },
+        ownerId,
+      );
+
+      const [filter, update] = updateSpy.mock.calls[0] as unknown as [
+        unknown,
+        { $set: { dayCount: number }; $inc: unknown },
+      ];
+      expect(filter).toEqual({ _id: itinerary._id, __v: 7 });
+      expect(update.$set.dayCount).toBe(3);
+      expect(update.$inc).toEqual({ __v: 1 });
+    });
+
+    it('writes nothing when the day is already at that position', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      const updateSpy = withUpdate(itinerary);
+
+      const response = await service.moveDay(
+        itinerary.id as string,
+        { dayId: dayIds[1], position: 2 },
+        ownerId,
+      );
+
+      expect(cities(response)).toEqual(['cairo', 'dubai', 'london']);
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('answers 400 for a position after the last day', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      const updateSpy = withUpdate(itinerary);
+
+      await expect(
+        service.moveDay(
+          itinerary.id as string,
+          { dayId: dayIds[0], position: 4 },
+          ownerId,
+        ),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'position must be between 1 and 3, the number of days',
+        ),
+      );
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for a day that is not in the itinerary', async () => {
+      const { itinerary } = withThreeDays();
+
+      await expect(
+        service.moveDay(
+          itinerary.id as string,
+          { dayId: new Types.ObjectId().toString(), position: 1 },
+          ownerId,
+        ),
+      ).rejects.toThrow(new NotFoundException('Day not found'));
+    });
+
+    it('answers 409 when the itinerary changed in the meantime', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      withUpdate(null);
+
+      await expect(
+        service.moveDay(
+          itinerary.id as string,
+          { dayId: dayIds[2], position: 1 },
+          ownerId,
+        ),
+      ).rejects.toThrow(new ConflictException(ITINERARY_CHANGED_MESSAGE));
+    });
+
+    it('answers 403 for an itinerary of another user', async () => {
+      const { itinerary, dayIds } = withThreeDays(otherUserId);
+      const updateSpy = withUpdate(itinerary);
+
+      await expect(
+        service.moveDay(
+          itinerary.id as string,
+          { dayId: dayIds[2], position: 1 },
+          ownerId,
+        ),
       ).rejects.toThrow(ForbiddenException);
       expect(updateSpy).not.toHaveBeenCalled();
     });
