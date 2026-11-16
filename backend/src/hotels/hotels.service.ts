@@ -202,4 +202,12 @@ export class HotelsService {
       throw new ForbiddenException(HOTEL_ACCESS_DENIED_MESSAGE);
     }
   }
+
+  /**
+   * The stored hotel, for other services (ACC-13 checks that a new moderator's
+   * hotel exists). 404 when there is none. Never exposed by a controller.
+   */
+  findEntityOrThrow(id: string): Promise<HotelDocument> {
+    return this.findHotelOrThrow(id);
+  }
 }

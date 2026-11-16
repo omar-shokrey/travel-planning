@@ -292,6 +292,24 @@ describe('HotelsService (HTL-01)', () => {
     });
   });
 
+  describe('findEntityOrThrow (for ACC-13)', () => {
+    it('returns the stored hotel', async () => {
+      const hotel = makeHotel();
+      const { hotelsModel, service } = setup({ hotel });
+
+      expect(await service.findEntityOrThrow(HOTEL_ID)).toBe(hotel);
+      expect(hotelsModel.findById).toHaveBeenCalledWith(HOTEL_ID);
+    });
+
+    it('answers 404 when there is no such hotel', async () => {
+      const { service } = setup({ hotel: null });
+
+      await expect(service.findEntityOrThrow(HOTEL_ID)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+  });
+
   describe('addPhotos', () => {
     it('checks the limit before saving and atomically appends filenames', async () => {
       const hotel = makeHotel({ photos: ['existing.jpg'] });
