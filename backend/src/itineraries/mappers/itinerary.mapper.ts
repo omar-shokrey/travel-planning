@@ -1,9 +1,11 @@
 import { DateTime } from 'luxon';
+import type { ActivityResponseDto } from '../dto/activity-response.dto';
 import type { CityGroupResponseDto } from '../dto/city-group-response.dto';
 import type { ItineraryDayResponseDto } from '../dto/itinerary-day-response.dto';
 import type { ItineraryDetailResponseDto } from '../dto/itinerary-detail-response.dto';
 import type { ItineraryResponseDto } from '../dto/itinerary-response.dto';
 import type { MoneyResponseDto } from '../dto/money-response.dto';
+import type { Activity } from '../models/activity.schema';
 import type { ItineraryDay } from '../models/itinerary-day.schema';
 import type { ItineraryDocument } from '../models/itinerary.schema';
 
@@ -45,6 +47,19 @@ export function toItineraryDayResponse(
     date: dayDate(startDate, index),
     cityId: day.cityId,
     ...(day.notes ? { notes: day.notes } : {}),
+    activities: (day.activities ?? []).map(toActivityResponse),
+  };
+}
+
+/** ITN-10: an activity with only the fields it has. */
+export function toActivityResponse(activity: Activity): ActivityResponseDto {
+  return {
+    id: activity._id.toString(),
+    name: activity.name,
+    ...(activity.description ? { description: activity.description } : {}),
+    ...(activity.time ? { time: activity.time } : {}),
+    ...(activity.cost != null ? { cost: activity.cost } : {}),
+    ...(activity.currency ? { currency: activity.currency } : {}),
   };
 }
 

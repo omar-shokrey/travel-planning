@@ -10,6 +10,10 @@ export const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 /** A time of day in 24-hour form, for example 09:30. */
 export const TIME_OF_DAY_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+/** ITN-10: limits for an activity, so one itinerary document stays small. */
+export const ACTIVITY_NAME_MAX = 100;
+export const ACTIVITY_DESCRIPTION_MAX = 1000;
+
 /** A currency code as in countries.csv, for example EGP. */
 export const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
 
