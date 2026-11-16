@@ -34,4 +34,18 @@ describe('ReportSchema (GEN-09)', () => {
     expect(ReportSchema.path('reporterId').instance).toBe('ObjectId');
     expect(ReportSchema.path('targetId').instance).toBe('ObjectId');
   });
+
+  it('records who resolved a report and when, both optional (GEN-10)', () => {
+    expect(ReportSchema.path('resolvedBy').instance).toBe('ObjectId');
+    expect(ReportSchema.path('resolvedBy').isRequired).toBeFalsy();
+    expect(ReportSchema.path('resolvedAt').instance).toBe('Date');
+    expect(ReportSchema.path('resolvedAt').isRequired).toBeFalsy();
+  });
+
+  it('indexes the reports of one item, to resolve them together (GEN-10)', () => {
+    expect(ReportSchema.indexes()).toContainEqual([
+      { targetType: 1, targetId: 1, status: 1 },
+      expect.anything(),
+    ]);
+  });
 });

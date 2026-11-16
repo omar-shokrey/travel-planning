@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Types } from 'mongoose';
+import { PostModeration } from '../blog/models/post-moderation.enum';
 import type { PostsService } from '../blog/posts.service';
 import { ItineraryModeration } from '../itineraries/enums/itinerary-moderation.enum';
 import { ItineraryVisibility } from '../itineraries/enums/itinerary-visibility.enum';
@@ -13,6 +14,7 @@ import { ReportTargetType } from './enums/report-target-type.enum';
 import {
   ALREADY_REPORTED_MESSAGE,
   OWN_CONTENT_MESSAGE,
+  REPORT_NOT_FOUND_MESSAGE,
   ReportsService,
 } from './reports.service';
 
@@ -37,7 +39,10 @@ function setup() {
     ),
   };
   const posts = {
-    findPublishedAuthorId: jest.fn().mockResolvedValue(AUTHOR),
+    findPublishedSummary: jest.fn().mockResolvedValue({
+      authorId: AUTHOR,
+      moderation: PostModeration.Visible,
+    }),
   };
   const itineraries = {
     findEntityOrThrow: jest.fn().mockResolvedValue({
@@ -69,7 +74,7 @@ describe('ReportsService (GEN-09)', () => {
 
       const result = await service.create(postDto, REPORTER);
 
-      expect(posts.findPublishedAuthorId).toHaveBeenCalledWith(TARGET);
+      expect(posts.findPublishedSummary).toHaveBeenCalledWith(TARGET);
       expect(reports.create).toHaveBeenCalledWith({
         reporterId: new Types.ObjectId(REPORTER),
         targetType: ReportTargetType.Post,
@@ -115,7 +120,20 @@ describe('ReportsService (GEN-09)', () => {
   describe('a target that is not visible', () => {
     it('answers 404 for a missing or draft post', async () => {
       const { service, posts, reports } = setup();
-      posts.findPublishedAuthorId.mockResolvedValue(null);
+      posts.findPublishedSummary.mockResolvedValue(null);
+
+      await expect(service.create(postDto, REPORTER)).rejects.toThrow(
+        new NotFoundException('Post not found'),
+      );
+      expect(reports.create).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for a post of someone else that an admin hid (GEN-10)', async () => {
+      const { service, posts, reports } = setup();
+      posts.findPublishedSummary.mockResolvedValue({
+        authorId: AUTHOR,
+        moderation: PostModeration.Hidden,
+      });
 
       await expect(service.create(postDto, REPORTER)).rejects.toThrow(
         new NotFoundException('Post not found'),
@@ -161,12 +179,27 @@ describe('ReportsService (GEN-09)', () => {
   describe('own content', () => {
     it('refuses my own published post with 400', async () => {
       const { service, posts, reports } = setup();
-      posts.findPublishedAuthorId.mockResolvedValue(REPORTER);
+      posts.findPublishedSummary.mockResolvedValue({
+        authorId: REPORTER,
+        moderation: PostModeration.Visible,
+      });
 
       await expect(service.create(postDto, REPORTER)).rejects.toThrow(
         new BadRequestException(OWN_CONTENT_MESSAGE),
       );
       expect(reports.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses my own post with 400, even a hidden one: its author still sees it', async () => {
+      const { service, posts } = setup();
+      posts.findPublishedSummary.mockResolvedValue({
+        authorId: REPORTER,
+        moderation: PostModeration.Hidden,
+      });
+
+      await expect(service.create(postDto, REPORTER)).rejects.toThrow(
+        new BadRequestException(OWN_CONTENT_MESSAGE),
+      );
     });
 
     it('refuses my own itinerary with 400, even a private one', async () => {
@@ -214,6 +247,155 @@ describe('ReportsService (GEN-09)', () => {
       reports.create.mockRejectedValue(failure);
 
       await expect(service.create(postDto, REPORTER)).rejects.toBe(failure);
+    });
+  });
+});
+
+describe('ReportsService, admin methods (GEN-10)', () => {
+  const ADMIN = new Types.ObjectId().toString();
+  const RESOLVED_AT = new Date('2026-11-17T09:30:00.000Z');
+
+  /** A query whose chain (sort, skip, limit) ends in `result`. */
+  function chain(result: unknown) {
+    return {
+      sort: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue(result),
+    };
+  }
+
+  function setup(model: Record<string, unknown>) {
+    return new ReportsService(
+      model as never,
+      {} as unknown as PostsService,
+      {} as unknown as ItinerariesService,
+    );
+  }
+
+  describe('findEntityOrThrow', () => {
+    it('returns the report', async () => {
+      const report = { _id: new Types.ObjectId() };
+      const findById = jest.fn().mockReturnValue(chain(report));
+
+      expect(await setup({ findById }).findEntityOrThrow('r1')).toBe(report);
+      expect(findById).toHaveBeenCalledWith('r1');
+    });
+
+    it('answers 404 for an unknown report', async () => {
+      const findById = jest.fn().mockReturnValue(chain(null));
+
+      await expect(setup({ findById }).findEntityOrThrow('r1')).rejects.toThrow(
+        new NotFoundException(REPORT_NOT_FOUND_MESSAGE),
+      );
+    });
+  });
+
+  describe('listForAdmin', () => {
+    it('filters on the status, sorts oldest first and counts the same filter', async () => {
+      const query = chain(['a']);
+      const find = jest.fn().mockReturnValue(query);
+      const countDocuments = jest.fn().mockReturnValue(chain(1));
+
+      const result = await setup({ find, countDocuments }).listForAdmin(
+        { status: ReportStatus.Open },
+        { skip: 0, limit: 10 },
+      );
+
+      expect(result).toEqual({ items: ['a'], total: 1 });
+      expect(find).toHaveBeenCalledWith({ status: 'open' });
+      expect(countDocuments).toHaveBeenCalledWith({ status: 'open' });
+      expect(query.sort).toHaveBeenCalledWith({ createdAt: 1, _id: 1 });
+      expect(query.limit).toHaveBeenCalledWith(10);
+      // Nothing to skip on the first page, so .skip() is not called.
+      expect(query.skip).not.toHaveBeenCalled();
+    });
+
+    it('adds the target type and skips to the page', async () => {
+      const query = chain([]);
+      const find = jest.fn().mockReturnValue(query);
+      const countDocuments = jest.fn().mockReturnValue(chain(0));
+
+      await setup({ find, countDocuments }).listForAdmin(
+        { status: ReportStatus.Hidden, targetType: ReportTargetType.Post },
+        { skip: 20, limit: 10 },
+      );
+
+      expect(find).toHaveBeenCalledWith({
+        status: 'hidden',
+        targetType: 'post',
+      });
+      expect(query.skip).toHaveBeenCalledWith(20);
+    });
+  });
+
+  describe('resolve', () => {
+    it('changes only a report that is still open, and returns it', async () => {
+      const resolved = { _id: new Types.ObjectId() };
+      const findOneAndUpdate = jest.fn().mockReturnValue(chain(resolved));
+
+      const result = await setup({ findOneAndUpdate }).resolve(
+        'r1',
+        ReportStatus.Hidden,
+        ADMIN,
+        RESOLVED_AT,
+      );
+
+      expect(result).toBe(resolved);
+      expect(findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: 'r1', status: ReportStatus.Open },
+        {
+          $set: {
+            status: ReportStatus.Hidden,
+            resolvedBy: new Types.ObjectId(ADMIN),
+            resolvedAt: RESOLVED_AT,
+          },
+        },
+        { returnDocument: 'after' },
+      );
+    });
+
+    it('returns null when the report is no longer open', async () => {
+      const findOneAndUpdate = jest.fn().mockReturnValue(chain(null));
+
+      expect(
+        await setup({ findOneAndUpdate }).resolve(
+          'r1',
+          ReportStatus.Dismissed,
+          ADMIN,
+          RESOLVED_AT,
+        ),
+      ).toBeNull();
+    });
+  });
+
+  describe('resolveOpenOfTarget', () => {
+    it('resolves the open reports of one item only, and counts them', async () => {
+      const updateMany = jest.fn().mockReturnValue(chain({ modifiedCount: 2 }));
+
+      const changed = await setup({ updateMany }).resolveOpenOfTarget(
+        ReportTargetType.Itinerary,
+        TARGET,
+        ReportStatus.Deleted,
+        ADMIN,
+        RESOLVED_AT,
+      );
+
+      expect(changed).toBe(2);
+      expect(updateMany).toHaveBeenCalledWith(
+        {
+          targetType: ReportTargetType.Itinerary,
+          targetId: new Types.ObjectId(TARGET),
+          status: ReportStatus.Open,
+        },
+        {
+          $set: {
+            status: ReportStatus.Deleted,
+            resolvedBy: new Types.ObjectId(ADMIN),
+            resolvedAt: RESOLVED_AT,
+          },
+        },
+      );
     });
   });
 });

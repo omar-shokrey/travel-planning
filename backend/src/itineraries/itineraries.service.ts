@@ -14,6 +14,7 @@ import {
 import type { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
+import { ItineraryModeration } from './enums/itinerary-moderation.enum';
 import type { AddDayDto } from './dto/add-day.dto';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto';
 import type { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
@@ -226,4 +227,75 @@ export class ItinerariesService {
       throw new BadRequestException(`Unknown city id: ${cityId}`);
     }
   }
+
+  /** For the admin module (GEN-10): whether an itinerary with this id exists. */
+  async existsById(id: string): Promise<boolean> {
+    // A count, not exists(): a findOne that matched stalled in local e2e runs
+    // against the Atlas test database.
+    return (await this.itineraries.countDocuments({ _id: id }).exec()) > 0;
+  }
+
+  /**
+   * For the admin module (GEN-10): hides an itinerary, or shows it again. Its
+   * owner and admins still see a hidden itinerary; reports (GEN-09) and public
+   * search (ITN-21, open PR, filters on `moderation`) leave it out for others. One conditional
+   * update, so of two admins at the same moment only one changes it. Returns
+   * false when nothing changed: the itinerary is missing or already in that
+   * state.
+   */
+  async setHidden(id: string, hidden: boolean): Promise<boolean> {
+    const filter = hidden
+      ? { _id: id, moderation: { $ne: ItineraryModeration.Hidden } }
+      : { _id: id, moderation: ItineraryModeration.Hidden };
+    const moderation = hidden
+      ? ItineraryModeration.Hidden
+      : ItineraryModeration.Visible;
+    const itinerary = await this.itineraries
+      // Not an edit by the owner, so `updatedAt` ("last changed") stays.
+      .findOneAndUpdate(filter, { $set: { moderation } }, { timestamps: false })
+      .select('_id')
+      .lean()
+      .exec();
+    return itinerary !== null;
+  }
+
+  /**
+   * For the admin module (GEN-10): deletes an itinerary, whoever owns it.
+   * Returns the file names of its activity images that no other itinerary
+   * uses, which the caller deletes, or null when there was no such itinerary.
+   * Clones are separate documents and are not touched (as in ITN-01); a clone
+   * keeps the image file names of its source (ITN-21), so a file a clone
+   * still uses is not returned.
+   */
+  async removeByAdmin(id: string): Promise<string[] | null> {
+    const itinerary = await this.itineraries
+      .findByIdAndDelete(id)
+      .select('days.activities.images')
+      .lean()
+      .exec();
+    if (!itinerary) {
+      return null;
+    }
+    const images = activityImages(itinerary);
+    if (images.length === 0) {
+      return [];
+    }
+    const others = await this.itineraries
+      .find({ 'days.activities.images': { $in: images } })
+      .select('days.activities.images')
+      .lean()
+      .exec();
+    const stillUsed = new Set(others.flatMap(activityImages));
+    return images.filter((image) => !stillUsed.has(image));
+  }
+}
+
+/** The image file names of every activity of an itinerary, each once. */
+function activityImages(itinerary: {
+  days?: { activities?: { images?: string[] }[] }[];
+}): string[] {
+  const names = (itinerary.days ?? []).flatMap((day) =>
+    (day.activities ?? []).flatMap((activity) => activity.images ?? []),
+  );
+  return [...new Set(names)];
 }

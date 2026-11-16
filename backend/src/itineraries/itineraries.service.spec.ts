@@ -10,6 +10,7 @@ import { Mongoose, Types } from 'mongoose';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
+import { ItineraryModeration } from './enums/itinerary-moderation.enum';
 import { ItineraryVisibility } from './enums/itinerary-visibility.enum';
 import { ItinerariesService } from './itineraries.service';
 import {
@@ -101,6 +102,105 @@ describe('ItinerariesService', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  describe('admin moderation (GEN-10)', () => {
+    /** A query whose chain (select, lean) ends in `result`. */
+    const query = (result: unknown) => {
+      const chain = {
+        select: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue(result),
+      };
+      return chain;
+    };
+    const id = new Types.ObjectId().toString();
+
+    it.each([
+      [1, true],
+      [0, false],
+    ])('existsById: a count of %p is %p', async (count, expected) => {
+      const spy = jest
+        .spyOn(ItineraryModel, 'countDocuments')
+        .mockReturnValue(query(count) as never);
+
+      expect(await service.existsById(id)).toBe(expected);
+      expect(spy).toHaveBeenCalledWith({ _id: id });
+    });
+
+    it('hides an itinerary that is not hidden yet, in one conditional update', async () => {
+      const spy = jest
+        .spyOn(ItineraryModel, 'findOneAndUpdate')
+        .mockReturnValue(query({ _id: id }) as never);
+
+      expect(await service.setHidden(id, true)).toBe(true);
+      expect(spy).toHaveBeenCalledWith(
+        { _id: id, moderation: { $ne: ItineraryModeration.Hidden } },
+        { $set: { moderation: ItineraryModeration.Hidden } },
+        { timestamps: false },
+      );
+    });
+
+    it('shows a hidden itinerary again, only if it is hidden', async () => {
+      const spy = jest
+        .spyOn(ItineraryModel, 'findOneAndUpdate')
+        .mockReturnValue(query({ _id: id }) as never);
+
+      expect(await service.setHidden(id, false)).toBe(true);
+      expect(spy).toHaveBeenCalledWith(
+        { _id: id, moderation: ItineraryModeration.Hidden },
+        { $set: { moderation: ItineraryModeration.Visible } },
+        { timestamps: false },
+      );
+    });
+
+    it('returns false when nothing matched (missing or already in that state)', async () => {
+      jest
+        .spyOn(ItineraryModel, 'findOneAndUpdate')
+        .mockReturnValue(query(null) as never);
+
+      expect(await service.setHidden(id, true)).toBe(false);
+    });
+
+    it('returns null when deleting an itinerary that does not exist', async () => {
+      jest
+        .spyOn(ItineraryModel, 'findByIdAndDelete')
+        .mockReturnValue(query(null) as never);
+
+      expect(await service.removeByAdmin(id)).toBeNull();
+    });
+
+    it('deletes an itinerary without images and returns no file', async () => {
+      const deleteSpy = jest
+        .spyOn(ItineraryModel, 'findByIdAndDelete')
+        .mockReturnValue(query({ days: [{ activities: [] }] }) as never);
+      const findSpy = jest.spyOn(ItineraryModel, 'find');
+
+      expect(await service.removeByAdmin(id)).toEqual([]);
+      expect(deleteSpy).toHaveBeenCalledWith(id);
+      expect(findSpy).not.toHaveBeenCalled();
+    });
+
+    it('returns the activity images that no other itinerary (a clone) still uses', async () => {
+      jest.spyOn(ItineraryModel, 'findByIdAndDelete').mockReturnValue(
+        query({
+          days: [
+            { activities: [{ images: ['a.jpg', 'b.jpg'] }] },
+            { activities: [{ images: ['c.png', 'a.jpg'] }, {}] },
+          ],
+        }) as never,
+      );
+      const findSpy = jest
+        .spyOn(ItineraryModel, 'find')
+        .mockReturnValue(
+          query([{ days: [{ activities: [{ images: ['b.jpg'] }] }] }]) as never,
+        );
+
+      expect(await service.removeByAdmin(id)).toEqual(['a.jpg', 'c.png']);
+      expect(findSpy).toHaveBeenCalledWith({
+        'days.activities.images': { $in: ['a.jpg', 'b.jpg', 'c.png'] },
+      });
+    });
   });
 
   describe('create', () => {
