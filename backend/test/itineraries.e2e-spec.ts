@@ -352,6 +352,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
         visibility: 'private',
         dayCount: 0,
         days: [],
+        cityGroups: [],
       });
     });
 
