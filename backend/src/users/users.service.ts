@@ -377,4 +377,25 @@ export class UsersService {
       )
       .exec();
   }
+
+  /**
+   * The ids of the moderators assigned to one hotel or airline, for the
+   * notification of a deactivated provider (ACC-15). Accounts closed by their
+   * owner (ACC-12) are left out. Uses the index on `assignment.providerId`.
+   */
+  async findModeratorIdsOfProvider(
+    providerType: ProviderType,
+    providerId: Types.ObjectId,
+  ): Promise<Types.ObjectId[]> {
+    const moderators = await this.users
+      .find({
+        'assignment.providerId': providerId,
+        'assignment.providerType': providerType,
+        status: { $ne: UserStatus.Deactivated },
+      })
+      .select('_id')
+      .lean()
+      .exec();
+    return moderators.map((moderator) => moderator._id);
+  }
 }
