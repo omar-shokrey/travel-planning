@@ -5,6 +5,8 @@ import { ActivitiesController } from './activities.controller';
 import { ActivitiesService } from './activities.service';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
+import { TransportCostsController } from './transport-costs.controller';
+import { TransportCostsService } from './transport-costs.service';
 import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
 
 @Module({
@@ -14,8 +16,12 @@ import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
     ]),
     ReferenceModule,
   ],
-  controllers: [ItinerariesController, ActivitiesController],
-  providers: [ItinerariesService, ActivitiesService],
+  controllers: [
+    ItinerariesController,
+    ActivitiesController,
+    TransportCostsController,
+  ],
+  providers: [ItinerariesService, ActivitiesService, TransportCostsService],
   exports: [ItinerariesService],
 })
 export class ItinerariesModule {}

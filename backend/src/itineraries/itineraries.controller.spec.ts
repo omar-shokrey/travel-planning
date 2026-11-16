@@ -1,6 +1,7 @@
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import type { ActivitiesService } from './activities.service';
 import { ItinerariesController } from './itineraries.controller';
+import type { TransportCostsService } from './transport-costs.service';
 import type { ItinerariesService } from './itineraries.service';
 
 const id = '6741c0ffee0ddba11ad0c0de';
@@ -22,9 +23,11 @@ describe('ItinerariesController', () => {
     remove: jest.fn(),
   };
   const activities = { add: jest.fn() };
+  const transportCosts = { add: jest.fn() };
   const controller = new ItinerariesController(
     service as unknown as ItinerariesService,
     activities as unknown as ActivitiesService,
+    transportCosts as unknown as TransportCostsService,
   );
 
   beforeEach(() => {
@@ -86,5 +89,21 @@ describe('ItinerariesController', () => {
     await controller.addActivity(id, dayId, activity, userId);
 
     expect(activities.add).toHaveBeenCalledWith(id, dayId, activity, userId);
+  });
+
+  it('passes a new transport cost and the logged-in user to the transport costs service', async () => {
+    const cost = {
+      dayId: '6741c0ffee0ddba11ad0d0d0',
+      mode: 'train',
+      fromCityId: 'cairo',
+      toCityId: 'luxor',
+      amount: 90000,
+      currency: 'EGP',
+    };
+    transportCosts.add.mockResolvedValue({ id });
+
+    await controller.addTransportCost(id, cost, userId);
+
+    expect(transportCosts.add).toHaveBeenCalledWith(id, cost, userId);
   });
 });
