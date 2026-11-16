@@ -1,4 +1,5 @@
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import type { ActivitiesService } from './activities.service';
 import { ItinerariesController } from './itineraries.controller';
 import type { ItinerariesService } from './itineraries.service';
 
@@ -20,8 +21,10 @@ describe('ItinerariesController', () => {
     update: jest.fn(),
     remove: jest.fn(),
   };
+  const activities = { add: jest.fn() };
   const controller = new ItinerariesController(
     service as unknown as ItinerariesService,
+    activities as unknown as ActivitiesService,
   );
 
   beforeEach(() => {
@@ -73,5 +76,15 @@ describe('ItinerariesController', () => {
       { notes: 'Museum' },
       userId,
     );
+  });
+
+  it('passes a new activity, the ids and the logged-in user to the activities service', async () => {
+    const dayId = '6741c0ffee0ddba11ad0d0d0';
+    const activity = { name: 'Museum', cost: 2000, currency: 'EGP' };
+    activities.add.mockResolvedValue({ id });
+
+    await controller.addActivity(id, dayId, activity, userId);
+
+    expect(activities.add).toHaveBeenCalledWith(id, dayId, activity, userId);
   });
 });
