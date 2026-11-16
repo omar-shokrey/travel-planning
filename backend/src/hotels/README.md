@@ -18,3 +18,17 @@ Hotel photos use `UploadsService`; the hotel stores only generated filenames.
 Uploads use a conditional photo-count update to prevent concurrent requests
 from exceeding the five-photo limit. A removed filename is deleted from the
 hotel before its file is removed.
+
+## Rooms (HTL-03)
+
+- `POST /api/hotels/:id/rooms` is limited to the moderator assigned to that
+  hotel. The service verifies both the hotel and the moderator assignment
+  before creating a room.
+- Rooms are stored in the separate `rooms` collection with a compound unique
+  index on `{ hotelId, number }`, so a room number can be reused at another
+  hotel but not within the same hotel. MongoDB enforces this even for concurrent
+  creates; the shared exception filter reports a duplicate as 409.
+- The DTO accepts only `number`, `type`, `beds`, `maxOccupancy` and
+  `pricePerNight`. It trims the text fields and requires positive whole-number
+  beds, occupancy and price (minor units). The server sets `hotelId` and
+  `active`; availability and booking behavior are left to later requirements.

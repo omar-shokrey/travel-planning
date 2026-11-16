@@ -11,8 +11,10 @@ import { City } from '../reference/models/city.schema';
 import { UploadsService } from '../uploads/uploads.service';
 import { UsersService } from '../users/users.service';
 import type { CreateHotelDto } from './dto/create-hotel.dto';
+import type { CreateRoomDto } from './dto/create-room.dto';
 import { HotelsService } from './hotels.service';
 import { Hotel, type HotelDocument } from './models/hotel.schema';
+import { Room, type RoomDocument } from './models/room.schema';
 import type { UpdateHotelDto } from './dto/update-hotel.dto';
 
 const HOTEL_ID = '6740f1c2a4b5c6d7e8f90123';
@@ -40,6 +42,23 @@ function makeHotel(overrides: Partial<Hotel> = {}): HotelDocument {
   return hotel as unknown as HotelDocument;
 }
 
+function makeRoom(overrides: Partial<Room> = {}): RoomDocument {
+  const room = {
+    _id: new Types.ObjectId('6740f1c2a4b5c6d7e8f90125'),
+    hotelId: new Types.ObjectId(HOTEL_ID),
+    number: '101',
+    type: 'Double',
+    beds: 2,
+    maxOccupancy: 3,
+    pricePerNight: 12500,
+    active: true,
+    createdAt: new Date('2026-11-05T11:00:00.000Z'),
+    updatedAt: new Date('2026-11-05T11:00:00.000Z'),
+    ...overrides,
+  };
+  return room as RoomDocument;
+}
+
 function moderator(providerType = ProviderType.Hotel, providerId = HOTEL_ID) {
   return {
     assignment: {
@@ -52,6 +71,7 @@ function moderator(providerType = ProviderType.Hotel, providerId = HOTEL_ID) {
 function setup(
   options: {
     hotel?: HotelDocument | null;
+    room?: RoomDocument;
     user?: object | null;
     city?: { countryCode: string } | null;
     updatedHotel?: HotelDocument | null;
@@ -68,6 +88,7 @@ function setup(
     options.city === undefined ? { countryCode: 'EG' } : options.city;
   const updatedHotel =
     options.updatedHotel === undefined ? hotel : options.updatedHotel;
+  const room = options.room ?? makeRoom();
   const cityExec = jest.fn().mockResolvedValue(city);
   const hotelExec = jest.fn().mockResolvedValue(hotel);
   const updateExec = jest.fn().mockResolvedValue(updatedHotel);
@@ -75,6 +96,9 @@ function setup(
     create: jest.fn().mockResolvedValue(hotel),
     findById: jest.fn(() => ({ exec: hotelExec })),
     findOneAndUpdate: jest.fn(() => ({ exec: updateExec })),
+  };
+  const roomsModel = {
+    create: jest.fn().mockResolvedValue(room),
   };
   const citiesModel = {
     findById: jest.fn(() => ({ select: jest.fn(() => ({ exec: cityExec })) })),
@@ -99,6 +123,7 @@ function setup(
   };
   const service = new HotelsService(
     hotelsModel as unknown as Model<Hotel>,
+    roomsModel as unknown as Model<Room>,
     citiesModel as unknown as Model<City>,
     usersService as unknown as UsersService,
     uploads as unknown as UploadsService,
@@ -109,6 +134,8 @@ function setup(
     hotel,
     hotelExec,
     hotelsModel,
+    room,
+    roomsModel,
     service,
     updateExec,
     updatedHotel,
@@ -124,6 +151,14 @@ const createDto: CreateHotelDto = {
   description: 'A quiet hotel close to the city centre.',
   starClass: 4,
   amenities: ['wifi', 'pool'],
+};
+
+const createRoomDto: CreateRoomDto = {
+  number: '101',
+  type: 'Double',
+  beds: 2,
+  maxOccupancy: 3,
+  pricePerNight: 12500,
 };
 
 describe('HotelsService (HTL-01)', () => {
@@ -154,6 +189,56 @@ describe('HotelsService (HTL-01)', () => {
         new BadRequestException('City not found'),
       );
       expect(hotelsModel.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createRoom (HTL-03)', () => {
+    it('stores the room under the hotel and sets its active state', async () => {
+      const hotel = makeHotel();
+      const { room, roomsModel, service } = setup({ hotel });
+
+      const response = await service.createRoom(
+        HOTEL_ID,
+        createRoomDto,
+        USER_ID,
+      );
+
+      expect(roomsModel.create).toHaveBeenCalledWith({
+        ...createRoomDto,
+        hotelId: hotel._id,
+        active: true,
+      });
+      expect(response).toMatchObject({
+        id: room._id.toString(),
+        hotelId: HOTEL_ID,
+        number: '101',
+        active: true,
+      });
+    });
+
+    it('returns 404 before checking assignment when the hotel is missing', async () => {
+      const { roomsModel, service, usersService } = setup({ hotel: null });
+
+      await expect(
+        service.createRoom(HOTEL_ID, createRoomDto, USER_ID),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(usersService.findEntityById).not.toHaveBeenCalled();
+      expect(roomsModel.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [
+        'another hotel',
+        moderator(ProviderType.Hotel, '6740f1c2a4b5c6d7e8f90126'),
+      ],
+      ['airline with the same id', moderator(ProviderType.Airline, HOTEL_ID)],
+    ])('forbids a moderator assigned to %s', async (_label, user) => {
+      const { roomsModel, service } = setup({ user });
+
+      await expect(
+        service.createRoom(HOTEL_ID, createRoomDto, USER_ID),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(roomsModel.create).not.toHaveBeenCalled();
     });
   });
 

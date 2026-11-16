@@ -14,6 +14,7 @@ import { ProviderType } from './../src/common/enums/provider-type.enum';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
 import { Hotel } from './../src/hotels/models/hotel.schema';
+import { Room } from './../src/hotels/models/room.schema';
 import { City } from './../src/reference/models/city.schema';
 import { Country } from './../src/reference/models/country.schema';
 import { User } from './../src/users/models/user.schema';
@@ -54,17 +55,28 @@ const validHotel = () => ({
   amenities: ['wifi', 'pool'],
 });
 
-describe('Hotel profile: create and edit (e2e, HTL-01)', () => {
+const validRoom = () => ({
+  number: `101-${RUN}`,
+  type: 'Double',
+  beds: 2,
+  maxOccupancy: 3,
+  pricePerNight: 12500,
+});
+
+describe('Hotel profiles and rooms (e2e, HTL-01, HTL-03)', () => {
   let app: NestExpressApplication;
   let users: Model<User>;
   let hotels: Model<Hotel>;
+  let rooms: Model<Room>;
   let cities: Model<City>;
   let countries: Model<Country>;
   const createdUserIds: string[] = [];
   const createdHotelIds: string[] = [];
+  const createdRoomIds: string[] = [];
   const cookies = new Map<string, string>();
   /** The hotel the moderator "assigned" manages, stored before the tests. */
   let managedHotelId: string;
+  let otherHotelId: string;
 
   const call = (
     method: 'post' | 'patch',
@@ -90,6 +102,8 @@ describe('Hotel profile: create and edit (e2e, HTL-01)', () => {
 
     users = app.get<Model<User>>(getModelToken(User.name));
     hotels = app.get<Model<Hotel>>(getModelToken(Hotel.name));
+    rooms = app.get<Model<Room>>(getModelToken(Room.name));
+    await rooms.init();
     cities = app.get<Model<City>>(getModelToken(City.name));
     countries = app.get<Model<Country>>(getModelToken(Country.name));
 
@@ -103,23 +117,31 @@ describe('Hotel profile: create and edit (e2e, HTL-01)', () => {
       { _id: CITY_A, name: 'HTL-01 test city A', countryCode: COUNTRY_A },
       { _id: CITY_B, name: 'HTL-01 test city B', countryCode: COUNTRY_B },
     ]);
-    const [managed] = await hotels.insertMany([
+    const [managed, otherHotel] = await hotels.insertMany([
       {
         ...validHotel(),
         name: 'Managed hotel',
         countryCode: COUNTRY_A,
         photos: [],
       },
+      {
+        ...validHotel(),
+        name: 'Other managed hotel',
+        countryCode: COUNTRY_A,
+        photos: [],
+      },
     ]);
     managedHotelId = managed._id.toString();
-    createdHotelIds.push(managedHotelId);
+    otherHotelId = otherHotel._id.toString();
+    createdHotelIds.push(managedHotelId, otherHotelId);
 
     const passwordHash = await hash(PASSWORD, 4);
     const accounts: [string, Role, Types.ObjectId | undefined][] = [
       ['admin', Role.Admin, undefined],
       ['user', Role.User, undefined],
       ['assigned', Role.HotelModerator, managed._id],
-      ['otherModerator', Role.HotelModerator, new Types.ObjectId()],
+      ['otherModerator', Role.HotelModerator, otherHotel._id],
+      ['airlineModerator', Role.AirlineModerator, undefined],
     ];
     const inserted = await users.insertMany(
       accounts.map(([label, role, hotelId]) => ({
@@ -148,6 +170,9 @@ describe('Hotel profile: create and edit (e2e, HTL-01)', () => {
   });
 
   afterAll(async () => {
+    for (const id of createdRoomIds) {
+      await rooms.findByIdAndDelete(id);
+    }
     for (const id of createdHotelIds) {
       await hotels.findByIdAndDelete(id);
     }
@@ -336,6 +361,155 @@ describe('Hotel profile: create and edit (e2e, HTL-01)', () => {
         `/api/hotels/${managedHotelId}`,
         undefined,
         { name: 'Nobody' },
+      );
+
+      expect(response.status).toBe(401);
+      expect(response.body.message).toBe(LOGIN_REQUIRED_MESSAGE);
+    });
+  });
+
+  describe('a hotel moderator adds a room (HTL-03)', () => {
+    it('creates an active room attached to the assigned hotel', async () => {
+      const room = validRoom();
+      const response = await call(
+        'post',
+        `/api/hotels/${managedHotelId}/rooms`,
+        'assigned',
+        room,
+      );
+
+      expect(response.status).toBe(201);
+      createdRoomIds.push(response.body.id as string);
+      expect(response.body).toMatchObject({
+        hotelId: managedHotelId,
+        ...room,
+        active: true,
+      });
+      expect(response.body.createdAt).toMatch(/Z$/);
+      const stored = await rooms.findById(response.body.id).lean().orFail();
+      expect(stored.hotelId.toString()).toBe(managedHotelId);
+      expect(stored.active).toBe(true);
+    });
+
+    it('rejects client-controlled fields', async () => {
+      const response = await call(
+        'post',
+        `/api/hotels/${managedHotelId}/rooms`,
+        'assigned',
+        { ...validRoom(), active: false, hotelId: otherHotelId },
+      );
+
+      expect(response.status).toBe(400);
+      expect(
+        response.body.errors.map(({ field }: { field: string }) => field),
+      ).toEqual(['active', 'hotelId']);
+    });
+
+    it('rejects duplicate room numbers within one hotel with 409', async () => {
+      const roomNumber = `duplicate-${RUN}`;
+      const first = await call(
+        'post',
+        `/api/hotels/${managedHotelId}/rooms`,
+        'assigned',
+        { ...validRoom(), number: roomNumber },
+      );
+      expect(first.status).toBe(201);
+      createdRoomIds.push(first.body.id as string);
+
+      const duplicate = await call(
+        'post',
+        `/api/hotels/${managedHotelId}/rooms`,
+        'assigned',
+        { ...validRoom(), number: roomNumber },
+      );
+      if (duplicate.status === 201) {
+        createdRoomIds.push(duplicate.body.id as string);
+      }
+
+      expect(duplicate.status).toBe(409);
+    });
+
+    it('allows the same room number at another hotel', async () => {
+      const roomNumber = `shared-${RUN}`;
+      const first = await call(
+        'post',
+        `/api/hotels/${managedHotelId}/rooms`,
+        'assigned',
+        { ...validRoom(), number: roomNumber },
+      );
+      expect(first.status).toBe(201);
+      createdRoomIds.push(first.body.id as string);
+
+      const second = await call(
+        'post',
+        `/api/hotels/${otherHotelId}/rooms`,
+        'otherModerator',
+        { ...validRoom(), number: roomNumber },
+      );
+      if (second.status === 201) {
+        createdRoomIds.push(second.body.id as string);
+      }
+
+      expect(second.status).toBe(201);
+      expect(second.body.hotelId).toBe(otherHotelId);
+    });
+
+    it('documents the route and DTO in Swagger', async () => {
+      const response = await request(app.getHttpServer()).get('/api/docs-json');
+
+      expect(response.status).toBe(200);
+      const operation = response.body.paths['/api/hotels/{id}/rooms'].post;
+      expect(operation.summary).toBe('Add a room to an assigned hotel');
+      expect(
+        operation.requestBody.content['application/json'].schema.$ref,
+      ).toBe('#/components/schemas/CreateRoomDto');
+      expect(
+        operation.responses['201'].content['application/json'].schema.$ref,
+      ).toBe('#/components/schemas/RoomResponseDto');
+    });
+
+    it('refuses a moderator assigned to another hotel', async () => {
+      const response = await call(
+        'post',
+        `/api/hotels/${managedHotelId}/rooms`,
+        'otherModerator',
+        validRoom(),
+      );
+
+      expect(response.status).toBe(403);
+    });
+
+    it.each(['admin', 'user', 'airlineModerator'])(
+      'refuses a %s',
+      async (who) => {
+        const response = await call(
+          'post',
+          `/api/hotels/${managedHotelId}/rooms`,
+          who,
+          validRoom(),
+        );
+
+        expect(response.status).toBe(403);
+      },
+    );
+
+    it('returns 404 for an unknown hotel', async () => {
+      const response = await call(
+        'post',
+        `/api/hotels/${new Types.ObjectId().toString()}/rooms`,
+        'assigned',
+        validRoom(),
+      );
+
+      expect(response.status).toBe(404);
+    });
+
+    it('requires a login', async () => {
+      const response = await call(
+        'post',
+        `/api/hotels/${managedHotelId}/rooms`,
+        undefined,
+        validRoom(),
       );
 
       expect(response.status).toBe(401);
