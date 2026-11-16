@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Mongoose, Schema } from 'mongoose';
 import type { ErrorResponse } from '../interfaces/error-response.interface';
 import { validationExceptionFactory } from '../pipes/validation-exception.factory';
 import { AllExceptionsFilter } from './all-exceptions.filter';
@@ -25,6 +26,30 @@ function handle(exception: unknown, url = '/api/flights?page=2') {
     statusCode: status.mock.calls[0][0] as number,
     body: json.mock.calls[0][0] as ErrorResponse,
   };
+}
+
+/**
+ * A real Mongoose ValidationError, made the way a save makes it: a document
+ * that breaks its schema, validated without any database.
+ */
+async function mongooseValidationError(): Promise<unknown> {
+  const mongoose = new Mongoose();
+  mongoose.set('autoIndex', false);
+  mongoose.set('autoCreate', false);
+  const Thing = mongoose.model(
+    'Thing',
+    new Schema({
+      name: { type: String, required: true },
+      starClass: { type: Number, min: 1, max: 5 },
+      address: { line: { type: String, required: true } },
+    }),
+  );
+  return new Thing({ starClass: 9, address: {} }).validate().then(
+    () => {
+      throw new Error('The document was expected to be invalid');
+    },
+    (error: unknown) => error,
+  );
 }
 
 describe('AllExceptionsFilter', () => {
@@ -106,4 +131,39 @@ describe('AllExceptionsFilter', () => {
       expect(logError).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('answers a Mongoose ValidationError with 400 and the usual field errors, not 500', async () => {
+    const { statusCode, body } = handle(await mongooseValidationError());
+
+    expect(statusCode).toBe(400);
+    expect(body.error).toBe('Bad Request');
+    expect(body.message).toBe('Validation failed');
+    expect(body.errors?.map(({ field }) => field)).toEqual([
+      'address.line',
+      'name',
+      'starClass',
+    ]);
+    for (const fieldError of body.errors ?? []) {
+      expect(fieldError.messages).toHaveLength(1);
+      expect(fieldError.messages[0]).toEqual(expect.any(String));
+    }
+    expect(
+      body.errors?.find(({ field }) => field === 'name')?.messages,
+    ).toEqual(['Path `name` is required.']);
+  });
+
+  it('does not log a Mongoose ValidationError as a server error', async () => {
+    handle(await mongooseValidationError());
+
+    expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('still answers 500 for an error that only looks like a validation error', () => {
+    const lookalike = Object.assign(new Error('Validation failed'), {
+      name: 'ValidationError',
+      errors: { name: { message: 'x' } },
+    });
+
+    expect(handle(lookalike).statusCode).toBe(500);
+  });
 });

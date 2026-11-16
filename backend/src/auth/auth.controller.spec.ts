@@ -255,12 +255,16 @@ describe('AuthController', () => {
       newPassword: 'N3wPassword',
     };
 
-    it('gives the service the id of the logged-in user and the body, and returns its answer', async () => {
-      const { authService, controller } = setup();
+    it('gives the service the id of the logged-in user, the access cookie and the body, and returns its answer', async () => {
+      const { authService, authCookies, request, controller } = setup();
 
-      expect(await controller.changePassword(created.id, change)).toBe(created);
+      expect(await controller.changePassword(created.id, request, change)).toBe(
+        created,
+      );
+      expect(authCookies.readAccessToken).toHaveBeenCalledWith(request);
       expect(authService.changePassword).toHaveBeenCalledWith(
         created.id,
+        'an-access-token',
         change,
       );
     });
