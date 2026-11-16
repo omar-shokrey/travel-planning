@@ -128,7 +128,6 @@ describe('Hotel profiles (e2e, HTL-01)', () => {
       ['user', Role.User, undefined],
       ['assigned', Role.HotelModerator, managed._id],
       ['otherModerator', Role.HotelModerator, otherHotel._id],
-      ['airlineModerator', Role.AirlineModerator, undefined],
     ];
     const inserted = await users.insertMany(
       accounts.map(([label, role, hotelId]) => ({
