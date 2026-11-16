@@ -3,7 +3,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { SessionsService } from '../auth/sessions.service';
 import { Role } from '../common/enums/role.enum';
+import {
+  paginate,
+  type PaginatedResponse,
+} from '../common/dto/paginated-response.dto';
 import type { UserResponseDto } from '../users/dto/user-response.dto';
 import { toUserResponse } from '../users/mappers/user.mapper';
 import { UsersService } from '../users/users.service';
@@ -11,6 +16,7 @@ import {
   ACCOUNT_NOT_FOUND_MESSAGE,
   ADMIN_PASSWORD_RESET_FORBIDDEN_MESSAGE,
 } from './admin.constants';
+import type { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
 import type { ResetPasswordDto } from './dto/reset-password.dto';
 
 /**
@@ -19,13 +25,34 @@ import type { ResetPasswordDto } from './dto/reset-password.dto';
  */
 @Injectable()
 export class AdminService {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly sessions: SessionsService,
+  ) {}
+
+  /**
+   * Every account, one page at a time (ACC-14): name, email, role, status and
+   * registration date, newest first. The admin can search the name or the
+   * email and filter by role and status.
+   */
+  async listAccounts(
+    query: ListAccountsQueryDto,
+  ): Promise<PaginatedResponse<UserResponseDto>> {
+    const { items, total } = await this.usersService.listAccounts(
+      { search: query.search, role: query.role, status: query.status },
+      { skip: query.skip, limit: query.limit },
+    );
+    return paginate(items.map(toUserResponse), total, query);
+  }
 
   /**
    * Gives a user or a moderator a temporary password chosen by the admin
    * (ACC-07a). The account must set a new password at its next login, and a
    * login lockout (ACC-05) is cleared so the temporary password works at once.
-   * An administrator's password cannot be reset this way.
+   * Every session of the account ends, so whoever holds one (the owner, or
+   * someone who stole it) must log in with the temporary password. An
+   * administrator's password cannot be reset this way, so the admin's own
+   * session is never touched.
    */
   async resetPassword(
     accountId: string,
@@ -46,6 +73,9 @@ export class AdminService {
     if (!updated) {
       throw new NotFoundException(ACCOUNT_NOT_FOUND_MESSAGE);
     }
+    // After the password, so a failure here never leaves the old password in
+    // place.
+    await this.sessions.revokeAllOfUser(accountId, new Date());
     return toUserResponse(updated);
   }
 }

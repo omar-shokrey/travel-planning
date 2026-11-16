@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Role } from '../../common/enums/role.enum';
 import { UserStatus } from '../../common/enums/user-status.enum';
 
@@ -29,6 +29,19 @@ export class UserResponseDto {
     example: false,
   })
   mustChangePassword: boolean;
+
+  @ApiPropertyOptional({
+    description: 'The phone number (ACC-09). Left out when there is none.',
+    example: '+20 10 1234 5678',
+  })
+  phone?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'The currency the user wants prices shown in (ACC-09). Left out when there is none: prices are then shown in USD, the platform currency.',
+    example: 'EGP',
+  })
+  preferredCurrency?: string;
 
   @ApiProperty({
     description: 'When the account was created, in UTC',

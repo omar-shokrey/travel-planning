@@ -20,9 +20,10 @@ export class PostResponseDto {
   @ApiPropertyOptional({
     type: String,
     format: 'date-time',
-    nullable: true,
+    example: '2026-11-15T10:00:00.000Z',
+    description: 'When the post was published, in UTC. Left out for a draft.',
   })
-  publishedAt?: Date;
+  publishedAt?: string;
 
   @ApiProperty({ type: [String] })
   tags: string[];
@@ -30,9 +31,17 @@ export class PostResponseDto {
   @ApiProperty({ type: [String] })
   images: string[];
 
-  @ApiProperty({ type: String, format: 'date-time' })
-  createdAt: Date;
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    example: '2026-11-15T10:00:00.000Z',
+  })
+  createdAt: string;
 
-  @ApiProperty({ type: String, format: 'date-time' })
-  updatedAt: Date;
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    example: '2026-11-15T10:00:00.000Z',
+  })
+  updatedAt: string;
 }

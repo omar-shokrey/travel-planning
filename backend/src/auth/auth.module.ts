@@ -31,6 +31,8 @@ import { SessionsService } from './sessions.service';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
-  exports: [AuthCookiesService],
+  // SessionsService is exported for AdminModule: an admin password reset
+  // ends the sessions of the account (ACC-07a).
+  exports: [AuthCookiesService, SessionsService],
 })
 export class AuthModule {}

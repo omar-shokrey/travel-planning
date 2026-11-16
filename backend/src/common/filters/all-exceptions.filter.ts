@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { Error as MongooseError } from 'mongoose';
 import { STATUS_CODES } from 'node:http';
 import type {
   ErrorResponse,
@@ -59,6 +60,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       return this.describeHttpException(exception);
     }
+    if (exception instanceof MongooseError.ValidationError) {
+      return this.describeValidationError(exception);
+    }
     if (this.isDuplicateKeyError(exception)) {
       const fields = Object.keys(exception.keyPattern ?? {});
       return {
@@ -92,6 +96,25 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? message.join('; ')
         : (message ?? exception.message),
       ...(errors ? { errors } : {}),
+    };
+  }
+
+  /**
+   * A document broke its schema on save (Mongoose ValidationError). It is the
+   * client's input that is wrong, so it is a 400 in the shape of the DTO
+   * validation errors (GEN-02), never a 500. Each failing path, such as
+   * `name` or `address.line`, becomes one field with the schema's message.
+   */
+  private describeValidationError(
+    exception: MongooseError.ValidationError,
+  ): ErrorDetails {
+    const errors = Object.entries(exception.errors)
+      .map(([field, error]) => ({ field, messages: [error.message] }))
+      .sort((a, b) => a.field.localeCompare(b.field));
+    return {
+      statusCode: HttpStatus.BAD_REQUEST,
+      message: 'Validation failed',
+      errors,
     };
   }
 
