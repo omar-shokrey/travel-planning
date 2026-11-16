@@ -194,4 +194,28 @@ export class ItinerariesController {
   ): Promise<ItineraryDetailResponseDto> {
     return this.itineraries.updateDay(id, dayId, dto, userId);
   }
+
+  @Delete(':id/days/:dayId')
+  @ApiOperation({
+    summary: 'Delete a day',
+    description:
+      'ITN-07. Delete a day of your own itinerary, after the user confirms it in the app. The days after it are renumbered and their dates and budget totals recalculated. Returns the itinerary with its remaining days.',
+  })
+  @ApiParam({ name: 'id', description: 'Itinerary id' })
+  @ApiParam({ name: 'dayId', description: 'Day id' })
+  @ApiOkResponse({ type: ItineraryDetailResponseDto })
+  @ApiBadRequestResponse({ description: 'An id is not a valid id' })
+  @ApiForbiddenResponse({
+    description: 'The itinerary belongs to another user',
+  })
+  @ApiNotFoundResponse({
+    description: 'No itinerary has this id, or it has no day with this id',
+  })
+  removeDay(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Param('dayId', ParseObjectIdPipe) dayId: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    return this.itineraries.removeDay(id, dayId, userId);
+  }
 }
