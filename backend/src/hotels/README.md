@@ -12,7 +12,8 @@ hotel, so callers cannot choose a mismatched country.
 - **`null` in an edit answers 400.** `UpdateHotelDto` comes from `PartialType`, which makes every field `@IsOptional()`, and that lets `null` through as well as a missing field. Every hotel field is required, so `HotelsService.update` checks first, before reading anything, and answers 400 in the usual shape (`errors` names each field, "name must not be null"). Without it, `null` reached the schema on save, and the exception filter turned the Mongoose `ValidationError` into a 500.
 - Amenities are trimmed and duplicates are removed (the first is kept) before the 30-amenity limit is checked, on create and edit.
 - The photo updates use `returnDocument: 'after'`, like the rest of the code; Mongoose 9 still accepts `new: true` but marks it deprecated.
-- The e2e test `hotels-profile.e2e-spec.ts` runs the whole flow on the test database: it adds its own countries and cities (unique ids), stores a hotel and its moderator, and removes them all at the end.
+- The e2e test `hotels-profile.e2e-spec.ts` creates its own countries and cities
+  (unique ids), then removes those and its hotel and users at the end.
 
 Hotel photos use `UploadsService`; the hotel stores only generated filenames.
 Uploads use a conditional photo-count update to prevent concurrent requests
@@ -32,3 +33,6 @@ hotel before its file is removed.
   `pricePerNight`. It trims the text fields and requires positive whole-number
   beds, occupancy and price (minor units). The server sets `hotelId` and
   `active`; availability and booking behavior are left to later requirements.
+- The real-AppModule e2e coverage is in `hotels-rooms.e2e-spec.ts`; it creates
+  its own hotels and users, explicitly awaits the room indexes before testing
+  hotel-scoped uniqueness, and removes its fixtures at the end.
