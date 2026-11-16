@@ -27,6 +27,9 @@ export class RoomResponseDto {
   })
   pricePerNight: number;
 
+  @ApiProperty({ example: 'USD' })
+  currency: string;
+
   @ApiProperty({ example: true })
   active: boolean;
 

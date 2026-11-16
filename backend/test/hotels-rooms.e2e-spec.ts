@@ -167,6 +167,7 @@ describe('Hotel rooms (e2e, HTL-03)', () => {
     expect(response.body).toMatchObject({
       hotelId: managedHotelId,
       ...room,
+      currency: 'USD',
       active: true,
     });
     expect(response.body.createdAt).toMatch(/Z$/);

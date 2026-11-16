@@ -1,4 +1,5 @@
 import type { Types } from 'mongoose';
+import { PLATFORM_CURRENCY } from '../../common/constants/currency';
 import type { RoomResponseDto } from '../dto/room-response.dto';
 import type { Room } from '../models/room.schema';
 
@@ -25,6 +26,7 @@ export function toRoomResponse(room: RoomSource): RoomResponseDto {
     beds: room.beds,
     maxOccupancy: room.maxOccupancy,
     pricePerNight: room.pricePerNight,
+    currency: PLATFORM_CURRENCY,
     active: room.active,
     availability: room.availability.map(({ from, to }) => ({ from, to })),
     createdAt: room.createdAt.toISOString(),
