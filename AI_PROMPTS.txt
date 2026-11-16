@@ -896,3 +896,42 @@ answered 400 "fromCityId and toCityId must be different cities"; moving it to da
 200. Claude then deleted its test itineraries one by one by id. I changed nothing and rejected
 nothing.
 ================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository and my laptop)
+Branch / Issue: feature/ITN-21-search-public-itineraries / #78
+Related Requirement: ITN-21
+Prompt:
+Continuing my wave 3 issues in the same chat, I asked Claude to implement ITN-21, open its pull
+request, and test it in Swagger on my laptop.
+How the output was used:
+Claude wrote the search DTO, the service and controller, the response DTOs, the unit and e2e tests
+and the README section. It ran format, lint, typecheck, build and the unit tests in its own
+workspace, and the end-to-end tests against a local MongoDB-compatible stand-in (FerretDB). I
+applied its commits with a script so they carry my name.
+Accepted, changed, or rejected:
+Design choices by Claude: Publicly visible means public (ITN-20), not hidden by an admin (GEN-10)
+and the author not deactivated (ACC-12). Anything else answers 404, so a private itinerary is never
+revealed. The keyword is matched as plain text (escaped), never as a pattern. `minDays` above
+`maxDays` answers 400. Search results leave out the days to stay light; most recently updated first,
+paginated. The clone gets new ids for everything and shares nothing with the original, so editing or
+deleting either leaves the other alone. The author's name is kept in `clonedFrom` at clone time. The
+read routes are under `/api/itineraries/public/`, the only public part of `/api/itineraries` the
+guest-access test (ACC-10) allows. A clone keeps the same image filenames, so ITN-12 must not delete
+an image file another activity still uses (written in the README).
+Checked: on my laptop the checks script ran format (no changes), lint (0 warnings and 0 errors),
+typecheck, build, npm test (62 suites, 856 tests passed) and npm run test:e2e on the test database
+(28 suites, 482 tests passed). Claude tested it in Swagger in the Claude app's browser while I was
+logged in, with the API on the ITN-21 branch, which contains this branch; it sent the requests from
+the Swagger page. With the test itinerary set to public: a guest search by a title word found it
+with its author and dayCount 4 and without the days; minDays=4, city=london, country=FR, q=Paris and
+q=Egypt found it; maxDays=3, city=tokyo and country=JP did not; minDays=5&maxDays=2 answered 400.
+The guest view answered 200 with the author, 4 days, the activity and 3 city groups. Clone as a
+guest answered 401 "You must log in to do this"; logged in it answered 201 with a private copy, new
+ids and clonedFrom crediting the author. After setting the original private, the search no longer
+found it and the public view answered 404. After deleting the original, the clone still opened with
+its 4 days and its credit, and deleting its activity and transport cost worked. Claude then deleted
+its test itineraries one by one by id. I changed nothing and rejected nothing.
+================================================
