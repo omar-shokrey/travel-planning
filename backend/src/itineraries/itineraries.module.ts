@@ -1,10 +1,13 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceModule } from '../reference/reference.module';
+import { UsersModule } from '../users/users.module';
 import { ActivitiesController } from './activities.controller';
 import { ActivitiesService } from './activities.service';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
+import { PublicItinerariesController } from './public-itineraries.controller';
+import { PublicItinerariesService } from './public-itineraries.service';
 import { TransportCostsController } from './transport-costs.controller';
 import { TransportCostsService } from './transport-costs.service';
 import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
@@ -15,13 +18,20 @@ import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
       { name: Itinerary.name, schema: ItinerarySchema },
     ]),
     ReferenceModule,
+    UsersModule,
   ],
   controllers: [
     ItinerariesController,
     ActivitiesController,
     TransportCostsController,
+    PublicItinerariesController,
   ],
-  providers: [ItinerariesService, ActivitiesService, TransportCostsService],
+  providers: [
+    ItinerariesService,
+    ActivitiesService,
+    TransportCostsService,
+    PublicItinerariesService,
+  ],
   exports: [ItinerariesService],
 })
 export class ItinerariesModule {}
