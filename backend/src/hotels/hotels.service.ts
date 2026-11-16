@@ -119,7 +119,14 @@ export class HotelsService {
             },
           },
         },
-        { $push: { availability: { from: dto.from, to: dto.to } } },
+        {
+          $push: {
+            availability: {
+              $each: [{ from: dto.from, to: dto.to }],
+              $sort: { from: 1 },
+            },
+          },
+        },
         { returnDocument: 'after', runValidators: true },
       )
       .exec();

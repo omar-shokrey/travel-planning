@@ -195,6 +195,7 @@ describe('Room availability ranges (e2e, HTL-04)', () => {
     expect(response.body).toMatchObject({
       id: managedRoomId,
       hotelId: managedHotelId,
+      currency: 'USD',
       availability: [availability],
     });
     expect(response.body.createdAt).toMatch(/Z$/);
@@ -223,6 +224,34 @@ describe('Room availability ranges (e2e, HTL-04)', () => {
     expect(firstResponse.status).toBe(201);
     expect(secondResponse.status).toBe(201);
     expect(secondResponse.body.availability).toEqual([first, second]);
+  });
+
+  it('returns availability sorted when an earlier range is added after a later one', async () => {
+    const later = range('2026-12-15', '2026-12-20');
+    const earlier = range('2026-12-01', '2026-12-08');
+
+    const laterResponse = await call(
+      managedHotelId,
+      managedRoomId,
+      'assigned',
+      later,
+    );
+    const earlierResponse = await call(
+      managedHotelId,
+      managedRoomId,
+      'assigned',
+      earlier,
+    );
+
+    expect(laterResponse.status).toBe(201);
+    expect(earlierResponse.status).toBe(201);
+    expect(earlierResponse.body).toMatchObject({
+      currency: 'USD',
+      availability: [earlier, later],
+    });
+    expect(
+      (await rooms.findById(managedRoomId).lean().orFail()).availability,
+    ).toEqual([earlier, later]);
   });
 
   it('rejects overlapping ranges with 409', async () => {
@@ -332,5 +361,13 @@ describe('Room availability ranges (e2e, HTL-04)', () => {
     expect(
       operation.responses['201'].content['application/json'].schema.$ref,
     ).toBe('#/components/schemas/RoomResponseDto');
+    const roomSchema = response.body.components.schemas.RoomResponseDto;
+    expect(roomSchema.properties.currency).toMatchObject({
+      type: 'string',
+      example: 'USD',
+    });
+    expect(roomSchema.properties.availability.items.$ref).toBe(
+      '#/components/schemas/RoomAvailabilityResponseDto',
+    );
   });
 });

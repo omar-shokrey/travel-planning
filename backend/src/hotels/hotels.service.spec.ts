@@ -270,11 +270,54 @@ describe('HotelsService (HTL-01)', () => {
             },
           },
           {
-            $push: { availability: createRoomAvailabilityDto },
+            $push: {
+              availability: {
+                $each: [createRoomAvailabilityDto],
+                $sort: { from: 1 },
+              },
+            },
           },
           { returnDocument: 'after', runValidators: true },
         );
         expect(response.availability).toEqual([createRoomAvailabilityDto]);
+      });
+
+      it('keeps ranges sorted when adding an earlier range after a later one', async () => {
+        const earlier = { from: '2026-12-01', to: '2026-12-08' };
+        const later = { from: '2026-12-15', to: '2026-12-20' };
+        const room = makeRoom({ availability: [later] });
+        const updatedRoom = makeRoom({ availability: [earlier, later] });
+        const { roomsModel, service } = setup({ room, updatedRoom });
+
+        const response = await service.addRoomAvailability(
+          HOTEL_ID,
+          ROOM_ID,
+          earlier,
+          USER_ID,
+        );
+
+        expect(roomsModel.findOneAndUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            availability: {
+              $not: {
+                $elemMatch: {
+                  from: { $lt: earlier.to },
+                  to: { $gt: earlier.from },
+                },
+              },
+            },
+          }),
+          {
+            $push: {
+              availability: {
+                $each: [earlier],
+                $sort: { from: 1 },
+              },
+            },
+          },
+          { returnDocument: 'after', runValidators: true },
+        );
+        expect(response.availability).toEqual([earlier, later]);
       });
 
       it('returns 404 when the hotel does not exist', async () => {

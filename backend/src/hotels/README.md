@@ -48,3 +48,5 @@ hotel before its file is removed.
 - The service adds a range with a conditional atomic update that checks for
   overlap and appends only when none exists. Concurrent requests therefore
   cannot both add overlapping ranges.
+- Past ranges are accepted because HTL-04 sets no limit; bookings are checked
+  against dates later (HTL-11/HTL-18).
