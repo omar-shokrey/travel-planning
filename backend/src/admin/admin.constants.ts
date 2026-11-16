@@ -15,3 +15,13 @@ export const ADMIN_PASSWORD_RESET_FORBIDDEN_MESSAGE =
  * longest email address.
  */
 export const ACCOUNT_SEARCH_MAX_LENGTH = 254;
+
+/**
+ * The answer when the provider of a new moderator does not exist (ACC-13),
+ * by provider type. It is a 400 on `providerId`, because the id is part of
+ * the body the admin sent.
+ */
+export const PROVIDER_NOT_FOUND_MESSAGE = {
+  airline: 'providerId must be the id of an existing airline',
+  hotel: 'providerId must be the id of an existing hotel',
+} as const;

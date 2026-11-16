@@ -10,6 +10,7 @@ import {
   type CreateUserInput,
   type LockoutPolicy,
 } from './users.service';
+import { ProviderType } from '../common/enums/provider-type.enum';
 
 const input: CreateUserInput = {
   name: 'Sara Ahmed',
@@ -133,6 +134,47 @@ describe('UsersService', () => {
       await expect(service.createRegisteredUser(input)).rejects.toBe(
         duplicateKey,
       );
+    });
+  });
+
+  describe('createModerator (ACC-13)', () => {
+    const moderator = {
+      name: 'Mona Hotel',
+      email: ' Mona@Example.com ',
+      password: 'Temp0rary1',
+      role: Role.HotelModerator,
+      providerType: ProviderType.Hotel,
+      providerId: new Types.ObjectId('6740f1c2a4b5c6d7e8f90abc'),
+    } as const;
+
+    it('stores an active moderator linked to its provider, who must change the password', async () => {
+      const { service, storedFields } = setup();
+
+      await service.createModerator(moderator);
+
+      const { passwordHash, ...others } = storedFields();
+      expect(others).toEqual({
+        name: 'Mona Hotel',
+        email: 'mona@example.com',
+        role: Role.HotelModerator,
+        status: UserStatus.Active,
+        mustChangePassword: true,
+        assignment: {
+          providerType: ProviderType.Hotel,
+          providerId: moderator.providerId,
+        },
+      });
+      expect(await compare('Temp0rary1', passwordHash as string)).toBe(true);
+    });
+
+    it('refuses an email that is already registered and stores nothing', async () => {
+      const { model, service } = setup({ _id: 'someone' });
+
+      const attempt = service.createModerator(moderator);
+
+      await expect(attempt).rejects.toBeInstanceOf(ConflictException);
+      await expect(attempt).rejects.toThrow(EMAIL_TAKEN_MESSAGE);
+      expect(model.create).not.toHaveBeenCalled();
     });
   });
 

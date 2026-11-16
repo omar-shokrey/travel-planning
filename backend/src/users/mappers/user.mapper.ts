@@ -7,7 +7,7 @@ export type UserSource = Pick<
   User,
   'name' | 'email' | 'role' | 'status' | 'mustChangePassword' | 'createdAt'
 > &
-  Partial<Pick<User, 'phone' | 'preferredCurrency'>> & {
+  Partial<Pick<User, 'phone' | 'preferredCurrency' | 'assignment'>> & {
     _id: Types.ObjectId;
   };
 
@@ -24,6 +24,13 @@ export function toUserResponse(user: UserSource): UserResponseDto {
     ...(user.phone != null && { phone: user.phone }),
     ...(user.preferredCurrency != null && {
       preferredCurrency: user.preferredCurrency,
+    }),
+    // Only a moderator has one (ACC-13): the airline or hotel it manages.
+    ...(user.assignment != null && {
+      assignment: {
+        providerType: user.assignment.providerType,
+        providerId: user.assignment.providerId.toString(),
+      },
     }),
     createdAt: user.createdAt.toISOString(),
   };

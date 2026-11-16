@@ -1,4 +1,8 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
@@ -10,10 +14,16 @@ import {
 } from './admin.constants';
 import { AdminService } from './admin.service';
 import { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
+import type { AirlinesService } from '../flights/airlines.service';
+import type { HotelsService } from '../hotels/hotels.service';
+import { ProviderType } from '../common/enums/provider-type.enum';
+import { PROVIDER_NOT_FOUND_MESSAGE } from './admin.constants';
 
 const accountId = '6740f1c2a4b5c6d7e8f90123';
 const accountObjectId = new Types.ObjectId(accountId);
 const temporaryPassword = 'Temp0rary1';
+const providerId = '6740f1c2a4b5c6d7e8f90abc';
+const providerObjectId = new Types.ObjectId(providerId);
 
 function setup(role: Role = Role.User) {
   const stored = {
@@ -31,13 +41,31 @@ function setup(role: Role = Role.User) {
       .fn()
       .mockResolvedValue({ ...stored, mustChangePassword: true }),
     listAccounts: jest.fn().mockResolvedValue({ items: [stored], total: 21 }),
+    createModerator: jest.fn().mockResolvedValue({
+      ...stored,
+      role: Role.HotelModerator,
+      mustChangePassword: true,
+      assignment: {
+        providerType: ProviderType.Hotel,
+        providerId: providerObjectId,
+      },
+    }),
   };
   const sessions = { revokeAllOfUser: jest.fn().mockResolvedValue(undefined) };
+  // The providers of ACC-13: by default both exist.
+  const airlines = {
+    findEntityOrThrow: jest.fn().mockResolvedValue({ _id: providerObjectId }),
+  };
+  const hotels = {
+    findEntityOrThrow: jest.fn().mockResolvedValue({ _id: providerObjectId }),
+  };
   const service = new AdminService(
     usersService as unknown as UsersService,
     sessions as unknown as SessionsService,
+    airlines as unknown as AirlinesService,
+    hotels as unknown as HotelsService,
   );
-  return { usersService, sessions, service };
+  return { usersService, sessions, airlines, hotels, service };
 }
 
 describe('AdminService', () => {
@@ -204,6 +232,93 @@ describe('AdminService', () => {
         items: [],
         meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
       });
+    });
+  });
+
+  describe('createModerator (ACC-13)', () => {
+    const body = {
+      name: 'Mona Hotel',
+      email: 'mona@example.com',
+      role: Role.HotelModerator as Role.HotelModerator,
+      providerId,
+      temporaryPassword,
+    };
+
+    it.each([
+      [Role.HotelModerator, ProviderType.Hotel, 'hotels', 'airlines'],
+      [Role.AirlineModerator, ProviderType.Airline, 'airlines', 'hotels'],
+    ] as const)(
+      'checks that the %s provider exists, then creates the account linked to it',
+      async (role, providerType, checked, notChecked) => {
+        const mocks = setup();
+
+        await mocks.service.createModerator({ ...body, role });
+
+        expect(mocks[checked].findEntityOrThrow).toHaveBeenCalledWith(
+          providerId,
+        );
+        expect(mocks[notChecked].findEntityOrThrow).not.toHaveBeenCalled();
+        expect(mocks.usersService.createModerator).toHaveBeenCalledWith({
+          name: 'Mona Hotel',
+          email: 'mona@example.com',
+          password: temporaryPassword,
+          role,
+          providerType,
+          providerId: providerObjectId,
+        });
+      },
+    );
+
+    it('returns the public account with its assignment, never the password', async () => {
+      const { service } = setup();
+
+      const account = await service.createModerator(body);
+
+      expect(account).toMatchObject({
+        role: 'hotel_moderator',
+        mustChangePassword: true,
+        assignment: { providerType: 'hotel', providerId },
+      });
+      expect(JSON.stringify(account)).not.toContain(temporaryPassword);
+    });
+
+    it('refuses a provider that does not exist with 400 on providerId, and creates nothing', async () => {
+      const { hotels, usersService, service } = setup();
+      hotels.findEntityOrThrow.mockRejectedValue(
+        new NotFoundException('Hotel not found'),
+      );
+
+      const attempt = service.createModerator(body);
+
+      await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
+      const error = (await attempt.catch(
+        (e: unknown) => e,
+      )) as BadRequestException;
+      expect(error.getResponse()).toEqual({
+        message: 'Validation failed',
+        errors: [
+          { field: 'providerId', messages: [PROVIDER_NOT_FOUND_MESSAGE.hotel] },
+        ],
+      });
+      expect(usersService.createModerator).not.toHaveBeenCalled();
+    });
+
+    it('passes on any other error of the provider lookup', async () => {
+      const { airlines, service } = setup();
+      const failure = new Error('database down');
+      airlines.findEntityOrThrow.mockRejectedValue(failure);
+
+      await expect(
+        service.createModerator({ ...body, role: Role.AirlineModerator }),
+      ).rejects.toBe(failure);
+    });
+
+    it('passes on the 409 of an email that is already registered', async () => {
+      const { usersService, service } = setup();
+      const conflict = new Error('This email is already registered');
+      usersService.createModerator.mockRejectedValue(conflict);
+
+      await expect(service.createModerator(body)).rejects.toBe(conflict);
     });
   });
 });

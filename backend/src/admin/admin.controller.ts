@@ -10,7 +10,9 @@ import {
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
+  ApiConflictResponse,
   ApiCookieAuth,
+  ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -26,6 +28,7 @@ import { Role } from '../common/enums/role.enum';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { AdminService } from './admin.service';
+import { CreateModeratorDto } from './dto/create-moderator.dto';
 import { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 
@@ -58,6 +61,28 @@ export class AdminController {
     @Query() query: ListAccountsQueryDto,
   ): Promise<PaginatedResponse<UserResponseDto>> {
     return this.adminService.listAccounts(query);
+  }
+
+  @Post('moderators')
+  @ApiOperation({
+    summary: 'Create a hotel or airline moderator account (ACC-13)',
+    description:
+      'Admin only. Creates an active `airline_moderator` or `hotel_moderator` account linked to exactly one airline or hotel (`providerId`), with the temporary password the admin chose; the admin gives it to the moderator. The account answers with `mustChangePassword: true`: at the first login the moderator must set a new password with PATCH /api/auth/change-password (ACC-08). An airline or hotel may have several moderators.',
+  })
+  @ApiCreatedResponse({
+    description: 'The moderator account was created',
+    type: UserResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'A field is invalid or missing: the role is not a moderator role, the email is not an email, the temporary password breaks the rule, or `providerId` is not the id of an existing airline (airline moderator) or hotel (hotel moderator). `errors` names each field.',
+  })
+  @ApiConflictResponse({ description: 'The email is already registered' })
+  @ApiForbiddenResponse({
+    description: 'The caller is not an administrator, or is suspended',
+  })
+  createModerator(@Body() dto: CreateModeratorDto): Promise<UserResponseDto> {
+    return this.adminService.createModerator(dto);
   }
 
   @Post('users/:id/reset-password')

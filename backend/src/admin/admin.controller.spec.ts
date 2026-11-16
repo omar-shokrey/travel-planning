@@ -17,6 +17,7 @@ describe('AdminController', () => {
     const adminService = {
       resetPassword: jest.fn().mockResolvedValue(account),
       listAccounts: jest.fn().mockResolvedValue(page),
+      createModerator: jest.fn().mockResolvedValue(account),
     };
     const controller = new AdminController(
       adminService as unknown as AdminService,
@@ -47,6 +48,22 @@ describe('AdminController', () => {
 
       expect(await controller.listAccounts(query)).toBe(page);
       expect(adminService.listAccounts).toHaveBeenCalledWith(query);
+    });
+  });
+
+  describe('createModerator (ACC-13)', () => {
+    it('gives the service the body and returns the new account', async () => {
+      const { adminService, controller } = setup();
+      const body = {
+        name: 'Mona Hotel',
+        email: 'mona@example.com',
+        role: Role.HotelModerator as Role.HotelModerator,
+        providerId: '6740f1c2a4b5c6d7e8f90abc',
+        temporaryPassword: 'Temp0rary1',
+      };
+
+      expect(await controller.createModerator(body)).toBe(account);
+      expect(adminService.createModerator).toHaveBeenCalledWith(body);
     });
   });
 });
