@@ -24,11 +24,20 @@ import {
 const trim = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.trim() : value;
 
+/**
+ * Trims each amenity and removes duplicates, keeping the first, so "wifi" and
+ * " wifi " are stored once. The 30-amenity limit is counted after that.
+ * Anything that is not a text is left for the validators to reject.
+ */
 const trimAmenities = ({ value }: TransformFnParams): unknown =>
   Array.isArray(value)
-    ? value.map((amenity: unknown) =>
-        typeof amenity === 'string' ? amenity.trim() : amenity,
-      )
+    ? [
+        ...new Set(
+          value.map((amenity: unknown) =>
+            typeof amenity === 'string' ? amenity.trim() : amenity,
+          ),
+        ),
+      ]
     : value;
 
 export class CreateHotelDto {
@@ -87,6 +96,7 @@ export class CreateHotelDto {
     example: ['wifi', 'pool'],
     type: [String],
     maxItems: HOTEL_AMENITIES_MAX_COUNT,
+    description: `Up to ${HOTEL_AMENITIES_MAX_COUNT} amenities of at most ${HOTEL_AMENITY_MAX_LENGTH} characters. They are trimmed and duplicates are removed.`,
   })
   @Transform(trimAmenities)
   @IsArray()
