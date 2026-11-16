@@ -1,5 +1,6 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CityGroupResponseDto } from './city-group-response.dto';
+import { CloneSourceResponseDto } from './clone-source-response.dto';
 import { ItineraryDayResponseDto } from './itinerary-day-response.dto';
 import { ItineraryResponseDto } from './itinerary-response.dto';
 
@@ -18,4 +19,10 @@ export class ItineraryDetailResponseDto extends ItineraryResponseDto {
     type: [CityGroupResponseDto],
   })
   cityGroups: CityGroupResponseDto[];
+
+  @ApiPropertyOptional({
+    description: 'ITN-21. Present only on a clone: the original and its author',
+    type: CloneSourceResponseDto,
+  })
+  clonedFrom?: CloneSourceResponseDto;
 }

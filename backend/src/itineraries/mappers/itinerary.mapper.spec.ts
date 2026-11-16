@@ -373,3 +373,22 @@ describe('toTransportCostResponse (ITN-16)', () => {
     });
   });
 });
+
+describe('clonedFrom (ITN-21)', () => {
+  it('names the original and its author on a clone only', () => {
+    const itineraryId = new Types.ObjectId();
+    const authorId = new Types.ObjectId();
+    const clone = stored({
+      cloneSource: { itineraryId, authorId, authorName: 'Sara Ahmed' },
+    });
+
+    expect(toItineraryDetailResponse(clone).clonedFrom).toEqual({
+      itineraryId: itineraryId.toString(),
+      authorId: authorId.toString(),
+      authorName: 'Sara Ahmed',
+    });
+    expect(toItineraryDetailResponse(stored())).not.toHaveProperty(
+      'clonedFrom',
+    );
+  });
+});
