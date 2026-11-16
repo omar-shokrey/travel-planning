@@ -124,14 +124,10 @@ describe('Likes on a post (e2e, BLG-06)', () => {
   });
 
   afterAll(async () => {
-    // A like is found by its exact post and user, the unique key.
+    // Only the likes on the posts this file created, one post at a time. One
+    // call per post keeps the cleanup inside the hook timeout on a slow link.
     for (const postId of createdPostIds) {
-      for (const userId of createdUserIds) {
-        await likes.deleteOne({
-          postId: new Types.ObjectId(postId),
-          userId: new Types.ObjectId(userId),
-        });
-      }
+      await likes.deleteMany({ postId: new Types.ObjectId(postId) });
     }
     for (const id of createdPostIds) {
       await posts.findByIdAndDelete(id);
