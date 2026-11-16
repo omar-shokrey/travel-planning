@@ -7,8 +7,11 @@ import { HotelDetailsController } from './hotel-details.controller';
 import { HotelDetailsService } from './hotel-details.service';
 import { HotelPoliciesController } from './hotel-policies.controller';
 import { HotelPoliciesService } from './hotel-policies.service';
+import { HotelRoomsController } from './hotel-rooms.controller';
+import { HotelRoomsService } from './hotel-rooms.service';
 import { HotelsController } from './hotels.controller';
 import { Hotel, HotelSchema } from './models/hotel.schema';
+import { RoomNight, RoomNightSchema } from './models/room-night.schema';
 import { Room, RoomSchema } from './models/room.schema';
 import { HotelsService } from './hotels.service';
 
@@ -17,6 +20,7 @@ import { HotelsService } from './hotels.service';
     MongooseModule.forFeature([
       { name: Hotel.name, schema: HotelSchema },
       { name: Room.name, schema: RoomSchema },
+      { name: RoomNight.name, schema: RoomNightSchema },
     ]),
     ReferenceModule,
     UploadsModule,
@@ -27,9 +31,15 @@ import { HotelsService } from './hotels.service';
   controllers: [
     HotelsController,
     HotelPoliciesController,
+    HotelRoomsController,
     HotelDetailsController,
   ],
-  providers: [HotelsService, HotelDetailsService, HotelPoliciesService],
+  providers: [
+    HotelsService,
+    HotelDetailsService,
+    HotelPoliciesService,
+    HotelRoomsService,
+  ],
   exports: [HotelsService],
 })
 export class HotelsModule {}
