@@ -18,6 +18,8 @@ describe('AdminController', () => {
       resetPassword: jest.fn().mockResolvedValue(account),
       listAccounts: jest.fn().mockResolvedValue(page),
       createModerator: jest.fn().mockResolvedValue(account),
+      suspend: jest.fn().mockResolvedValue(account),
+      reactivate: jest.fn().mockResolvedValue(account),
     };
     const controller = new AdminController(
       adminService as unknown as AdminService,
@@ -65,5 +67,17 @@ describe('AdminController', () => {
       expect(await controller.createModerator(body)).toBe(account);
       expect(adminService.createModerator).toHaveBeenCalledWith(body);
     });
+  });
+
+  describe('suspend and reactivate (ACC-16)', () => {
+    it.each(['suspend', 'reactivate'] as const)(
+      'gives the service the account id to %s and returns its answer',
+      async (action) => {
+        const { adminService, controller } = setup();
+
+        expect(await controller[action](account.id)).toBe(account);
+        expect(adminService[action]).toHaveBeenCalledWith(account.id);
+      },
+    );
   });
 });
