@@ -277,15 +277,15 @@ describe('Suspend moderators and deactivate providers (e2e, ACC-15)', () => {
       expect((await hotels.findById(hotelId).lean())?.active).toBe(false);
     });
 
-    it('notifies every moderator of the hotel, with a link to it', async () => {
+    it('notifies every moderator of the hotel, without a link', async () => {
       for (const label of ['hotelModerator', 'secondHotelModerator']) {
         const told = (await notificationsOf(label)).filter(
           (notification) => notification.type === 'provider_deactivated',
         );
         expect(told).toHaveLength(1);
         expect(told[0].message).toContain(hotelName);
-        expect(told[0].linkType).toBe('hotel');
-        expect(told[0].linkId?.toString()).toBe(hotelId.toString());
+        // No link, the same as an airline: the hotel is hidden now.
+        expect(told[0].linkType).toBeUndefined();
       }
     });
 

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Logger,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -27,7 +28,6 @@ import { AdminService } from './admin.service';
 import { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
 import type { AirlinesService } from '../flights/airlines.service';
 import type { HotelsService } from '../hotels/hotels.service';
-import { NotificationLinkType } from '../notifications/enums/notification-link-type.enum';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import type { NotificationsService } from '../notifications/notifications.service';
 import { ProviderType } from '../common/enums/provider-type.enum';
@@ -367,6 +367,21 @@ describe('AdminService', () => {
       expect(account.status).toBe('suspended');
     });
 
+    it('still suspends and notifies when ending the sessions fails, and logs it', async () => {
+      const { sessions, notifications, service } = setup();
+      sessions.revokeAllOfUser.mockRejectedValue(new Error('database down'));
+      const logError = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation();
+
+      const account = await service.suspend(accountId);
+
+      expect(account.status).toBe('suspended');
+      expect(notifications.notify).toHaveBeenCalledTimes(1);
+      expect(logError).toHaveBeenCalledTimes(1);
+      logError.mockRestore();
+    });
+
     it('sends the user an account_suspended notification, after the status change', async () => {
       const { usersService, notifications, service } = setup();
 
@@ -595,7 +610,7 @@ describe('AdminService', () => {
       },
     );
 
-    it('tells every moderator of the hotel, with a link to it', async () => {
+    it('tells every moderator of the hotel, without a link, like an airline', async () => {
       const { findModeratorIdsOfProvider, notifications, service } =
         setupProvider(ProviderType.Hotel, true);
 
@@ -609,7 +624,6 @@ describe('AdminService', () => {
         moderatorIds,
         NotificationType.ProviderDeactivated,
         providerDeactivatedNotification(ProviderType.Hotel, 'Nile View'),
-        { type: NotificationLinkType.Hotel, id: providerObjectId },
       );
     });
 
@@ -625,8 +639,37 @@ describe('AdminService', () => {
         moderatorIds,
         NotificationType.ProviderDeactivated,
         providerDeactivatedNotification(ProviderType.Airline, 'Nile View'),
-        undefined,
       );
+    });
+
+    it('still answers when telling the moderators fails after the change, and logs it', async () => {
+      const { findModeratorIdsOfProvider, notifications, service } =
+        setupProvider(ProviderType.Hotel, true);
+      findModeratorIdsOfProvider.mockRejectedValue(new Error('database down'));
+      const logError = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation();
+
+      const result = await service.deactivateProvider(
+        ProviderType.Hotel,
+        providerId,
+      );
+
+      expect(result).toMatchObject({ type: 'hotel', active: false });
+      expect(notifications.notifyMany).not.toHaveBeenCalled();
+      expect(logError).toHaveBeenCalledTimes(1);
+      logError.mockRestore();
+    });
+
+    it('words the notice so it stays true after a later reactivation and promises no other notice', () => {
+      const text = providerDeactivatedNotification(
+        ProviderType.Hotel,
+        'Nile View',
+      );
+
+      expect(text).toContain('was deactivated');
+      expect(text).toContain('While it is deactivated');
+      expect(text).not.toMatch(/until it is reactivated/i);
     });
 
     it('never changes the status of the moderator accounts', async () => {

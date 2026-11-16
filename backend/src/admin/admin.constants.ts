@@ -75,11 +75,12 @@ export const PROVIDER_STATUS_CHANGED_MESSAGE =
 
 /**
  * ACC-15: the in-app notification the moderators of a deactivated hotel or
- * airline get.
+ * airline get. It describes the deactivation only, so it stays true when the
+ * provider is reactivated before it is read, and it promises no later notice.
  */
 export function providerDeactivatedNotification(
   type: ProviderType,
   name: string,
 ): string {
-  return `Your ${type} "${name}" was deactivated by an administrator. It is hidden from search and cannot be booked until it is reactivated. Existing confirmed bookings remain valid.`;
+  return `Your ${type} "${name}" was deactivated by an administrator. While it is deactivated, it is hidden from search and cannot be booked. Existing confirmed bookings remain valid.`;
 }

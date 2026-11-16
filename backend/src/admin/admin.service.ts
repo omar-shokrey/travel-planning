@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Types } from 'mongoose';
@@ -41,7 +42,6 @@ import type { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
 import type { ResetPasswordDto } from './dto/reset-password.dto';
 import type { ProviderStatusResponseDto } from './dto/provider-status-response.dto';
 import { toProviderStatusResponse } from './mappers/provider-status.mapper';
-import { NotificationLinkType } from '../notifications/enums/notification-link-type.enum';
 
 /**
  * Account management by an administrator. It never writes to the `users`
@@ -49,6 +49,8 @@ import { NotificationLinkType } from '../notifications/enums/notification-link-t
  */
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     private readonly usersService: UsersService,
     private readonly sessions: SessionsService,
@@ -170,9 +172,18 @@ export class AdminService {
       wrongStatusMessage: ACCOUNT_ALREADY_SUSPENDED_MESSAGE,
     });
     // After the status, so a failure here never leaves the account active.
-    // A session this misses (a failure, or a login racing the suspension) is
-    // refused by the guard while suspended and ended by `reactivate`.
-    await this.sessions.revokeAllOfUser(accountId, new Date());
+    // The suspension has happened, so a failure here is logged, not answered
+    // as a 500: a session this misses (a failure, or a login racing the
+    // suspension) is refused by the guard while suspended and ended by
+    // `reactivate`.
+    try {
+      await this.sessions.revokeAllOfUser(accountId, new Date());
+    } catch (error) {
+      this.logger.error(
+        `Ending the sessions of suspended account ${accountId} failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
     // `notify` never throws.
     await this.notifications.notify(
       updated._id,
@@ -266,20 +277,26 @@ export class AdminService {
   ): Promise<ProviderStatusResponseDto> {
     const updated = await this.changeProviderActive(type, id, false);
     // After the update, so a notification never announces a change that
-    // failed. `notifyMany` never throws.
-    const moderatorIds = await this.usersService.findModeratorIdsOfProvider(
-      type,
-      updated._id,
-    );
-    await this.notifications.notifyMany(
-      moderatorIds,
-      NotificationType.ProviderDeactivated,
-      providerDeactivatedNotification(type, updated.name),
-      // The notification links have no airline kind (GEN-01 data model).
-      type === ProviderType.Hotel
-        ? { type: NotificationLinkType.Hotel, id: updated._id }
-        : undefined,
-    );
+    // failed. The change has happened, so a failure to tell the moderators is
+    // logged, not answered as a 500. No link, for hotels and airlines alike:
+    // the provider is now hidden, and notification links have no airline
+    // kind (GEN-01), so both kinds get the same notice.
+    try {
+      const moderatorIds = await this.usersService.findModeratorIdsOfProvider(
+        type,
+        updated._id,
+      );
+      await this.notifications.notifyMany(
+        moderatorIds,
+        NotificationType.ProviderDeactivated,
+        providerDeactivatedNotification(type, updated.name),
+      );
+    } catch (error) {
+      this.logger.error(
+        `Telling the moderators of ${type} ${id} about its deactivation failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
     return toProviderStatusResponse(type, updated);
   }
 
