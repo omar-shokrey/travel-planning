@@ -15,3 +15,7 @@ export const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
 
 /** A country code as in countries.csv, for example EG. */
 export const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/;
+
+/** The answer when an itinerary changed under a request that edits it by position. */
+export const ITINERARY_CHANGED_MESSAGE =
+  'The itinerary was changed by another request. Reload it and try again.';
