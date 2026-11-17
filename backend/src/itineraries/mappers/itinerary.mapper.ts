@@ -165,5 +165,14 @@ export function toItineraryDetailResponse(
       toItineraryDayResponse(day, index, itinerary.startDate),
     ),
     cityGroups: toCityGroups(itinerary.days, itinerary.startDate),
+    ...(itinerary.cloneSource
+      ? {
+          clonedFrom: {
+            itineraryId: itinerary.cloneSource.itineraryId.toString(),
+            authorId: itinerary.cloneSource.authorId.toString(),
+            authorName: itinerary.cloneSource.authorName,
+          },
+        }
+      : {}),
   };
 }
