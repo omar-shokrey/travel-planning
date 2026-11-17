@@ -619,6 +619,24 @@ describe('HotelsService (HTL-01)', () => {
     });
   });
 
+  describe('setRating (HTL-23)', () => {
+    it('stores the average and the count in one update', async () => {
+      const id = new Types.ObjectId();
+      const { hotelsModel, service } = setup();
+      const exec = jest.fn().mockResolvedValue({ modifiedCount: 1 });
+      const updateOne = jest.fn().mockReturnValue({ exec });
+      Object.assign(hotelsModel, { updateOne });
+
+      await service.setRating(id, 4.33, 3);
+
+      expect(updateOne).toHaveBeenCalledWith(
+        { _id: id },
+        { $set: { averageRating: 4.33, ratingCount: 3 } },
+      );
+      expect(exec).toHaveBeenCalled();
+    });
+  });
+
   describe('addPhotos', () => {
     it('checks the limit before saving and atomically appends filenames', async () => {
       const hotel = makeHotel({ photos: ['existing.jpg'] });

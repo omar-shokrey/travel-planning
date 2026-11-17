@@ -323,6 +323,21 @@ export class HotelsService {
   }
 
   /**
+   * HTL-23: stores the hotel's rating summary after a review was added,
+   * edited or deleted. The reviews module computes it from all the reviews
+   * of the hotel. Never exposed by a controller.
+   */
+  async setRating(
+    hotelId: Types.ObjectId,
+    averageRating: number,
+    ratingCount: number,
+  ): Promise<void> {
+    await this.hotels
+      .updateOne({ _id: hotelId }, { $set: { averageRating, ratingCount } })
+      .exec();
+  }
+
+  /**
    * Deactivates or reactivates the hotel, for the admin (ACC-15). It changes
    * `active` only when it is not already that value, in one update, so two
    * admins at once cannot both succeed. `null` when the hotel is missing or
