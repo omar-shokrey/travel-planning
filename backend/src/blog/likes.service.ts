@@ -89,10 +89,6 @@ export class LikesService {
   }
 
   /**
-   * A draft is private to its author, so for everyone else it does not exist:
-   * a missing post and a draft both answer 404.
-   */
-  /**
    * 404 unless the post is published and not hidden by an admin (GEN-10);
    * its author still reaches their own hidden post. A guest (no `viewerId`)
    * never does, so a hidden post answers exactly like a missing one.
