@@ -9,6 +9,7 @@ import { BudgetCategory } from '../enums/budget-category.enum';
 import {
   dayCosts,
   dayDate,
+  toActivityResponse,
   toCityGroups,
   toItineraryDetailResponse,
   toItineraryResponse,
@@ -121,18 +122,21 @@ describe('toItineraryDetailResponse', () => {
         date: '2026-12-30',
         cityId: 'cairo',
         notes: 'Arrive in the evening',
+        activities: [],
       },
       {
         id: itinerary.days[1]._id.toString(),
         dayNumber: 2,
         date: '2026-12-31',
         cityId: 'cairo',
+        activities: [],
       },
       {
         id: itinerary.days[2]._id.toString(),
         dayNumber: 3,
         date: '2027-01-01',
         cityId: 'dubai',
+        activities: [],
       },
     ]);
   });
@@ -143,6 +147,7 @@ describe('toItineraryDetailResponse', () => {
 
     expect(day).not.toHaveProperty('notes');
     expect(Object.keys(day).sort()).toEqual([
+      'activities',
       'cityId',
       'date',
       'dayNumber',
@@ -273,5 +278,62 @@ describe('dayCosts and totalPerCurrency', () => {
       { amount: 2, currency: 'EGP' },
       { amount: 4, currency: 'USD' },
     ]);
+  });
+});
+
+describe('toActivityResponse (ITN-10)', () => {
+  it('returns every field an activity has, with its id', () => {
+    const [day] = stored({
+      days: [
+        {
+          cityId: 'cairo',
+          activities: [
+            {
+              name: 'Museum',
+              description: 'Two hours',
+              time: '09:30',
+              cost: 20000,
+              currency: 'EGP',
+            },
+          ],
+        },
+      ],
+    }).days;
+
+    expect(toActivityResponse(day.activities[0])).toEqual({
+      id: day.activities[0]._id.toString(),
+      name: 'Museum',
+      description: 'Two hours',
+      time: '09:30',
+      cost: 20000,
+      currency: 'EGP',
+    });
+  });
+
+  it('leaves out the fields an activity does not have, and the images', () => {
+    const [day] = stored({
+      days: [{ cityId: 'cairo', activities: [{ name: 'Walk' }] }],
+    }).days;
+
+    expect(toActivityResponse(day.activities[0])).toEqual({
+      id: day.activities[0]._id.toString(),
+      name: 'Walk',
+    });
+  });
+
+  it('keeps a cost of 0', () => {
+    const [day] = stored({
+      days: [
+        {
+          cityId: 'cairo',
+          activities: [{ name: 'Park', cost: 0, currency: 'EGP' }],
+        },
+      ],
+    }).days;
+
+    expect(toActivityResponse(day.activities[0])).toMatchObject({
+      cost: 0,
+      currency: 'EGP',
+    });
   });
 });

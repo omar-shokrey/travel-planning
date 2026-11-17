@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceModule } from '../reference/reference.module';
+import { ActivitiesController } from './activities.controller';
+import { ActivitiesService } from './activities.service';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
 import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
@@ -12,8 +14,8 @@ import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
     ]),
     ReferenceModule,
   ],
-  controllers: [ItinerariesController],
-  providers: [ItinerariesService],
+  controllers: [ItinerariesController, ActivitiesController],
+  providers: [ItinerariesService, ActivitiesService],
   exports: [ItinerariesService],
 })
 export class ItinerariesModule {}

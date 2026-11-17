@@ -68,3 +68,14 @@ Owner: Ali Ghayesh (M8). Requirements: ITN-01 to ITN-26. Routes: `/api/itinerari
 - **`cityGroups` is part of the itinerary detail** (`GET /api/itineraries/:id` and every route that returns the itinerary with its days). Consecutive days in the same city form one group with `firstDayNumber`, `lastDayNumber`, `startDate`, `endDate`, `dayCount` and `budgetSubtotal`. A city visited twice with other days in between gives two groups.
 - **Computed when read, never stored**, so adding, editing, moving (ITN-08) or deleting (ITN-07) a day regroups at once. Hotel search for a group (ITN-25) can use `startDate` and the day after `endDate` as check-in and check-out.
 - **The subtotal is one amount per currency.** It adds activity costs (ITN-10), budget entries (ITN-14) and transport costs (ITN-16) of the group's days, sorted by currency code. Entries keep their own currency; one total in the user's currency comes with ITN-18. An activity without a cost adds nothing.
+
+## ITN-10: activities per day
+
+- **Routes as in section 8 of the project description**: `POST /api/itineraries/:id/days/:dayId/activities` adds one; `PATCH /api/activities/:id` and `DELETE /api/activities/:id` work by the activity's own id. All are for the owner only and return the itinerary with its days, so the day list and the city group subtotals (ITN-09) are always current.
+- **`ActivitiesService` and `ActivitiesController` are separate files**, so the itinerary service does not grow with every embedded list. They reuse `findOwnedOrThrow()`, `findDayOrThrow()`, `assertCurrencySupported()` and `saveOrConflict()` from `ItinerariesService`.
+- **An activity is found by its id inside the days** (`days.activities._id`): 404 if no itinerary has it, then 403 if the itinerary is not the caller's.
+- **A cost and its currency go together.** The DTO refuses one without the other, and an edit that would leave only one answers 400. The currency must be supported: one of the currency codes of the seeded countries (GEN-12). A cost is whole minor units, 0 or more. An activity without a cost adds nothing to the budget; its cost counts under Activities (ITN-14).
+- **Limits not in the workbook**: name at most 100 characters, description at most 1000, so one itinerary document stays small.
+- **`null` in an edit answers 400** (`assertNoNullFields`), as the hotel edit does (HTL-01). An empty description or time removes it. A cost cannot be removed once set; setting it to 0 makes it add nothing.
+- **Deleting writes a new list for the day** instead of a `$pull`, and every change goes through `saveOrConflict()`, so a change that raced with a delete or a move of a day (ITN-07, ITN-08) answers 409 instead of editing the wrong day.
+- **Images (ITN-12) are not in the response yet.** `images` is in the schema; ITN-12 adds the routes and the URLs, and must delete an activity's files when the activity or its day is deleted.

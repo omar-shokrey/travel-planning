@@ -453,6 +453,7 @@ describe('ItinerariesService', () => {
           date: '2026-12-21',
           cityId: 'dubai',
           notes: 'Fly in the morning',
+          activities: [],
         },
       ]);
     });

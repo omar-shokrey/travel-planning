@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ActivityResponseDto } from './activity-response.dto';
 
 /** One day of an itinerary as the API returns it. */
 export class ItineraryDayResponseDto {
@@ -22,4 +23,11 @@ export class ItineraryDayResponseDto {
 
   @ApiPropertyOptional({ example: 'Arrive in the evening' })
   notes?: string;
+
+  @ApiProperty({
+    description:
+      'ITN-10. The activities of the day, in the order they were added',
+    type: [ActivityResponseDto],
+  })
+  activities: ActivityResponseDto[];
 }
