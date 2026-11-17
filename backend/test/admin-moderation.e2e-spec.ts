@@ -174,6 +174,9 @@ describe('Admin report handling and moderation (e2e, GEN-10)', () => {
       // BLG-05/06 with GEN-10: hidden, then deleted with its comments and likes.
       'pEngageHide',
       'pEngageDelete',
+      // Comments reported (GEN-09) and moderated (GEN-10).
+      'pComments',
+      'pCommentsHiddenPost',
     ];
     const insertedPosts = await posts.insertMany(
       postLabels.map((label) => ({
@@ -331,17 +334,38 @@ describe('Admin report handling and moderation (e2e, GEN-10)', () => {
     });
 
     it('pages through the reports (GEN-05)', async () => {
+      // Compared with the whole list, so open reports that other suites or an
+      // interrupted run left in the shared test database cannot change it.
+      const all: Row[] = [];
+      let page = 1;
+      let items: Row[];
+      do {
+        const response = await call(
+          'admin',
+          'get',
+          `${REPORTS}?page=${page}&limit=50`,
+        );
+        expect(response.status).toBe(200);
+        items = response.body.items as Row[];
+        all.push(...items);
+        page += 1;
+      } while (items.length === 50);
+
       const first = await call('admin', 'get', `${REPORTS}?page=1&limit=2`);
       const second = await call('admin', 'get', `${REPORTS}?page=2&limit=2`);
 
-      expect(first.body.items.map((row: Row) => row.id)).toEqual([
-        id('rDismiss'),
-        id('rDismissOther'),
-      ]);
-      expect(second.body.items.map((row: Row) => row.id)).toEqual([
-        id('rHide'),
-        id('rHideOther'),
-      ]);
+      const idsOf = (rows: Row[]) => rows.map((row) => row.id);
+      expect(idsOf(first.body.items)).toEqual(idsOf(all.slice(0, 2)));
+      expect(idsOf(second.body.items)).toEqual(idsOf(all.slice(2, 4)));
+      // This suite's four oldest reports come in this order (oldest first).
+      const positions = [
+        'rDismiss',
+        'rDismissOther',
+        'rHide',
+        'rHideOther',
+      ].map((label) => all.findIndex((row) => row.id === id(label)));
+      expect(positions).not.toContain(-1);
+      expect(positions).toEqual([...positions].sort((a, b) => a - b));
       expect(second.body.meta).toMatchObject({ page: 2, limit: 2 });
       expect(second.body.meta.total).toBeGreaterThanOrEqual(
         createdReportIds.length,
@@ -350,7 +374,7 @@ describe('Admin report handling and moderation (e2e, GEN-10)', () => {
 
     it.each([
       ['status=closed', 'status'],
-      ['targetType=comment', 'targetType'],
+      ['targetType=review', 'targetType'],
       ['limit=51', 'limit'],
       ['reporterId=x', 'reporterId'],
     ])('answers 400 for %s', async (query, field) => {
@@ -690,11 +714,13 @@ describe('Admin report handling and moderation (e2e, GEN-10)', () => {
     });
 
     it('answers 400 for an unknown content type or a bad id', async () => {
-      const badType = await moderate('comment', id('pDismiss'), {
+      const badType = await moderate('review', id('pDismiss'), {
         moderation: 'hidden',
       });
       expect(badType.status).toBe(400);
-      expect(badType.body.message).toBe('type must be one of: post, itinerary');
+      expect(badType.body.message).toBe(
+        'type must be one of: post, itinerary, comment',
+      );
 
       expect((await remove('post', 'abc')).status).toBe(400);
     });
@@ -773,6 +799,257 @@ describe('Admin report handling and moderation (e2e, GEN-10)', () => {
 
       expect(await comments.countDocuments(filter)).toBe(0);
       expect(await likes.countDocuments(filter)).toBe(0);
+    });
+  });
+
+  describe('comments: reported (GEN-09) and moderated (GEN-10)', () => {
+    const commentOn = async (who: string, postId: string, body: string) => {
+      const response = await call(
+        who,
+        'post',
+        `/api/posts/${postId}/comments`,
+      ).send({ body });
+      expect(response.status).toBe(201);
+      return response.body.id as string;
+    };
+    const listedIds = async (postId: string) => {
+      const response = await call(
+        undefined,
+        'get',
+        `/api/posts/${postId}/comments?limit=50`,
+      );
+      expect(response.status).toBe(200);
+      return (response.body.items as { id: string }[]).map((item) => item.id);
+    };
+    const commentCount = async (postId: string) =>
+      (await posts.findById(postId).select('commentCount').lean().exec())
+        ?.commentCount;
+    /** A report through GEN-09; a 201 is kept for the cleanup. */
+    const report = async (who: string | undefined, commentId: string) => {
+      const response = await call(who, 'post', '/api/reports').send({
+        targetType: 'comment',
+        targetId: commentId,
+        reason: 'Rude comment',
+      });
+      if (response.status === 201) {
+        createdReportIds.push(response.body.id as string);
+      }
+      return response;
+    };
+
+    beforeAll(async () => {
+      ids.set('cHide', await commentOn('viewer', id('pComments'), 'Hide me'));
+      ids.set('cDelete', await commentOn('viewer', id('pComments'), 'Bye'));
+      ids.set(
+        'cDeleteHidden',
+        await commentOn('viewer', id('pComments'), 'Hidden, then deleted'),
+      );
+      ids.set(
+        'cOnHiddenPost',
+        await commentOn('viewer', id('pCommentsHiddenPost'), 'On a post'),
+      );
+    });
+
+    it('a user reports a comment of someone else: 201, open (GEN-09)', async () => {
+      const response = await report('reporter1', id('cHide'));
+
+      expect(response.status).toBe(201);
+      expect(response.body).toMatchObject({
+        targetType: 'comment',
+        targetId: id('cHide'),
+        status: 'open',
+      });
+      ids.set('rComment', response.body.id as string);
+    });
+
+    it('refuses my own comment with 400', async () => {
+      const response = await report('viewer', id('cHide'));
+
+      expect(response.status).toBe(400);
+      expect(response.body.message).toBe('You cannot report your own content');
+    });
+
+    it('answers 404 for a comment that does not exist', async () => {
+      const response = await report(
+        'reporter1',
+        new Types.ObjectId().toString(),
+      );
+
+      expect(response.status).toBe(404);
+      expect(response.body.message).toBe('Comment not found');
+    });
+
+    it('answers 401 to a guest', async () => {
+      expect((await report(undefined, id('cHide'))).status).toBe(401);
+    });
+
+    it('answers 404 for a comment on a hidden post, except to the post author', async () => {
+      expect(
+        (
+          await moderate('post', id('pCommentsHiddenPost'), {
+            moderation: 'hidden',
+          })
+        ).status,
+      ).toBe(200);
+
+      expect((await report('reporter1', id('cOnHiddenPost'))).status).toBe(404);
+      // The author of the post still sees it, so the comment can be reported.
+      expect((await report('author', id('cOnHiddenPost'))).status).toBe(201);
+    });
+
+    it('a non-admin gets 403 on the comment routes', async () => {
+      const url = `/api/admin/content/comment/${id('cHide')}`;
+      expect(
+        (await call('viewer', 'patch', url).send({ moderation: 'hidden' }))
+          .status,
+      ).toBe(403);
+      expect((await call('moderator', 'delete', url)).status).toBe(403);
+    });
+
+    it('hiding a comment takes it off the list and the count, and resolves its open reports as hidden', async () => {
+      const postId = id('pComments');
+      expect(await commentCount(postId)).toBe(3);
+
+      const response = await moderate('comment', id('cHide'), {
+        moderation: 'hidden',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        type: 'comment',
+        id: id('cHide'),
+        moderation: 'hidden',
+      });
+      expect(await listedIds(postId)).not.toContain(id('cHide'));
+      expect(await commentCount(postId)).toBe(2);
+      expect((await storedReport('rComment'))?.status).toBe(
+        ReportStatus.Hidden,
+      );
+      // Others no longer see it; its author still edits it (BLG-07).
+      expect((await report('reporter2', id('cHide'))).status).toBe(404);
+      const edit = await call(
+        'viewer',
+        'patch',
+        `/api/comments/${id('cHide')}`,
+      ).send({ body: 'Edited while hidden' });
+      expect(edit.status).toBe(200);
+      expect(edit.body.moderation).toBe('hidden');
+    });
+
+    it('a second hide answers 409 and does not count twice', async () => {
+      const response = await moderate('comment', id('cHide'), {
+        moderation: 'hidden',
+      });
+
+      expect(response.status).toBe(409);
+      expect(response.body.message).toBe('The comment is already hidden');
+      expect(await commentCount(id('pComments'))).toBe(2);
+    });
+
+    it('an admin still sees hidden content; others get 403, missing content 404', async () => {
+      const view = (who: string, type: string, targetId: string) =>
+        call(who, 'get', `/api/admin/content/${type}/${targetId}`);
+
+      const comment = await view('admin', 'comment', id('cHide'));
+      expect(comment.status).toBe(200);
+      expect(comment.body).toMatchObject({
+        type: 'comment',
+        id: id('cHide'),
+        moderation: 'hidden',
+        comment: { id: id('cHide'), body: 'Edited while hidden' },
+      });
+
+      const post = await view('admin', 'post', id('pCommentsHiddenPost'));
+      expect(post.status).toBe(200);
+      expect(post.body).toMatchObject({
+        type: 'post',
+        moderation: 'hidden',
+        post: { id: id('pCommentsHiddenPost') },
+      });
+
+      // Hidden above through its report (rItHide).
+      const itinerary = await view('admin', 'itinerary', id('iHide'));
+      expect(itinerary.status).toBe(200);
+      expect(itinerary.body).toMatchObject({
+        type: 'itinerary',
+        moderation: 'hidden',
+        itinerary: { id: id('iHide'), days: expect.any(Array) },
+      });
+
+      expect((await view('viewer', 'comment', id('cHide'))).status).toBe(403);
+      const missing = await view(
+        'admin',
+        'comment',
+        new Types.ObjectId().toString(),
+      );
+      expect(missing.status).toBe(404);
+      expect(missing.body.message).toBe('Comment not found');
+    });
+
+    it('showing it again puts it back on the list and raises the count', async () => {
+      const response = await moderate('comment', id('cHide'), {
+        moderation: 'visible',
+      });
+
+      expect(response.status).toBe(200);
+      expect(await listedIds(id('pComments'))).toContain(id('cHide'));
+      expect(await commentCount(id('pComments'))).toBe(3);
+    });
+
+    it('deleting a visible comment removes it and lowers the count', async () => {
+      const response = await remove('comment', id('cDelete'));
+
+      expect(response.status).toBe(204);
+      expect(await comments.findById(id('cDelete')).lean().exec()).toBeNull();
+      expect(await listedIds(id('pComments'))).not.toContain(id('cDelete'));
+      expect(await commentCount(id('pComments'))).toBe(2);
+      expect((await remove('comment', id('cDelete'))).status).toBe(404);
+    });
+
+    it('deleting a hidden comment leaves the count: it was taken off when hidden', async () => {
+      expect(
+        (
+          await moderate('comment', id('cDeleteHidden'), {
+            moderation: 'hidden',
+          })
+        ).status,
+      ).toBe(200);
+      expect(await commentCount(id('pComments'))).toBe(1);
+
+      expect((await remove('comment', id('cDeleteHidden'))).status).toBe(204);
+      expect(await commentCount(id('pComments'))).toBe(1);
+    });
+
+    it('answers 404 for a comment that does not exist', async () => {
+      const missing = new Types.ObjectId().toString();
+      const response = await moderate('comment', missing, {
+        moderation: 'hidden',
+      });
+
+      expect(response.status).toBe(404);
+      expect(response.body.message).toBe('Comment not found');
+    });
+
+    it('audits every comment action with the target type comment (GEN-07)', async () => {
+      const response = await call(
+        'admin',
+        'get',
+        `/api/admin/audit-logs?adminId=${id('admin')}&targetType=comment&limit=50`,
+      );
+
+      expect(response.status).toBe(200);
+      const actions = (
+        response.body.items as { action: string; targetId: string }[]
+      ).map((item) => `${item.action} ${item.targetId}`);
+      expect(actions).toEqual(
+        expect.arrayContaining([
+          `hide_content ${id('cHide')}`,
+          `show_content ${id('cHide')}`,
+          `delete_content ${id('cDelete')}`,
+          `hide_content ${id('cDeleteHidden')}`,
+          `delete_content ${id('cDeleteHidden')}`,
+        ]),
+      );
     });
   });
 

@@ -19,14 +19,15 @@ export class CreateReportDto {
   @ApiProperty({
     enum: ReportTargetType,
     example: ReportTargetType.Post,
-    description: 'Required. What is reported: a blog post or an itinerary.',
+    description:
+      'Required. What is reported: a blog post, a comment on a post, or an itinerary.',
   })
   @IsEnum(ReportTargetType)
   targetType: ReportTargetType;
 
   @ApiProperty({
     example: '6745a1b2c3d4e5f6a7b8c9d0',
-    description: 'Required. The id of the post or itinerary.',
+    description: 'Required. The id of the post, comment or itinerary.',
   })
   @IsMongoId()
   targetId: string;

@@ -118,6 +118,38 @@ describe('ItinerariesService', () => {
     const id = new Types.ObjectId().toString();
 
     it.each([
+      [ItineraryModeration.Hidden, true],
+      [ItineraryModeration.Visible, false],
+    ])(
+      'findForAdmin: any itinerary with its days, moderation %p is hidden=%p',
+      async (moderation, hidden) => {
+        const itinerary = stored();
+        itinerary.moderation = moderation;
+        const spy = jest
+          .spyOn(ItineraryModel, 'findById')
+          .mockReturnValue(query(itinerary) as never);
+
+        const found = await service.findForAdmin(id);
+
+        expect(spy).toHaveBeenCalledWith(id);
+        expect(found?.hidden).toBe(hidden);
+        expect(found?.itinerary).toMatchObject({
+          id: itinerary._id.toString(),
+          ownerId: itinerary.ownerId.toString(),
+          days: expect.any(Array),
+        });
+      },
+    );
+
+    it('findForAdmin: null when there is no such itinerary', async () => {
+      jest
+        .spyOn(ItineraryModel, 'findById')
+        .mockReturnValue(query(null) as never);
+
+      expect(await service.findForAdmin(id)).toBeNull();
+    });
+
+    it.each([
       [1, true],
       [0, false],
     ])('existsById: a count of %p is %p', async (count, expected) => {

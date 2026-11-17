@@ -35,12 +35,16 @@ import { AdminReportResponseDto } from '../reports/dto/admin-report-response.dto
 import { ReportTargetType } from '../reports/enums/report-target-type.enum';
 import { CONTENT_TYPE_MESSAGE } from './admin-moderation.constants';
 import { AdminModerationService } from './admin-moderation.service';
+import { AdminContentResponseDto } from './dto/admin-content-response.dto';
 import { ContentModerationResponseDto } from './dto/content-moderation-response.dto';
 import { ListReportsQueryDto } from './dto/list-reports-query.dto';
 import { ModerateContentDto } from './dto/moderate-content.dto';
 import { ResolveReportDto } from './dto/resolve-report.dto';
 
-/** `:type` of the content routes (GEN-10): `post` or `itinerary`, else 400. */
+/**
+ * `:type` of the content routes (GEN-10): `post`, `itinerary` or `comment`,
+ * else 400.
+ */
 export const CONTENT_TYPE_PIPE = new ParseEnumPipe(ReportTargetType, {
   exceptionFactory: () => new BadRequestException(CONTENT_TYPE_MESSAGE),
 });
@@ -55,7 +59,7 @@ const ApiContentParams = () =>
     }),
     ApiParam({
       name: 'id',
-      description: 'The id of the post or itinerary',
+      description: 'The id of the post, comment or itinerary',
       example: '6745a1b2c3d4e5f6a7b8c9d0',
     }),
   );
@@ -128,11 +132,33 @@ export class AdminModerationController {
     return this.moderation.resolveReport(id, dto.action, adminId);
   }
 
+  @Get('content/:type/:id')
+  @ApiOperation({
+    summary: 'View a post, a comment or an itinerary (GEN-10)',
+    description:
+      'Admin only. Any post (a draft too), comment or itinerary, whoever wrote it and hidden or not: hidden content is visible only to its author and admins. Use it to read reported content (`targetType` and `targetId` of a report) before resolving the report. `moderation` says whether it is hidden; exactly one of `post`, `comment` and `itinerary` is set.',
+  })
+  @ApiContentParams()
+  @ApiOkResponse({ type: AdminContentResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      '`type` is not `post`, `itinerary` or `comment`, or the id is not a valid id',
+  })
+  @ApiNotFoundResponse({
+    description: 'Post not found, comment not found, or itinerary not found',
+  })
+  viewContent(
+    @Param('type', CONTENT_TYPE_PIPE) type: ReportTargetType,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ): Promise<AdminContentResponseDto> {
+    return this.moderation.viewContent(type, id);
+  }
+
   @Patch('content/:type/:id')
   @ApiOperation({
-    summary: 'Hide or show a post or an itinerary (GEN-10)',
+    summary: 'Hide or show a post, a comment or an itinerary (GEN-10)',
     description:
-      'Admin only. `moderation: hidden` hides the content from everyone but its author and admins, and resolves its open reports as `hidden`. `moderation: visible` shows it again (to undo a mistaken hide); resolved reports stay resolved. Section 8 of the project description has no route for this, so it follows the `DELETE` route below.',
+      'Admin only. `moderation: hidden` hides the content from everyone but its author and admins, and resolves its open reports as `hidden`. `moderation: visible` shows it again (to undo a mistaken hide); resolved reports stay resolved. A hidden comment is left out of the comment list of its post for everyone and out of the `commentCount` of the post; its author can still edit or delete it. Section 8 of the project description has no route for this, so it follows the `DELETE` route below.',
   })
   @ApiContentParams()
   @ApiOkResponse({
@@ -141,10 +167,10 @@ export class AdminModerationController {
   })
   @ApiBadRequestResponse({
     description:
-      '`type` is not `post` or `itinerary`, the id is not a valid id, `moderation` is missing, `null` or unknown, or the body has a field that is not allowed',
+      '`type` is not `post`, `itinerary` or `comment`, the id is not a valid id, `moderation` is missing, `null` or unknown, or the body has a field that is not allowed',
   })
   @ApiNotFoundResponse({
-    description: 'Post not found, or itinerary not found',
+    description: 'Post not found, comment not found, or itinerary not found',
   })
   @ApiConflictResponse({
     description: 'The content already has this moderation state',
@@ -161,18 +187,18 @@ export class AdminModerationController {
   @Delete('content/:type/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
-    summary: 'Delete a post or an itinerary (GEN-10)',
+    summary: 'Delete a post, a comment or an itinerary (GEN-10)',
     description:
-      'Admin only. Deletes any post or itinerary and its image files, whoever wrote it. Its open reports are resolved as `deleted`; reports are kept as history. Clones of a deleted itinerary are not affected.',
+      'Admin only. Deletes any post, comment or itinerary and its image files, whoever wrote it. Deleting a visible comment lowers the `commentCount` of the post by one. Its open reports are resolved as `deleted`; reports are kept as history. Clones of a deleted itinerary are not affected.',
   })
   @ApiContentParams()
   @ApiNoContentResponse({ description: 'The content was deleted' })
   @ApiBadRequestResponse({
     description:
-      '`type` is not `post` or `itinerary`, or the id is not a valid id',
+      '`type` is not `post`, `itinerary` or `comment`, or the id is not a valid id',
   })
   @ApiNotFoundResponse({
-    description: 'Post not found, or itinerary not found',
+    description: 'Post not found, comment not found, or itinerary not found',
   })
   deleteContent(
     @Param('type', CONTENT_TYPE_PIPE) type: ReportTargetType,

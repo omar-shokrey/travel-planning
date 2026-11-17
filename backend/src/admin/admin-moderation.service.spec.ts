@@ -1,6 +1,7 @@
 import type { AuditService } from '../audit/audit.service';
 import { ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
+import type { CommentsService } from '../blog/comments.service';
 import type { PostsService } from '../blog/posts.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import type { ItinerariesService } from '../itineraries/itineraries.service';
@@ -62,12 +63,20 @@ function setup(targetType = ReportTargetType.Post) {
       ),
   };
   const content = () => ({
+    findForAdmin: jest.fn().mockResolvedValue(null),
     existsById: jest.fn().mockResolvedValue(true),
     setHidden: jest.fn().mockResolvedValue(true),
     removeByAdmin: jest.fn().mockResolvedValue(['a.jpg']),
   });
   const posts = content();
   const itineraries = content();
+  // A comment has no images: `removeByAdmin` answers true or false.
+  const comments = {
+    findForAdmin: jest.fn().mockResolvedValue(null),
+    existsById: jest.fn().mockResolvedValue(true),
+    setHidden: jest.fn().mockResolvedValue(true),
+    removeByAdmin: jest.fn().mockResolvedValue(true),
+  };
   const uploads = { deleteImage: jest.fn().mockResolvedValue(undefined) };
   // GEN-07: `record` never throws.
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
@@ -77,8 +86,9 @@ function setup(targetType = ReportTargetType.Post) {
     itineraries as unknown as ItinerariesService,
     uploads as unknown as UploadsService,
     audit as unknown as AuditService,
+    comments as unknown as CommentsService,
   );
-  return { service, reports, posts, itineraries, uploads, audit };
+  return { service, reports, posts, itineraries, comments, uploads, audit };
 }
 
 describe('AdminModerationService (GEN-10)', () => {
@@ -594,6 +604,222 @@ describe('AdminModerationService (GEN-10)', () => {
         service.deleteContent(ReportTargetType.Post, TARGET.toString(), ADMIN),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(audit.record).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('viewContent (GEN-10)', () => {
+    const ID = TARGET.toString();
+
+    it('shows a hidden post to the admin, in the blog response shape', async () => {
+      const { service, posts } = setup();
+      const post = { id: ID, title: 'Hidden' };
+      posts.findForAdmin.mockResolvedValue({ post, hidden: true });
+
+      expect(await service.viewContent(ReportTargetType.Post, ID)).toEqual({
+        type: ReportTargetType.Post,
+        id: ID,
+        moderation: ContentModeration.Hidden,
+        post,
+      });
+      expect(posts.findForAdmin).toHaveBeenCalledWith(ID);
+    });
+
+    it('shows a comment with its own moderation', async () => {
+      const { service, comments } = setup();
+      const comment = { id: ID, body: 'Rude', moderation: 'hidden' };
+      comments.findForAdmin.mockResolvedValue(comment);
+
+      expect(await service.viewContent(ReportTargetType.Comment, ID)).toEqual({
+        type: ReportTargetType.Comment,
+        id: ID,
+        moderation: ContentModeration.Hidden,
+        comment,
+      });
+    });
+
+    it('shows a visible itinerary with its days', async () => {
+      const { service, itineraries } = setup();
+      const itinerary = { id: ID, days: [] };
+      itineraries.findForAdmin.mockResolvedValue({ itinerary, hidden: false });
+
+      expect(await service.viewContent(ReportTargetType.Itinerary, ID)).toEqual(
+        {
+          type: ReportTargetType.Itinerary,
+          id: ID,
+          moderation: ContentModeration.Visible,
+          itinerary,
+        },
+      );
+    });
+
+    it.each([
+      [ReportTargetType.Post, 'Post not found'],
+      [ReportTargetType.Comment, 'Comment not found'],
+      [ReportTargetType.Itinerary, 'Itinerary not found'],
+    ])('answers 404 for a missing %s', async (type, message) => {
+      const { service } = setup();
+
+      await expect(service.viewContent(type, ID)).rejects.toThrow(
+        new NotFoundException(message),
+      );
+    });
+  });
+
+  describe('comments (GEN-10)', () => {
+    const COMMENT = TARGET.toString();
+
+    it('hides a comment through CommentsService, resolves its open reports as hidden and audits it', async () => {
+      const { service, comments, posts, reports, audit } = setup();
+
+      expect(
+        await service.moderateContent(
+          ReportTargetType.Comment,
+          COMMENT,
+          ContentModeration.Hidden,
+          ADMIN,
+        ),
+      ).toEqual({
+        type: ReportTargetType.Comment,
+        id: COMMENT,
+        moderation: ContentModeration.Hidden,
+      });
+      expect(comments.setHidden).toHaveBeenCalledWith(COMMENT, true);
+      expect(posts.setHidden).not.toHaveBeenCalled();
+      expect(reports.resolveOpenOfTarget).toHaveBeenCalledWith(
+        ReportTargetType.Comment,
+        COMMENT,
+        ReportStatus.Hidden,
+        ADMIN,
+        expect.any(Date),
+      );
+      expect(audit.record).toHaveBeenCalledWith({
+        adminId: ADMIN,
+        action: 'hide_content',
+        targetType: 'comment',
+        targetId: COMMENT,
+      });
+    });
+
+    it('shows a hidden comment again and audits show_content', async () => {
+      const { service, comments, reports, audit } = setup();
+
+      await service.moderateContent(
+        ReportTargetType.Comment,
+        COMMENT,
+        ContentModeration.Visible,
+        ADMIN,
+      );
+
+      expect(comments.setHidden).toHaveBeenCalledWith(COMMENT, false);
+      expect(reports.resolveOpenOfTarget).not.toHaveBeenCalled();
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'show_content',
+          targetType: 'comment',
+        }),
+      );
+    });
+
+    it('answers 409 when the comment is already hidden, 404 when it does not exist', async () => {
+      const { service, comments, audit } = setup();
+      comments.setHidden.mockResolvedValue(false);
+
+      await expect(
+        service.moderateContent(
+          ReportTargetType.Comment,
+          COMMENT,
+          ContentModeration.Hidden,
+          ADMIN,
+        ),
+      ).rejects.toThrow(new ConflictException('The comment is already hidden'));
+
+      comments.existsById.mockResolvedValue(false);
+      await expect(
+        service.moderateContent(
+          ReportTargetType.Comment,
+          COMMENT,
+          ContentModeration.Hidden,
+          ADMIN,
+        ),
+      ).rejects.toThrow(new NotFoundException('Comment not found'));
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('deletes a comment, resolves its open reports as deleted, audits it and deletes no image', async () => {
+      const { service, comments, reports, uploads, audit } = setup();
+
+      await service.deleteContent(ReportTargetType.Comment, COMMENT, ADMIN);
+
+      expect(comments.removeByAdmin).toHaveBeenCalledWith(COMMENT);
+      expect(reports.resolveOpenOfTarget).toHaveBeenCalledWith(
+        ReportTargetType.Comment,
+        COMMENT,
+        ReportStatus.Deleted,
+        ADMIN,
+        expect.any(Date),
+      );
+      expect(audit.record).toHaveBeenCalledWith({
+        adminId: ADMIN,
+        action: 'delete_content',
+        targetType: 'comment',
+        targetId: COMMENT,
+      });
+      expect(uploads.deleteImage).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for a comment that does not exist, and records nothing', async () => {
+      const { service, comments, reports, audit } = setup();
+      comments.removeByAdmin.mockResolvedValue(false);
+
+      await expect(
+        service.deleteContent(ReportTargetType.Comment, COMMENT, ADMIN),
+      ).rejects.toThrow(new NotFoundException('Comment not found'));
+      expect(reports.resolveOpenOfTarget).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('resolves a report of a comment with hide, through CommentsService', async () => {
+      const { service, comments, reports, audit } = setup(
+        ReportTargetType.Comment,
+      );
+
+      const result = await service.resolveReport(
+        REPORT_ID.toString(),
+        ReportAction.Hide,
+        ADMIN,
+      );
+
+      expect(result.status).toBe(ReportStatus.Hidden);
+      expect(comments.existsById).toHaveBeenCalledWith(COMMENT);
+      expect(comments.setHidden).toHaveBeenCalledWith(COMMENT, true);
+      expect(reports.resolveOpenOfTarget).toHaveBeenCalledWith(
+        ReportTargetType.Comment,
+        COMMENT,
+        ReportStatus.Hidden,
+        ADMIN,
+        expect.any(Date),
+      );
+      expect(audit.record).toHaveBeenCalledWith({
+        adminId: ADMIN,
+        action: 'hide_content',
+        targetType: 'comment',
+        targetId: COMMENT,
+        details: `report ${REPORT_ID.toString()}`,
+      });
+    });
+
+    it('resolves a report of a comment with delete, through CommentsService', async () => {
+      const { service, comments, uploads } = setup(ReportTargetType.Comment);
+
+      const result = await service.resolveReport(
+        REPORT_ID.toString(),
+        ReportAction.Delete,
+        ADMIN,
+      );
+
+      expect(result.status).toBe(ReportStatus.Deleted);
+      expect(comments.removeByAdmin).toHaveBeenCalledWith(COMMENT);
+      expect(uploads.deleteImage).not.toHaveBeenCalled();
     });
   });
 });

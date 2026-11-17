@@ -53,6 +53,7 @@ hotel before its file is removed.
 - `selectRefundPercent(tiers, daysRemaining)` in `cancellation-tiers.ts` is the selection rule of FLT-09: the tier with the highest threshold that does not exceed the days remaining, and 0% if no tier applies. It is a pure function with its own tests, for the cancellation of a reservation (HTL-21) and the refund (PAY-03) to call.
 - The percentages are not forced to rise with the threshold. The workbook does not ask for it, and the rule above gives one clear answer for any list.
 - The hotel page (`GET /api/hotels/:id`) shows the tiers inside `policy`.
+
 ## Rooms (HTL-03)
 
 - `POST /api/hotels/:id/rooms` is limited to the moderator assigned to that

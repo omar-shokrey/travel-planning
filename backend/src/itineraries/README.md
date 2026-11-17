@@ -99,3 +99,7 @@ Owner: Ali Ghayesh (M8). Requirements: ITN-01 to ITN-26. Routes: `/api/itinerari
 - **Results are lightweight**: the list fields of ITN-03 plus `author { id, name }`, without the days (`.select('-days')`), most recently updated first, paginated. Opening one gives the full detail (days, activities, transport costs, city groups) plus the author. An author whose account is gone shows as "Unknown author".
 - **A clone is a new private itinerary of the caller** with every day, activity, budget entry and transport cost copied with new ids. It shares nothing with the original, so editing or deleting either one leaves the other alone. `clonedFrom { itineraryId, authorId, authorName }` credits the author; the name is kept at clone time, so the credit stays if the original is deleted later.
 - **Cloned activities keep the same image filenames** (ITN-12). ITN-12 must therefore not delete an image file while another activity still uses it, or must copy the files on clone.
+
+## Admin view (GEN-10)
+
+- **`findForAdmin(id)`**, for the admin module only, returns any itinerary with its days (`toItineraryDetailResponse`), private or hidden, and whether an admin hid it, or `null`. It serves `GET /api/admin/content/itinerary/:id`, because hidden content is visible only to its author and admins (GEN-10). No itineraries controller uses it.
