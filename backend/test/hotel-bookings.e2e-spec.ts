@@ -260,6 +260,7 @@ describe('Book hotel rooms and hold them for payment (e2e, HTL-16, HTL-18)', () 
       id: expect.any(String),
       reference: null,
       hotelId,
+      hotelName: `HTL-16 main hotel ${RUN}`,
       checkIn: day(10),
       checkOut: day(13),
       nights: 3,
