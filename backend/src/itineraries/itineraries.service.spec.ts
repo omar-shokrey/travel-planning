@@ -922,6 +922,56 @@ describe('ItinerariesService', () => {
     });
   });
 
+  describe('findOwnerAndVisibilityOrThrow (GEN-09, ITN-21 rule)', () => {
+    /** findById(id).select(fields).lean().exec() resolves to `doc`. */
+    const lookup = (doc: Record<string, unknown> | null) => {
+      const select = jest.fn(() => ({
+        lean: () => ({ exec: () => Promise.resolve(doc) }),
+      }));
+      findByIdSpy.mockReturnValue({ select } as never);
+      return select;
+    };
+    const visible = {
+      ownerId: new Types.ObjectId(ownerId),
+      visibility: 'public',
+      moderation: 'visible',
+      authorDeactivated: false,
+    };
+
+    it('reads only the four fields and says a public, visible itinerary is publicly visible', async () => {
+      const select = lookup(visible);
+
+      await expect(
+        service.findOwnerAndVisibilityOrThrow('some-id'),
+      ).resolves.toEqual({ ownerId, publiclyVisible: true });
+      expect(findByIdSpy).toHaveBeenCalledWith('some-id');
+      expect(select).toHaveBeenCalledWith(
+        'ownerId visibility moderation authorDeactivated',
+      );
+    });
+
+    it.each([
+      ['private', { visibility: 'private' }],
+      ['hidden by an admin', { moderation: 'hidden' }],
+      ['by a deactivated author', { authorDeactivated: true }],
+      ['stored without a moderation value', { moderation: undefined }],
+    ])('is not publicly visible when %s', async (_case, change) => {
+      lookup({ ...visible, ...change });
+
+      await expect(
+        service.findOwnerAndVisibilityOrThrow('some-id'),
+      ).resolves.toEqual({ ownerId, publiclyVisible: false });
+    });
+
+    it('answers 404 when the itinerary does not exist', async () => {
+      lookup(null);
+
+      await expect(
+        service.findOwnerAndVisibilityOrThrow('some-id'),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
   describe('findEntityOrThrow', () => {
     it('returns the stored itinerary for other services', async () => {
       const itinerary = stored();

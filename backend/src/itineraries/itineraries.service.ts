@@ -30,6 +30,7 @@ import {
   toItineraryResponse,
 } from './mappers/itinerary.mapper';
 import type { ItineraryDay } from './models/itinerary-day.schema';
+import { PUBLICLY_VISIBLE } from './public-itineraries.service';
 import { Itinerary, type ItineraryDocument } from './models/itinerary.schema';
 
 @Injectable()
@@ -311,6 +312,34 @@ export class ItinerariesService {
       throw new NotFoundException('Itinerary not found');
     }
     return itinerary;
+  }
+
+  /**
+   * For other services (reports, GEN-09): the owner of an itinerary and
+   * whether everyone may see it, by the same rule as public search (ITN-21,
+   * `PUBLICLY_VISIBLE`), so the two cannot disagree. Reads only those four
+   * fields, not the days. 404 when the itinerary does not exist.
+   */
+  async findOwnerAndVisibilityOrThrow(
+    id: string,
+  ): Promise<{ ownerId: string; publiclyVisible: boolean }> {
+    const itinerary = await this.itineraries
+      .findById(id)
+      .select('ownerId visibility moderation authorDeactivated')
+      .lean()
+      .exec();
+    if (!itinerary) {
+      throw new NotFoundException('Itinerary not found');
+    }
+    const fields = Object.keys(
+      PUBLICLY_VISIBLE,
+    ) as (keyof typeof PUBLICLY_VISIBLE)[];
+    return {
+      ownerId: itinerary.ownerId.toString(),
+      publiclyVisible: fields.every(
+        (field) => itinerary[field] === PUBLICLY_VISIBLE[field],
+      ),
+    };
   }
 
   /**
