@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -13,6 +15,7 @@ import {
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOperation,
   ApiResponse,
@@ -131,14 +134,12 @@ export class PostsController {
 
   @Delete(':id')
   @Roles(Role.User)
+  @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete your own blog post (BLG-04)',
     description: 'Registered users can delete only their own posts.',
   })
-  @ApiResponse({
-    status: 200,
-    description: 'The post was deleted successfully.',
-  })
+  @ApiNoContentResponse({ description: 'The post was deleted' })
   @ApiBadRequestResponse({
     description: 'The post id is not a valid MongoDB ObjectId.',
   })

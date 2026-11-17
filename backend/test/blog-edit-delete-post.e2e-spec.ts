@@ -382,7 +382,7 @@ describe('PATCH/DELETE /api/posts/:id (e2e, BLG-04)', () => {
       .delete(`/api/posts/${postId}`)
       .set('Cookie', cookie);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(204);
 
     const deletedPost = await posts.findById(postId);
     expect(deletedPost).toBeNull();
@@ -422,7 +422,7 @@ describe('PATCH/DELETE /api/posts/:id (e2e, BLG-04)', () => {
       .delete(`/api/posts/${postId}`)
       .set('Cookie', cookie);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(204);
 
     expect(await posts.findById(postId)).toBeNull();
     expect(await comments.findById(commentId)).toBeNull();
