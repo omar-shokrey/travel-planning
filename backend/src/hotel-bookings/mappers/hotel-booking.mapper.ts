@@ -1,5 +1,5 @@
 import type { Types } from 'mongoose';
-import { sortCancellationTiers } from '../../hotels/cancellation-tiers';
+import { sortTiersByDaysBefore } from '../../common/cancellation-tiers';
 import type { HotelBookingResponseDto } from '../dto/hotel-booking-response.dto';
 import type { HotelBooking } from '../models/hotel-booking.schema';
 
@@ -30,7 +30,7 @@ export function toHotelBookingResponse(
     })),
     checkInTime: booking.checkInTime ?? null,
     checkOutTime: booking.checkOutTime ?? null,
-    cancellationTiers: sortCancellationTiers(booking.cancellationTiers).map(
+    cancellationTiers: sortTiersByDaysBefore(booking.cancellationTiers).map(
       ({ daysBefore, refundPercent }) => ({ daysBefore, refundPercent }),
     ),
     policyAcceptedAt: booking.policyAcceptedAt.toISOString(),
