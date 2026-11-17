@@ -84,9 +84,6 @@ export class PostsController {
   @ApiUnauthorizedResponse({
     description: 'Not logged in, or the access token is invalid or expired',
   })
-  @ApiUnauthorizedResponse({
-    description: 'Not logged in, or the access token is invalid or expired',
-  })
   @ApiForbiddenResponse({
     description:
       'The caller is not a registered user (moderators and admins have no posts), or the account is suspended',
