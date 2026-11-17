@@ -348,6 +348,7 @@ describe('Airline profiles (e2e, FLT-01)', () => {
       expect(guest.body).toEqual(loggedIn.body);
       expect(Object.keys(guest.body as object).sort()).toEqual([
         'active',
+        'cancellationTiers',
         'code',
         'createdAt',
         'id',

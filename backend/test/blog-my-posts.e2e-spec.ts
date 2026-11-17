@@ -189,6 +189,7 @@ describe('GET /api/posts/mine (e2e, BLG-03)', () => {
         id: expect.stringMatching(/^[0-9a-f]{24}$/),
         title: 'Oldest published',
         status: 'published',
+        moderation: 'visible',
         publishedAt: expect.stringMatching(/Z$/),
         createdAt: expect.stringMatching(/Z$/),
         updatedAt: expect.stringMatching(/Z$/),
