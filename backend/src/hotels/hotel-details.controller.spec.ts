@@ -11,7 +11,19 @@ describe('HotelDetailsController', () => {
       service as unknown as HotelDetailsService,
     );
 
-    expect(await controller.findOne(HOTEL_ID)).toBe(hotel);
-    expect(service.findActiveById).toHaveBeenCalledWith(HOTEL_ID);
+    expect(await controller.findOne(HOTEL_ID, {})).toBe(hotel);
+    expect(service.findActiveById).toHaveBeenCalledWith(HOTEL_ID, {});
+  });
+
+  it('passes the dates of the stay to the service (HTL-15)', async () => {
+    const service = { findActiveById: jest.fn().mockResolvedValue({}) };
+    const controller = new HotelDetailsController(
+      service as unknown as HotelDetailsService,
+    );
+    const query = { checkIn: '2026-12-10', checkOut: '2026-12-13' };
+
+    await controller.findOne(HOTEL_ID, query);
+
+    expect(service.findActiveById).toHaveBeenCalledWith(HOTEL_ID, query);
   });
 });

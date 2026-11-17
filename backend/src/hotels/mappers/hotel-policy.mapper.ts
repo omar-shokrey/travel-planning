@@ -1,4 +1,5 @@
 import { sortCancellationTiers } from '../cancellation-tiers';
+import type { AvailableRoomResponseDto } from '../dto/available-room-response.dto';
 import type { HotelDetailsResponseDto } from '../dto/hotel-details-response.dto';
 import type { HotelPolicyResponseDto } from '../dto/hotel-policy-response.dto';
 import type { HotelPolicy } from '../models/hotel-policy.schema';
@@ -31,12 +32,17 @@ export function toHotelPolicyResponse(
   };
 }
 
-/** The hotel page: the profile of HTL-01 plus the policies. */
+/**
+ * The hotel page: the profile of HTL-01 plus the policies, and the free rooms
+ * for the stay when the caller gave dates (HTL-15).
+ */
 export function toHotelDetailsResponse(
   hotel: HotelSource & { policy?: HotelPolicySource | null },
+  availableRooms: AvailableRoomResponseDto[] | null = null,
 ): HotelDetailsResponseDto {
   return {
     ...toHotelResponse(hotel),
     policy: toHotelPolicyResponse(hotel.policy),
+    availableRooms,
   };
 }
