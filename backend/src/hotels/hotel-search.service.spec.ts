@@ -2,9 +2,10 @@ import { BadRequestException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import type { SearchHotelsQueryDto } from './dto/search-hotels-query.dto';
 import type { HotelAvailableRoomsService } from './hotel-available-rooms.service';
+import { HotelSearchSort, SortOrder } from './hotel-search';
 import { HotelSearchService } from './hotel-search.service';
 
-const storedHotel = (name: string) => ({
+const storedHotel = (name: string, averageRating = 0, ratingCount = 0) => ({
   _id: new Types.ObjectId(),
   name,
   addressLine: '12 Nile Street',
@@ -13,8 +14,8 @@ const storedHotel = (name: string) => ({
   starClass: 4,
   amenities: [],
   photos: [],
-  averageRating: 0,
-  ratingCount: 0,
+  averageRating,
+  ratingCount,
 });
 
 const freeRoom = (maxOccupancy: number, pricePerNight = 10000) => ({
@@ -153,6 +154,82 @@ describe('HotelSearchService (HTL-11)', () => {
       limit: 2,
       total: 3,
       totalPages: 2,
+    });
+  });
+
+  describe('filters and sort (HTL-12)', () => {
+    /** Three hotels in name order, each with one free room. */
+    const threeHotels = () => {
+      const a = storedHotel('A', 4, 10);
+      const b = storedHotel('B', 4.5, 2);
+      const c = storedHotel('C', 0, 0);
+      const free = new Map([
+        [a._id.toString(), [freeRoom(2, 12000)]],
+        [b._id.toString(), [freeRoom(2, 9000)]],
+        [c._id.toString(), [freeRoom(2, 15000)]],
+      ]);
+      return setup([a, b, c], free);
+    };
+
+    it('asks the database only for rated hotels from the minimum rating', async () => {
+      const { service, hotelModel } = setup([]);
+
+      await service.search(search({ minRating: 4 }));
+
+      expect(hotelModel.find).toHaveBeenCalledWith({
+        cityId: 'cairo',
+        averageRating: { $gte: 4 },
+        ratingCount: { $gt: 0 },
+        active: true,
+      });
+    });
+
+    it('keeps the hotels whose cheapest free room is in the price range', async () => {
+      const { service } = threeHotels();
+
+      const result = await service.search(
+        search({ minPrice: 9000, maxPrice: 12000 }),
+      );
+
+      expect(result.items.map((hotel) => hotel.name)).toEqual(['A', 'B']);
+      expect(result.meta.total).toBe(2);
+    });
+
+    it('sorts by price, cheapest first', async () => {
+      const { service } = threeHotels();
+
+      const result = await service.search(
+        search({ sort: HotelSearchSort.Price }),
+      );
+
+      expect(result.items.map((hotel) => hotel.name)).toEqual(['B', 'A', 'C']);
+    });
+
+    it('sorts by rating, best first', async () => {
+      const { service } = threeHotels();
+
+      const result = await service.search(
+        search({ sort: HotelSearchSort.Rating }),
+      );
+
+      expect(result.items.map((hotel) => hotel.name)).toEqual(['B', 'A', 'C']);
+    });
+
+    it('sorts by price, most expensive first, before it pages', async () => {
+      const { service } = threeHotels();
+
+      const result = await service.search(
+        search({
+          sort: HotelSearchSort.Price,
+          order: SortOrder.Desc,
+          page: 1,
+          limit: 1,
+          skip: 0,
+        }),
+      );
+
+      expect(result.items.map((hotel) => hotel.name)).toEqual(['C']);
+      expect(result.meta.total).toBe(3);
     });
   });
 });

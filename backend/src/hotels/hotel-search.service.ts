@@ -8,7 +8,13 @@ import {
 import type { HotelSearchResultResponseDto } from './dto/hotel-search-result-response.dto';
 import type { SearchHotelsQueryDto } from './dto/search-hotels-query.dto';
 import { HotelAvailableRoomsService } from './hotel-available-rooms.service';
-import { canHost } from './hotel-search';
+import {
+  canHost,
+  cheapestPricePerNight,
+  HotelSearchSort,
+  inPriceRange,
+  sortCandidates,
+} from './hotel-search';
 import { toHotelSearchResultResponse } from './mappers/hotel-search-result.mapper';
 import { Hotel } from './models/hotel.schema';
 
@@ -24,6 +30,11 @@ export class HotelSearchService {
    * HTL-11: the active hotels of the city or country that have at least
    * `rooms` rooms free for the whole stay, whose combined maximum occupancy
    * covers `guests`. Sorted by hotel name, one page at a time.
+   *
+   * HTL-12: optionally only the hotels whose cheapest free room costs between
+   * `minPrice` and `maxPrice` a night (inclusive), and whose average rating
+   * is at least `minRating` (unrated hotels are then left out), sorted by
+   * that price or by rating.
    */
   async search(
     query: SearchHotelsQueryDto,
@@ -37,8 +48,18 @@ export class HotelSearchService {
         ? { cityId: query.cityId }
         : { countryCode: query.countryCode };
 
+    // An unrated hotel has averageRating 0, so `ratingCount > 0` only makes
+    // the rule of HTL-12 explicit.
+    const rating =
+      query.minRating !== undefined
+        ? {
+            averageRating: { $gte: query.minRating },
+            ratingCount: { $gt: 0 },
+          }
+        : {};
+
     const hotels = await this.hotels
-      .find({ ...destination, active: true })
+      .find({ ...destination, ...rating, active: true })
       .select(
         'name addressLine cityId countryCode starClass amenities photos averageRating ratingCount',
       )
@@ -53,10 +74,30 @@ export class HotelSearchService {
 
     const matches = hotels.flatMap((hotel) => {
       const free = freeByHotel.get(hotel._id.toString()) ?? [];
-      return canHost(free, query.rooms, query.guests) ? [{ hotel, free }] : [];
+      if (!canHost(free, query.rooms, query.guests)) {
+        return [];
+      }
+      const price = cheapestPricePerNight(free);
+      if (!inPriceRange(price, query.minPrice, query.maxPrice)) {
+        return [];
+      }
+      return [
+        {
+          hotel,
+          free,
+          cheapestPricePerNight: price,
+          averageRating: hotel.averageRating,
+        },
+      ];
     });
 
-    const items = matches
+    const sorted = sortCandidates(
+      matches,
+      query.sort ?? HotelSearchSort.Name,
+      query.order,
+    );
+
+    const items = sorted
       .slice(query.skip, query.skip + query.limit)
       .map(({ hotel, free }) => toHotelSearchResultResponse(hotel, free));
 
