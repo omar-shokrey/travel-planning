@@ -24,27 +24,22 @@ describe('HotelPolicySchema (HTL-09, HTL-10)', () => {
   });
 
   it('gives a policy without tiers an empty list, which means no refund', () => {
-    expect(
-      policy({ cancellationTiers: undefined }).cancellationTiers,
-    ).toEqual([]);
+    expect(policy({ cancellationTiers: undefined }).cancellationTiers).toEqual(
+      [],
+    );
   });
 
   it('requires both times', () => {
     expect(
-      invalidPaths(
-        policy({ checkInTime: undefined, checkOutTime: undefined }),
-      ),
+      invalidPaths(policy({ checkInTime: undefined, checkOutTime: undefined })),
     ).toEqual(['checkInTime', 'checkOutTime']);
   });
 
-  it.each(['24:00', '9:00', '14:60', '2pm'])(
-    'refuses the time %s',
-    (time) => {
-      expect(invalidPaths(policy({ checkInTime: time }))).toEqual([
-        'checkInTime',
-      ]);
-    },
-  );
+  it.each(['24:00', '9:00', '14:60', '2pm'])('refuses the time %s', (time) => {
+    expect(invalidPaths(policy({ checkInTime: time }))).toEqual([
+      'checkInTime',
+    ]);
+  });
 
   it.each([
     ['a negative threshold', { daysBefore: -1, refundPercent: 50 }],
@@ -53,9 +48,7 @@ describe('HotelPolicySchema (HTL-09, HTL-10)', () => {
     ['a negative refund', { daysBefore: 7, refundPercent: -1 }],
     ['a refund that is not whole', { daysBefore: 7, refundPercent: 12.5 }],
   ])('refuses a tier with %s', (_, tier) => {
-    expect(invalidPaths(policy({ cancellationTiers: [tier] }))).toHaveLength(
-      1,
-    );
+    expect(invalidPaths(policy({ cancellationTiers: [tier] }))).toHaveLength(1);
   });
 
   it('refuses a tier without its numbers', () => {
