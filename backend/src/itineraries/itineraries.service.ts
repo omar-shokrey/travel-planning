@@ -30,6 +30,7 @@ import {
   toItineraryDetailResponse,
   toItineraryResponse,
 } from './mappers/itinerary.mapper';
+import { assertNoNullFields } from './dto/null-fields';
 import type { ItineraryDay } from './models/itinerary-day.schema';
 import { PUBLICLY_VISIBLE } from './public-itineraries.service';
 import { Itinerary, type ItineraryDocument } from './models/itinerary.schema';
@@ -98,25 +99,27 @@ export class ItinerariesService {
     dto: UpdateItineraryDto,
     userId: string,
   ): Promise<ItineraryResponseDto> {
+    // `null` answers 400, as in every other edit (HTL-01, ITN-10, ITN-16).
+    assertNoNullFields(dto);
     const itinerary = await this.findOwnedOrThrow(id, userId);
 
-    // A field that is absent or null is left as it is.
-    if (dto.countries != null) {
+    // A field that is absent is left as it is.
+    if (dto.countries !== undefined) {
       await this.assertCountriesExist(dto.countries);
       itinerary.countries = dto.countries;
     }
-    if (dto.title != null) {
+    if (dto.title !== undefined) {
       itinerary.title = dto.title;
     }
-    if (dto.startDate != null) {
+    if (dto.startDate !== undefined) {
       itinerary.startDate = dto.startDate;
     }
     // ITN-20: public search reads this field, so a change applies at once.
-    if (dto.visibility != null) {
+    if (dto.visibility !== undefined) {
       itinerary.visibility = dto.visibility;
     }
 
-    await itinerary.save();
+    await this.saveOrConflict(itinerary);
     return toItineraryResponse(itinerary);
   }
 
@@ -168,6 +171,8 @@ export class ItinerariesService {
     dto: UpdateDayDto,
     userId: string,
   ): Promise<ItineraryDetailResponseDto> {
+    // `null` answers 400, as in every other edit (HTL-01, ITN-10, ITN-16).
+    assertNoNullFields(dto);
     const itinerary = await this.findOwnedOrThrow(id, userId);
     const day = itinerary.days.find(
       (candidate) => candidate._id.toString() === dayId,
@@ -176,12 +181,12 @@ export class ItinerariesService {
       throw new NotFoundException('Day not found');
     }
 
-    // A field that is absent or null is left as it is.
-    if (dto.cityId != null) {
+    // A field that is absent is left as it is. Empty notes clear them.
+    if (dto.cityId !== undefined) {
       await this.assertCityExists(dto.cityId);
       day.cityId = dto.cityId;
     }
-    if (dto.notes != null) {
+    if (dto.notes !== undefined) {
       day.notes = dto.notes;
     }
 
