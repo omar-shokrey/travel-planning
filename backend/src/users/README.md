@@ -1,6 +1,6 @@
 # users
 
-Owns the `users` collection: the `User` schema, `UsersService`, the public shape of an account (`UserResponseDto`) and its mapper. It also has the own-profile route `PATCH /api/users/me` (ACC-09, in `UsersController` and `ProfileService`); own-account deactivation (ACC-12) comes later.
+Owns the `users` collection: the `User` schema, `UsersService`, the public shape of an account (`UserResponseDto`) and its mapper. It also has the own-account routes `GET /api/users/me` (ACC-11) and `PATCH /api/users/me` (ACC-09), in `UsersController` and `ProfileService`; own-account deactivation (ACC-12) comes later.
 
 ## Design decisions
 
@@ -17,6 +17,15 @@ Owns the `users` collection: the `User` schema, `UsersService`, the public shape
 - **`createdAt` and `updatedAt` are declared on the `User` class without `@Prop()`.** Mongoose writes them (`timestamps: true`). The declarations only give them a type.
 - **`updatePassword` hashes the new password and clears `mustChangePassword` in one update** (ACC-08). `findEntityByIdWithPasswordHash` is the lookup by id that reads the hash, for the check of the current password.
 - **Names are limited to 100 characters** (`USER_NAME_MAX_LENGTH`). The workbook sets no limit. Reuse the constant in every DTO that accepts a name.
+
+## My account (ACC-11)
+
+`GET /api/users/me` returns the account of the logged-in user (200). Any role may use it.
+
+- **The route has no id.** The id comes from the login cookie (`@CurrentUser('id')`) and from nothing else, so a request cannot name another account, and an `id` in the query is ignored. No route reads another user's account by id. An administrator reads other accounts through the list `GET /api/admin/accounts` (ACC-14).
+- **It returns the same account as `GET /api/auth/me`.** Section 8 of the project description lists both routes. Both build the answer with `toUserResponse`, so the password hash and the login counters can never be returned. The frontend keeps using `/api/auth/me` to learn who is logged in (ACC-04, ACC-19); `/api/users/me` is the read next to the profile edit (ACC-09).
+- **401 when the account is gone.** The authentication guard already loads the account on every request: a missing or deactivated account gets 401 and a suspended one 403 before the route runs. `ProfileService.getMyProfile` answers the same 401 "You must log in to do this" as a backstop, for an account deleted between the guard and the lookup.
+- **`getMyProfile` repeats `AuthService.me` on purpose.** `auth` depends on `users`, so `users` cannot call `AuthService` without a circular import.
 
 ## Edit my profile (ACC-09)
 

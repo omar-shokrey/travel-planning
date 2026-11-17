@@ -10,6 +10,7 @@ describe('UsersController', () => {
 
   function setup() {
     const profileService = {
+      getMyProfile: jest.fn().mockResolvedValue(account),
       updateMyProfile: jest.fn().mockResolvedValue(account),
     };
     const controller = new UsersController(
@@ -17,6 +18,24 @@ describe('UsersController', () => {
     );
     return { profileService, controller };
   }
+
+  describe('getMyProfile (ACC-11)', () => {
+    it('gives the service the id of the logged-in user and returns its answer', async () => {
+      const { profileService, controller } = setup();
+
+      expect(await controller.getMyProfile(account.id)).toBe(account);
+      expect(profileService.getMyProfile).toHaveBeenCalledWith(account.id);
+    });
+
+    it('needs a login, and is open to every role', () => {
+      const reflector = new Reflector();
+      const handler = UsersController.prototype.getMyProfile;
+
+      expect(reflector.get(IS_PUBLIC_KEY, handler)).toBeUndefined();
+      expect(reflector.get(ROLES_KEY, handler)).toBeUndefined();
+      expect(reflector.get(ROLES_KEY, UsersController)).toBeUndefined();
+    });
+  });
 
   describe('updateMyProfile (ACC-09)', () => {
     it('gives the service the id of the logged-in user and the body, and returns its answer', async () => {
