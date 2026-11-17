@@ -1,3 +1,4 @@
+import { PostModeration } from '../models/post-moderation.enum';
 import { PostStatus } from '../models/post-status.enum';
 import { toMyPostResponse, toPostResponse } from './post.mapper';
 
@@ -106,6 +107,7 @@ describe('toPostResponse', () => {
       title: 'Three days in Cairo',
       body: 'A long body that the list does not show.',
       status: PostStatus.Published,
+      moderation: PostModeration.Visible,
       publishedAt: new Date('2026-11-15T12:00:00.000+02:00'),
       tags: ['cairo'],
       images: ['cairo.jpg'],
@@ -120,6 +122,7 @@ describe('toPostResponse', () => {
         id: '6740f1c2a4b5c6d7e8f90abc',
         title: 'Three days in Cairo',
         status: PostStatus.Published,
+        moderation: PostModeration.Visible,
         publishedAt: '2026-11-15T10:00:00.000Z',
         createdAt: '2026-11-14T10:00:00.000Z',
         updatedAt: '2026-11-15T10:00:00.000Z',
@@ -135,6 +138,12 @@ describe('toPostResponse', () => {
       expect(keys).not.toContain('tags');
       expect(keys).not.toContain('images');
       expect(keys).not.toContain('authorId');
+    });
+
+    it('tells the author that an admin hid the post (GEN-10)', () => {
+      const hidden = { ...stored, moderation: PostModeration.Hidden };
+
+      expect(toMyPostResponse(hidden as never).moderation).toBe('hidden');
     });
 
     it('leaves out publishedAt for a draft', () => {

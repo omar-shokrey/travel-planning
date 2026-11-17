@@ -9,3 +9,4 @@ export const HOTEL_CITY_ID_MAX_LENGTH = 50;
 
 /** HTL-10: a hotel has at most this many cancellation tiers. */
 export const HOTEL_CANCELLATION_TIERS_MAX_COUNT = 10;
+export const ROOM_DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;

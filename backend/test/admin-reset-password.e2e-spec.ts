@@ -6,6 +6,7 @@ import { Types, type Model } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import './support/auth-env';
+import { deleteAuditLogsOf } from './support/delete-audit-logs';
 import { deleteSessionsOf } from './support/delete-sessions';
 import { AppModule } from './../src/app.module';
 import {
@@ -153,6 +154,8 @@ describe('POST /api/admin/users/:id/reset-password (e2e, ACC-07a)', () => {
     for (const id of createdIds) {
       await deleteSessionsOf(app, id);
     }
+    // Each reset wrote an audit record (GEN-07).
+    await deleteAuditLogsOf(app, createdIds);
     for (const id of createdIds) {
       await users.findByIdAndDelete(id);
     }

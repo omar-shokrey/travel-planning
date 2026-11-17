@@ -352,6 +352,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
         visibility: 'private',
         dayCount: 0,
         days: [],
+        cityGroups: [],
       });
     });
 
@@ -624,18 +625,24 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           date: '2026-12-20',
           cityId: CITY_A,
           notes: 'Arrive late',
+          activities: [],
+          transportCosts: [],
         },
         {
           id: expect.stringMatching(/^[0-9a-f]{24}$/),
           dayNumber: 2,
           date: '2026-12-21',
           cityId: CITY_A,
+          activities: [],
+          transportCosts: [],
         },
         {
           id: expect.stringMatching(/^[0-9a-f]{24}$/),
           dayNumber: 3,
           date: '2026-12-22',
           cityId: CITY_B,
+          activities: [],
+          transportCosts: [],
         },
       ]);
     });
@@ -774,6 +781,8 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           date: '2026-12-20',
           cityId: CITY_A,
           notes: 'Original notes',
+          activities: [],
+          transportCosts: [],
         },
         {
           id: dayIds[1],
@@ -781,6 +790,8 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           date: '2026-12-21',
           cityId: CITY_B,
           notes: 'New notes',
+          activities: [],
+          transportCosts: [],
         },
       ]);
     });
