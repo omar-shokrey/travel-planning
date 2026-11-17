@@ -4,7 +4,7 @@ Owns the `reports` collection: the `Report` schema, `ReportsService`, the reques
 
 ## Design decisions
 
-- **Posts and itineraries only, for now.** GEN-09 also names comments and reviews. Comments (BLG-05) are in an open PR and hotel reviews are not built, so `ReportTargetType` has only `post` and `itinerary`. A later PR adds `comment` and `review` and their visibility checks. No placeholder values were added, so the API never accepts a type it cannot check.
+- **Posts and itineraries only, for now.** GEN-09 also names comments and reviews. Comments (BLG-05) were not merged when this was built and hotel reviews are not built yet, so `ReportTargetType` has only `post` and `itinerary`. A later PR adds `comment` and `review` and their visibility checks. No placeholder values were added, so the API never accepts a type it cannot check.
 - **`POST /api/reports` is not in section 8 of the project description**, which lists only the admin side (`GET /api/admin/reports`). The route follows the module name and the plural-noun rule of AGENTS.md. One route for every type keeps the unique index and the admin list in one collection.
 - **Only the `user` role may report** (`@Roles(Role.User)`). GEN-09 says "a registered user". Admins moderate reports instead of filing them, and moderators manage their provider only, so both get 403. A guest gets 401.
 - **Every field is required, `null` included.** `targetType` (`@IsEnum`), `targetId` (`@IsMongoId`) and `reason` (`@IsString`, `@IsNotEmpty`, `@MaxLength`) have no `@IsOptional()`, so a missing field and `null` both answer 400 with the field in `errors`. Unknown fields such as `reporterId` or `status` are refused by the global `ValidationPipe`.

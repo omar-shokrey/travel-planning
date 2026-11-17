@@ -404,7 +404,7 @@ export class ItinerariesService {
   /**
    * For the admin module (GEN-10): hides an itinerary, or shows it again. Its
    * owner and admins still see a hidden itinerary; reports (GEN-09) and public
-   * search (ITN-21, open PR, filters on `moderation`) leave it out for others. One conditional
+   * search (ITN-21, `PUBLICLY_VISIBLE`) leave it out for others. One conditional
    * update, so of two admins at the same moment only one changes it. Returns
    * false when nothing changed: the itinerary is missing or already in that
    * state.
