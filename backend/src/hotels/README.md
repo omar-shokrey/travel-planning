@@ -16,15 +16,16 @@ hotel, so callers cannot choose a mismatched country.
 - The e2e test `hotels-profile.e2e-spec.ts` creates its own countries and cities
   (unique ids), then removes those and its hotel and users at the end.
 
+## Photos (HTL-01, GEN-08)
+
+- Hotel photos use `UploadsService`; the hotel stores only the generated filenames.
+- Uploads use a conditional photo-count update, so concurrent requests cannot exceed the five-photo limit.
+- A removed filename is deleted from the hotel before its file is removed.
+
 ## Deactivated hotels (ACC-15)
 
 - An admin deactivates or reactivates a hotel through `PATCH /api/admin/providers/hotel/:id/deactivate` and `/reactivate`. `HotelsService.setActive(id, active)` writes the flag for the admin module, with one conditional update. No hotels route exposes it.
 - **Every feature that shows or books hotels must respect `active`:** hotel search (HTL-11) leaves out hotels with `active: false` (the `(cityId, active)` index is there for it), and hotel booking (HTL-16) refuses them. Confirmed bookings of a deactivated hotel stay valid. These routes do not exist yet; this is the rule for whoever builds them.
-
-Hotel photos use `UploadsService`; the hotel stores only generated filenames.
-Uploads use a conditional photo-count update to prevent concurrent requests
-from exceeding the five-photo limit. A removed filename is deleted from the
-hotel before its file is removed.
 
 ## Hotel details (HTL-02)
 
@@ -50,9 +51,10 @@ hotel before its file is removed.
 - They are set with the same `PUT /api/hotels/:id/policies` as the times, because the endpoint table gives HTL-09 and HTL-10 one route. `PUT` replaces the policies as a whole, so `cancellationTiers` is required; an empty list means "no refund".
 - Two tiers of one hotel cannot have the same `daysBefore`; the request answers 400. A hotel has at most 10 tiers (`HOTEL_CANCELLATION_TIERS_MAX_COUNT`), a limit I chose because the workbook gives none.
 - The tiers are stored and returned with the highest threshold first, whatever order they were sent in.
-- `selectRefundPercent(tiers, daysRemaining)` in `cancellation-tiers.ts` is the selection rule of FLT-09: the tier with the highest threshold that does not exceed the days remaining, and 0% if no tier applies. It is a pure function with its own tests, for the cancellation of a reservation (HTL-21) and the refund (PAY-03) to call.
+- The selection rule is the one of FLT-09, shared with flights in `common/cancellation-tiers.ts`: `refundPercentFor(tiers, daysRemaining)` picks the tier with the highest threshold that does not exceed the days remaining, and 0% if no tier applies. The cancellation of a reservation (HTL-21) and the refund (PAY-03) call it with the tiers copied into the reservation. `sortTiersByDaysBefore` from the same file gives the stored and returned order.
 - The percentages are not forced to rise with the threshold. The workbook does not ask for it, and the rule above gives one clear answer for any list.
 - The hotel page (`GET /api/hotels/:id`) shows the tiers inside `policy`.
+
 ## Rooms (HTL-03)
 
 - `POST /api/hotels/:id/rooms` is limited to the moderator assigned to that
