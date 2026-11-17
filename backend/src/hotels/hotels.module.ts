@@ -9,6 +9,8 @@ import { HotelDetailsController } from './hotel-details.controller';
 import { HotelDetailsService } from './hotel-details.service';
 import { HotelPoliciesController } from './hotel-policies.controller';
 import { HotelPoliciesService } from './hotel-policies.service';
+import { HotelSearchController } from './hotel-search.controller';
+import { HotelSearchService } from './hotel-search.service';
 import { HotelRoomStatusController } from './hotel-room-status.controller';
 import { HotelRoomStatusService } from './hotel-room-status.service';
 import { HotelRoomsController } from './hotel-rooms.controller';
@@ -38,6 +40,7 @@ import { HotelsService } from './hotels.service';
     HotelRoomsController,
     HotelRoomStatusController,
     HotelAvailableRoomsController,
+    HotelSearchController,
     HotelDetailsController,
   ],
   providers: [
@@ -47,6 +50,7 @@ import { HotelsService } from './hotels.service';
     HotelRoomsService,
     HotelRoomStatusService,
     HotelAvailableRoomsService,
+    HotelSearchService,
   ],
   exports: [HotelsService],
 })
