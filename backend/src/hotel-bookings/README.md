@@ -35,3 +35,17 @@ Hotel reservations (`hotel_bookings`). The rooms and their nights belong to the 
 - Each item shows what the workbook asks for (guest, dates, status) plus the reference, the rooms with their guests and the total, so the moderator can prepare the stay. The guest's account id, the hold and the policy acceptance are left out.
 - The guest is shown by name only. The names of one page are read in one query on the `User` model, which `UsersModule` exports, as the public itineraries do for their authors.
 - Latest check-in first, paginated. Without `status`, every reservation except `expired` ones, which were holds that were never paid; `status=expired` still shows them. The (`hotelId`, `status`) index serves the query.
+
+## Ratings and reviews (HTL-23)
+
+- The routes are the ones of the endpoint table: `POST /api/hotel-bookings/:id/review`, `PATCH /api/reviews/:id` and `DELETE /api/reviews/:id`, all for registered users, in one `ReviewsController`. Reviews live in this module, as the module table of the spec says, in the `reviews` collection.
+- A guest reviews their own reservation (403 otherwise, 404 if it does not exist) once it is completed. A Confirmed reservation whose check-out date has passed (UTC) counts as completed too, so the guest does not wait for the hourly job; one that ends today does not. A pending, expired or cancelled reservation answers 409.
+- One review per reservation, whatever its number of rooms: the unique `bookingId` index decides, so two requests at once still give one review and a 409. After a delete, the reservation can be reviewed again.
+- The rating is a whole number from 1 to 5, the text optional with at most 1000 characters, trimmed; an empty text means no text, and in an edit it removes the text. An edit with neither field answers 400.
+- The hotel's `averageRating` and `ratingCount` are recomputed from all its reviews (one aggregation) after every new review, every rating change and every delete, and stored on the hotel through `HotelsService.setRating`, because the hotels module owns the hotel. The average is rounded to two decimals; a hotel without reviews goes back to 0 and 0, which HTL-12's `minRating` treats as unrated.
+- Every review counts in the average, hidden ones too: hiding (GEN-10) is about the text, not the stay. The `moderation` field (`visible`/`hidden`) is in the schema for that; reporting reviews (GEN-09) and hiding them (GEN-10) belong to the reports and admin modules, whose `ReportTargetType` already says reviews come with HTL-23.
+- The answer shows the author by name (one lookup on the `User` model that `UsersModule` exports), never the author's account id or the moderation state.
+
+## Completed stays (HTL-23, GEN-11)
+
+- `HotelBookingCompletionService` runs every hour. It finds up to 100 Confirmed reservations whose check-out date is before today (UTC) and sets each to Completed with an update that matches only while it is still Confirmed, so a reservation cancelled in the meantime stays Cancelled.
