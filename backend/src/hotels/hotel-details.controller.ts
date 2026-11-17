@@ -9,7 +9,7 @@ import {
 } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
-import { HotelResponseDto } from './dto/hotel-response.dto';
+import { HotelDetailsResponseDto } from './dto/hotel-details-response.dto';
 import { HotelDetailsService } from './hotel-details.service';
 
 /**
@@ -29,21 +29,21 @@ export class HotelDetailsController {
   @ApiOperation({
     summary: 'Hotel details (HTL-02)',
     description:
-      'HTL-02. The hotel page for guests and users: profile, photos, amenities, average rating and number of ratings. A deactivated hotel answers 404.',
+      'HTL-02. The hotel page for guests and users: profile, photos, amenities, check-in and check-out times (HTL-09), average rating and number of ratings. A deactivated hotel answers 404.',
   })
   @ApiParam({
     name: 'id',
     description: 'Hotel id',
     example: '6740f1c2a4b5c6d7e8f90123',
   })
-  @ApiOkResponse({ type: HotelResponseDto })
+  @ApiOkResponse({ type: HotelDetailsResponseDto })
   @ApiBadRequestResponse({ description: 'The hotel id is not a valid id' })
   @ApiNotFoundResponse({
     description: 'The hotel does not exist or is deactivated',
   })
   findOne(
     @Param('id', ParseObjectIdPipe) id: string,
-  ): Promise<HotelResponseDto> {
+  ): Promise<HotelDetailsResponseDto> {
     return this.hotelDetails.findActiveById(id);
   }
 }

@@ -58,6 +58,21 @@ describe('HotelDetailsService', () => {
         averageRating: 4.5,
         createdAt: '2026-11-05T11:00:00.000Z',
         updatedAt: '2026-11-06T09:30:00.000Z',
+        policy: null,
+      });
+    });
+
+    it('shows the check-in and check-out times the moderator set (HTL-09)', async () => {
+      const { service } = setup({
+        ...storedHotel(),
+        policy: { checkInTime: '14:00', checkOutTime: '12:00' },
+      });
+
+      const result = await service.findActiveById(HOTEL_ID);
+
+      expect(result.policy).toEqual({
+        checkInTime: '14:00',
+        checkOutTime: '12:00',
       });
     });
 
