@@ -11,6 +11,8 @@ import { Airline, AirlineDocument } from './models/airline.schema';
 import { CreateAirlineDto } from './dto/create-airline.dto';
 import { UpdateAirlineDto } from './dto/update-airline.dto';
 import { AirlineResponseDto } from './dto/airline-response.dto';
+import { UpdateCancellationPolicyDto } from './dto/update-cancellation-policy.dto';
+import { sortTiersByDaysBefore } from './cancellation-policy';
 import { toAirlineResponse } from './mappers/airline.mapper';
 import { UploadsService } from '../uploads/uploads.service';
 import type { ImageFile } from '../uploads/uploads.types';
@@ -74,6 +76,56 @@ export class AirlinesService {
     }
 
     return airline;
+  }
+
+  /**
+   * Replaces the cancellation tiers of an airline (FLT-09). Only the airline
+   * moderator assigned to it may do it. The tiers are stored highest
+   * threshold first, in one update, so a reader never sees half a policy.
+   */
+  async setCancellationPolicy(
+    id: string,
+    userId: string,
+    dto: UpdateCancellationPolicyDto,
+  ): Promise<AirlineResponseDto> {
+    const airline = await this.findEntityOrThrow(id);
+    await this.assertAssignedModerator(airline, userId);
+
+    const tiers = sortTiersByDaysBefore(dto.tiers).map((tier) => ({
+      daysBefore: tier.daysBefore,
+      refundPercent: tier.refundPercent,
+    }));
+    const updated = await this.airlineModel
+      .findByIdAndUpdate(
+        id,
+        { $set: { 'policy.cancellationTiers': tiers } },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
+    if (!updated) {
+      throw new NotFoundException('Airline not found');
+    }
+    return toAirlineResponse(updated);
+  }
+
+  /**
+   * 403 unless the user is the airline moderator assigned to this airline.
+   * `update` makes the same check inline; sharing one helper is a later
+   * refactor.
+   */
+  private async assertAssignedModerator(
+    airline: AirlineDocument,
+    userId: string,
+  ): Promise<void> {
+    const user = await this.usersService.findEntityById(userId);
+    if (
+      user?.assignment?.providerType !== ProviderType.Airline ||
+      user.assignment.providerId.toString() !== airline._id.toString()
+    ) {
+      throw new ForbiddenException(
+        'You can only change the policy of your assigned airline',
+      );
+    }
   }
 
   async update(
