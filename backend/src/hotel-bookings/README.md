@@ -19,3 +19,12 @@ Hotel reservations (`hotel_bookings`). The rooms and their nights belong to the 
 - `HotelBookingExpiryService` runs every minute (`@nestjs/schedule`, registered once in `AppModule` with `ScheduleModule.forRoot()`). It finds up to 100 `pending_payment` reservations whose hold has ended and sets each to `expired` with an update that matches only while it is still `pending_payment`, then releases its held nights.
 - Every query already ignores a held night whose `holdExpiresAt` has passed, so a room is free again the moment the hold ends, even before the job runs.
 - For HTL-17 (confirmation after payment): confirm only with an update that matches `status: pending_payment` **and** `holdExpiresAt > now`. After the hold ends, another reservation may already have taken the nights, so a late payment must be refunded instead of confirmed. PAY-01 also cancels the PaymentIntent when the hold expires.
+
+## My reservations (HTL-20)
+
+- `GET /api/hotel-bookings` lists the logged-in user's own reservations and `GET /api/hotel-bookings/:id` opens one. Both are for registered users (role `user`). The owner always comes from the login, never from the request.
+- Opening someone else's reservation answers 403, and a missing one 404, the same as the owner-only itinerary routes (ACC-11). Admins see all bookings through their own route (ACC-17), not this one.
+- `group` gives the three tabs of the workbook. Upcoming: Confirmed with a check-out date that has not passed (a stay that is going on is still upcoming), plus Pending Payment with a live hold, so the user can still pay. Past: Completed, or Confirmed with a check-out date that has passed (until the completion job of HTL-23 marks it Completed). Cancelled: Cancelled. "Today" is the UTC date, as everywhere in the hotels module.
+- An Expired reservation was never paid, so it is in no group; the list without `group` shows every reservation, expired ones included.
+- Upcoming is sorted soonest check-in first; past and cancelled latest first; the list without a group newest first. The filter and the order are pure functions in `hotel-booking-groups.ts` with unit tests, and the (`userId`, `status`) index serves them.
+- The list and the details return the same `HotelBookingResponseDto` (reference, hotel, rooms with guests and prices, dates, total, status, policies), so the details page needs no other call. `hotelName` is read from the hotels module with one query per page (`HotelsService.findNamesByIds`), because the reservation stores only the hotel id, as in the data model.
