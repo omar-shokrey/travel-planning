@@ -21,8 +21,8 @@ import { AdminService } from './admin.service';
   // or hotel exists (ACC-13), and to deactivate it (ACC-15). Neither imports
   // AdminModule.
   // GEN-10 (report handling): ReportsModule, BlogModule and ItinerariesModule
-  // own the reports, posts and itineraries, and UploadsModule deletes the
-  // images of deleted content. None of them imports AdminModule.
+  // own the reports, posts, comments and itineraries, and UploadsModule
+  // deletes the images of deleted content. None of them imports AdminModule.
   // AuditModule to record admin actions and read the audit log (GEN-07).
   imports: [
     AuditModule,

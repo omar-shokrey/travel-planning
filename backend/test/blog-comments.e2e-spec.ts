@@ -149,6 +149,7 @@ describe('Comments on a post (e2e, BLG-05)', () => {
         postId,
         authorId: reader.id,
         body: 'Great tips!',
+        moderation: 'visible',
         createdAt: expect.stringMatching(/Z$/),
         updatedAt: expect.stringMatching(/Z$/),
       });
