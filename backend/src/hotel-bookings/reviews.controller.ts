@@ -2,11 +2,13 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -22,8 +24,12 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Role } from '../common/enums/role.enum';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { CreateReviewDto } from './dto/create-review.dto';
@@ -35,7 +41,7 @@ const UNAUTHORIZED = {
   description: 'Not logged in, or the access token is invalid or expired',
 };
 
-/** HTL-23: the routes of the endpoint table, under two prefixes. */
+/** HTL-23 and HTL-24: the routes of the endpoint table, under three prefixes. */
 @ApiTags('reviews')
 @Controller()
 export class ReviewsController {
@@ -136,5 +142,32 @@ export class ReviewsController {
     @CurrentUser('id') userId: string,
   ): Promise<void> {
     return this.reviews.remove(id, userId);
+  }
+
+  @Get('hotels/:id/reviews')
+  @Public()
+  @ApiOperation({
+    summary: "A hotel's reviews (HTL-24)",
+    description:
+      "HTL-24. For guests and users: the reviews of an active hotel, newest first, paginated, each with its rating, text, author's name and date. Reviews hidden by an admin (GEN-10) are left out. The hotel's average rating and number of ratings are `averageRating` and `ratingCount` on the hotel page (`GET /api/hotels/:id`) and in the search results.",
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Hotel id',
+    example: '6740f1c2a4b5c6d7e8f90123',
+  })
+  @ApiPaginatedResponse(ReviewResponseDto)
+  @ApiBadRequestResponse({
+    description:
+      'The hotel id is not a valid id, or the page parameters are wrong',
+  })
+  @ApiNotFoundResponse({
+    description: 'The hotel does not exist or is deactivated',
+  })
+  findForHotel(
+    @Param('id', ParseObjectIdPipe) hotelId: string,
+    @Query() query: PaginationQueryDto,
+  ): Promise<PaginatedResponse<ReviewResponseDto>> {
+    return this.reviews.findForHotel(hotelId, query);
   }
 }

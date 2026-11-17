@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Types } from 'mongoose';
+import type { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import type { HotelsService } from '../hotels/hotels.service';
 import { HotelBookingStatus } from './enums/hotel-booking-status.enum';
 import { ReviewModeration } from './enums/review-moderation.enum';
@@ -55,8 +56,21 @@ const setup = (
     createError?: unknown;
     updated?: object | null;
     summary?: { count: number; average: number }[];
+    hotel?: object;
+    listed?: object[];
+    total?: number;
   } = {},
 ) => {
+  const listChain = {
+    sort: jest.fn(),
+    skip: jest.fn(),
+    limit: jest.fn(),
+    lean: jest.fn(),
+    exec: jest.fn().mockResolvedValue(options.listed ?? []),
+  };
+  for (const step of ['sort', 'skip', 'limit', 'lean'] as const) {
+    listChain[step].mockReturnValue(listChain);
+  }
   const booking =
     options.booking === undefined
       ? {
@@ -77,6 +91,10 @@ const setup = (
         : Promise.resolve({ toObject: () => storedReview(fields) }),
     ),
     findById: jest.fn().mockReturnValue(query(reviewFound)),
+    find: jest.fn().mockReturnValue(listChain),
+    countDocuments: jest.fn().mockReturnValue({
+      exec: jest.fn().mockResolvedValue(options.total ?? 0),
+    }),
     findOneAndUpdate: jest.fn().mockReturnValue({
       lean: () => ({
         exec: () =>
@@ -97,16 +115,21 @@ const setup = (
     }),
   };
   const users = {
-    findById: jest.fn().mockReturnValue(query({ name: 'Sara Ahmed' })),
+    find: jest.fn().mockReturnValue(query([{ _id: USER, name: 'Sara Ahmed' }])),
   };
-  const hotels = { setRating: jest.fn().mockResolvedValue(undefined) };
+  const hotels = {
+    setRating: jest.fn().mockResolvedValue(undefined),
+    findEntityOrThrow: jest
+      .fn()
+      .mockResolvedValue(options.hotel ?? { _id: HOTEL, active: true }),
+  };
   const service = new ReviewsService(
     reviews as never,
     bookings as never,
     users as never,
     hotels as unknown as HotelsService,
   );
-  return { service, reviews, bookings, users, hotels };
+  return { service, reviews, bookings, users, hotels, listChain };
 };
 
 describe('isCompletedStay (HTL-23)', () => {
@@ -360,5 +383,69 @@ describe('ReviewsService (HTL-23)', () => {
         ),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
+  });
+});
+
+describe('ReviewsService.findForHotel (HTL-24)', () => {
+  const page = (number = 1, limit = 10) =>
+    ({ page: number, limit, skip: (number - 1) * limit }) as PaginationQueryDto;
+
+  it('reads one page of the visible reviews, newest first, with author names', async () => {
+    const other = new Types.ObjectId();
+    const { service, reviews, users, listChain } = setup({
+      listed: [storedReview(), storedReview({ userId: other })],
+      total: 12,
+    });
+
+    const result = await service.findForHotel(HOTEL.toString(), page(2, 5));
+
+    const filter = { hotelId: HOTEL, moderation: ReviewModeration.Visible };
+    expect(reviews.find).toHaveBeenCalledWith(filter);
+    expect(reviews.countDocuments).toHaveBeenCalledWith(filter);
+    expect(listChain.sort).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
+    expect(listChain.skip).toHaveBeenCalledWith(5);
+    expect(listChain.limit).toHaveBeenCalledWith(5);
+    expect(users.find).toHaveBeenCalledWith({ _id: { $in: [USER, other] } });
+    expect(result.meta).toEqual({
+      page: 2,
+      limit: 5,
+      total: 12,
+      totalPages: 3,
+    });
+    expect(result.items.map((item) => item.authorName)).toEqual([
+      'Sara Ahmed',
+      null,
+    ]);
+  });
+
+  it('answers 404 for a deactivated hotel', async () => {
+    const { service, reviews } = setup({
+      hotel: { _id: HOTEL, active: false },
+    });
+
+    await expect(
+      service.findForHotel(HOTEL.toString(), page()),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(reviews.find).not.toHaveBeenCalled();
+  });
+
+  it('passes on the 404 of a missing hotel', async () => {
+    const { service, hotels } = setup();
+    hotels.findEntityOrThrow.mockRejectedValue(
+      new NotFoundException('Hotel not found'),
+    );
+
+    await expect(
+      service.findForHotel(HOTEL.toString(), page()),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('reads no users for an empty page', async () => {
+    const { service, users } = setup();
+
+    const result = await service.findForHotel(HOTEL.toString(), page());
+
+    expect(result.items).toEqual([]);
+    expect(users.find).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,11 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
+import {
+  paginate,
+  type PaginatedResponse,
+} from '../common/dto/paginated-response.dto';
+import type { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { HotelsService } from '../hotels/hotels.service';
 import { todayUtc } from '../hotels/room-dates';
 import { User } from '../users/models/user.schema';
@@ -14,6 +19,7 @@ import type { CreateReviewDto } from './dto/create-review.dto';
 import type { ReviewResponseDto } from './dto/review-response.dto';
 import type { UpdateReviewDto } from './dto/update-review.dto';
 import { HotelBookingStatus } from './enums/hotel-booking-status.enum';
+import { ReviewModeration } from './enums/review-moderation.enum';
 import { toReviewResponse } from './mappers/review.mapper';
 import { HotelBooking } from './models/hotel-booking.schema';
 import { Review } from './models/review.schema';
@@ -36,6 +42,7 @@ export const ALREADY_REVIEWED_MESSAGE =
 export const REVIEW_NOT_FOUND_MESSAGE = 'Review not found';
 export const NOT_YOUR_REVIEW_MESSAGE = 'You can only change your own reviews';
 export const EMPTY_UPDATE_MESSAGE = 'Send rating, text or both';
+export const HOTEL_NOT_FOUND_MESSAGE = 'Hotel not found';
 
 /**
  * HTL-23: a reservation can be reviewed once it is Completed. A Confirmed
@@ -173,6 +180,43 @@ export class ReviewsService {
   }
 
   /**
+   * HTL-24: one page of a hotel's reviews, newest first, for everyone. Only
+   * an active hotel has a public page (ACC-15), so a deactivated or missing
+   * one answers 404. Hidden reviews (GEN-10) are left out. The average and
+   * the number of ratings are on the hotel itself (`GET /api/hotels/:id`).
+   */
+  async findForHotel(
+    hotelId: string,
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResponse<ReviewResponseDto>> {
+    const hotel = await this.hotels.findEntityOrThrow(hotelId);
+    if (!hotel.active) {
+      throw new NotFoundException(HOTEL_NOT_FOUND_MESSAGE);
+    }
+
+    const filter = {
+      hotelId: hotel._id,
+      moderation: ReviewModeration.Visible,
+    };
+    const [found, total] = await Promise.all([
+      this.reviews
+        .find(filter)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(query.skip)
+        .limit(query.limit)
+        .lean()
+        .exec(),
+      this.reviews.countDocuments(filter).exec(),
+    ]);
+
+    const names = await this.namesOf(found.map((review) => review.userId));
+    const items = found.map((review) =>
+      toReviewResponse(review, names.get(review.userId.toString()) ?? null),
+    );
+    return paginate(items, total, query);
+  }
+
+  /**
    * Recomputes the hotel's `averageRating` and `ratingCount` from all its
    * reviews, so the summary can never drift from the reviews it sums up.
    */
@@ -220,11 +264,23 @@ export class ReviewsService {
   }
 
   private async nameOf(userId: string): Promise<string | null> {
-    const user = await this.users
-      .findById(new Types.ObjectId(userId))
+    const id = new Types.ObjectId(userId);
+    return (await this.namesOf([id])).get(id.toString()) ?? null;
+  }
+
+  /** The names of the authors on one page, in one query. */
+  private async namesOf(
+    ids: readonly Types.ObjectId[],
+  ): Promise<Map<string, string>> {
+    const unique = [...new Map(ids.map((id) => [id.toString(), id])).values()];
+    if (unique.length === 0) {
+      return new Map();
+    }
+    const users = await this.users
+      .find({ _id: { $in: unique } })
       .select('name')
       .lean()
       .exec();
-    return user?.name ?? null;
+    return new Map(users.map((user) => [user._id.toString(), user.name]));
   }
 }
