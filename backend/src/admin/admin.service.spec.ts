@@ -214,7 +214,7 @@ describe('AdminService', () => {
     });
 
     it('records the reset in the audit log, with the admin and the account, without the password', async () => {
-      const { audit, sessions, service } = setup();
+      const { audit, sessions, usersService, service } = setup();
 
       await service.resetPassword(accountId, { temporaryPassword }, adminId);
 
@@ -228,10 +228,25 @@ describe('AdminService', () => {
       expect(JSON.stringify(audit.record.mock.calls)).not.toContain(
         temporaryPassword,
       );
-      // Only once the reset is complete.
-      expect(sessions.revokeAllOfUser.mock.invocationCallOrder[0]).toBeLessThan(
-        audit.record.mock.invocationCallOrder[0],
+      // As soon as the password is saved, before the sessions end.
+      expect(
+        usersService.setTemporaryPassword.mock.invocationCallOrder[0],
+      ).toBeLessThan(audit.record.mock.invocationCallOrder[0]);
+      expect(audit.record.mock.invocationCallOrder[0]).toBeLessThan(
+        sessions.revokeAllOfUser.mock.invocationCallOrder[0],
       );
+    });
+
+    it('still records the reset when ending the sessions fails afterwards', async () => {
+      const { audit, sessions, service } = setup();
+      const failure = new Error('database down');
+      sessions.revokeAllOfUser.mockRejectedValue(failure);
+
+      await expect(
+        service.resetPassword(accountId, { temporaryPassword }, adminId),
+      ).rejects.toBe(failure);
+      // The password did change, so the log must say so.
+      expect(audit.record).toHaveBeenCalledTimes(1);
     });
 
     it.each([

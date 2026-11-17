@@ -191,15 +191,17 @@ export class AdminService {
     if (!updated) {
       throw new NotFoundException(ACCOUNT_NOT_FOUND_MESSAGE);
     }
-    // After the password, so a failure here never leaves the old password in
-    // place.
-    await this.sessions.revokeAllOfUser(accountId, new Date());
+    // As soon as the password has changed, so the reset is logged even if
+    // ending the sessions fails below. `record` never throws.
     await this.audit.record({
       adminId,
       action: AuditAction.ResetPassword,
       targetType: AuditTargetType.User,
       targetId: updated._id,
     });
+    // After the password, so a failure here never leaves the old password in
+    // place.
+    await this.sessions.revokeAllOfUser(accountId, new Date());
     return toUserResponse(updated);
   }
 

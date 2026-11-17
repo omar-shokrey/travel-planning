@@ -42,7 +42,7 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **Errors:** an id that is not an ObjectId answers 400 (`ParseObjectIdPipe`), an unknown account 404 "Account not found", a caller who is not an admin 403 (`RolesGuard`).
 - **Every session of the account ends** (ACC-06 sessions). `SessionsService.revokeAllOfUser` sets `revokedAt` on all of them, with no exception, so the old access and refresh cookies get 401 and whoever held a session, the owner or someone who stole it, must log in with the temporary password. The filter always names that one account. The admin's own session is never touched, because an administrator's password cannot be reset here. `AdminModule` imports `AuthModule`, which exports `SessionsService`; `AuthModule` does not import `AdminModule`, so there is no cycle.
 - **The password is saved first, then the sessions end.** If the second step fails, the temporary password is in place but the old sessions stay alive until they log out or run out (30 minutes idle). The other order would end the sessions while the old password still works.
-- **The reset is recorded in the audit log** (GEN-07) after the sessions end, with the admin, the action `reset_password` and the account, never the password. See `backend/src/audit/README.md`.
+- **The reset is recorded in the audit log** (GEN-07) as soon as the password has changed, before the sessions end, so a failure in ending them cannot leave a completed reset unlogged. The record has the admin, the action `reset_password` and the account, never the password. See `backend/src/audit/README.md`.
 - **Not built here:** a notification to the owner.
 
 ## Account list (ACC-14)

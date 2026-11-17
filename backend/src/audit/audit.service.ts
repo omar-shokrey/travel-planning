@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model, type QueryFilter } from 'mongoose';
+import { AUDIT_DETAILS_MAX_LENGTH } from './audit.constants';
 import type { AuditAction } from './enums/audit-action.enum';
 import type { AuditTargetType } from './enums/audit-target-type.enum';
 import { AuditLog, type AuditLogDocument } from './models/audit-log.schema';
@@ -53,7 +54,9 @@ export class AuditService {
           action: entry.action,
           targetType: entry.targetType,
           targetId: entry.targetId.toString(),
-          details: entry.details,
+          // Cut, not refused: a longer note (an airline name has no length
+          // limit at creation) would fail the schema and lose the record.
+          details: entry.details?.slice(0, AUDIT_DETAILS_MAX_LENGTH),
         },
       ]);
     } catch (error) {

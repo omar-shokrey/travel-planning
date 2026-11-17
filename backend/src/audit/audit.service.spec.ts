@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { Types, type Model } from 'mongoose';
+import { AUDIT_DETAILS_MAX_LENGTH } from './audit.constants';
 import { AuditService } from './audit.service';
 import { AuditAction } from './enums/audit-action.enum';
 import { AuditTargetType } from './enums/audit-target-type.enum';
@@ -60,6 +61,21 @@ describe('AuditService', () => {
           details: 'hotel_moderator of hotel x',
         },
       ]);
+    });
+
+    it('cuts a note longer than the limit, so the record is still saved', async () => {
+      const { model, service } = setup();
+
+      await service.record({
+        adminId: ADMIN_ID,
+        action: AuditAction.DeactivateProvider,
+        targetType: AuditTargetType.Airline,
+        targetId: TARGET_ID,
+        details: 'A'.repeat(AUDIT_DETAILS_MAX_LENGTH + 100),
+      });
+
+      const [[rows]] = model.insertMany.mock.calls as [[{ details: string }[]]];
+      expect(rows[0].details).toHaveLength(AUDIT_DETAILS_MAX_LENGTH);
     });
 
     it('never throws when the write fails, and logs it without the note', async () => {
