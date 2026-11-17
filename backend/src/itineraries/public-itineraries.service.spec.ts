@@ -160,7 +160,10 @@ describe('PublicItinerariesService', () => {
 
       await service.search(query({ q: 'Cai' }));
 
-      const pattern = /Cai/i;
+      // The string form, not a RegExp object: in local runs against the
+      // Atlas test database, a RegExp with the `i` flag inside `$or` never
+      // got an answer (the same as in ACC-14).
+      const pattern = { $regex: 'Cai', $options: 'i' };
       expect(find).toHaveBeenCalledWith({
         ...PUBLICLY_VISIBLE,
         $or: [
@@ -180,9 +183,12 @@ describe('PublicItinerariesService', () => {
       await service.search(query({ q: '.*(' }));
 
       const filter = find.mock.calls[0][0] as unknown as {
-        $or: { title: RegExp }[];
+        $or: { title: { $regex: string; $options: string } }[];
       };
-      expect(filter.$or[0].title.source).toBe('\\.\\*\\(');
+      expect(filter.$or[0].title).toEqual({
+        $regex: '\\.\\*\\(',
+        $options: 'i',
+      });
     });
 
     it('rejects a minimum duration above the maximum', async () => {

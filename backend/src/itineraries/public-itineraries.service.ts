@@ -178,7 +178,12 @@ export class PublicItinerariesService {
   private async keywordConditions(
     keyword: string,
   ): Promise<QueryFilter<Itinerary>[]> {
-    const pattern = new RegExp(escapeRegExp(keyword), 'i');
+    // The `$regex` string form, not a RegExp object. Both mean the same to
+    // MongoDB, but in local runs against the Atlas test database a query
+    // with a RegExp object and the `i` flag inside `$or` sometimes never got
+    // an answer (the connection was then reset), while the string form always
+    // did. ACC-14's account search uses the same form for the same reason.
+    const pattern = { $regex: escapeRegExp(keyword), $options: 'i' };
     const [countries, cities] = await Promise.all([
       this.countries
         .find({ $or: [{ _id: keyword.toUpperCase() }, { name: pattern }] })
