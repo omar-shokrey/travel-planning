@@ -16,3 +16,13 @@ export const CHILD_AGE_MAX = 17;
 
 /** HTL-18: how many reservations one run of the hold-expiry job handles. */
 export const HOTEL_BOOKING_EXPIRY_BATCH = 100;
+
+/** HTL-23: how many confirmed stays one run of the completion job handles. */
+export const HOTEL_BOOKING_COMPLETION_BATCH = 100;
+
+/** HTL-23: a rating is a whole number from 1 to 5. */
+export const REVIEW_RATING_MIN = 1;
+export const REVIEW_RATING_MAX = 5;
+
+/** HTL-23: the review text has at most 1000 characters. */
+export const REVIEW_TEXT_MAX_LENGTH = 1000;
