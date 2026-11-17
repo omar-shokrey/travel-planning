@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { BlogModule } from '../blog/blog.module';
 import { FlightsModule } from '../flights/flights.module';
@@ -22,7 +23,9 @@ import { AdminService } from './admin.service';
   // GEN-10 (report handling): ReportsModule, BlogModule and ItinerariesModule
   // own the reports, posts and itineraries, and UploadsModule deletes the
   // images of deleted content. None of them imports AdminModule.
+  // AuditModule to record admin actions and read the audit log (GEN-07).
   imports: [
+    AuditModule,
     AuthModule,
     BlogModule,
     FlightsModule,
