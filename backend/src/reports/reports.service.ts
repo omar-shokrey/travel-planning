@@ -8,8 +8,6 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { PostModeration } from '../blog/models/post-moderation.enum';
 import { PostsService } from '../blog/posts.service';
-import { ItineraryModeration } from '../itineraries/enums/itinerary-moderation.enum';
-import { ItineraryVisibility } from '../itineraries/enums/itinerary-visibility.enum';
 import { ItinerariesService } from '../itineraries/itineraries.service';
 import type { CreateReportDto } from './dto/create-report.dto';
 import type { ReportResponseDto } from './dto/report-response.dto';
@@ -189,18 +187,13 @@ export class ReportsService {
       return post.authorId;
     }
 
-    const itinerary = await this.itineraries.findEntityOrThrow(targetId);
-    const ownerId = itinerary.ownerId.toString();
-    // Another user sees an itinerary only while it is public (ITN-20), not
-    // hidden by an admin (GEN-10) and its author is active (ACC-12): the same
-    // rule as public search (ITN-21). Follow-up: once ITN-21 (#167) merges,
-    // call its "publicly visible" method in ItinerariesService instead, so
-    // search and reports cannot disagree, and read only the fields needed.
-    const visibleToOthers =
-      itinerary.visibility === ItineraryVisibility.Public &&
-      itinerary.moderation === ItineraryModeration.Visible &&
-      !itinerary.authorDeactivated;
-    if (ownerId !== reporterId && !visibleToOthers) {
+    // Another user sees an itinerary only while it is publicly visible: public
+    // (ITN-20), not hidden by an admin (GEN-10) and its author active
+    // (ACC-12). The rule is ITN-21's own (`PUBLICLY_VISIBLE`), applied by the
+    // itineraries module, so search and reports cannot disagree.
+    const { ownerId, publiclyVisible } =
+      await this.itineraries.findOwnerAndVisibilityOrThrow(targetId);
+    if (ownerId !== reporterId && !publiclyVisible) {
       throw new NotFoundException('Itinerary not found');
     }
     return ownerId;

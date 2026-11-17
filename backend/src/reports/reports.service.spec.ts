@@ -6,8 +6,6 @@ import {
 import { Types } from 'mongoose';
 import { PostModeration } from '../blog/models/post-moderation.enum';
 import type { PostsService } from '../blog/posts.service';
-import { ItineraryModeration } from '../itineraries/enums/itinerary-moderation.enum';
-import { ItineraryVisibility } from '../itineraries/enums/itinerary-visibility.enum';
 import type { ItinerariesService } from '../itineraries/itineraries.service';
 import { ReportStatus } from './enums/report-status.enum';
 import { ReportTargetType } from './enums/report-target-type.enum';
@@ -41,13 +39,11 @@ function setup() {
       moderation: PostModeration.Visible,
     }),
   };
+  // The itineraries module applies ITN-21's "publicly visible" rule.
   const itineraries = {
-    findEntityOrThrow: jest.fn().mockResolvedValue({
-      ownerId: new Types.ObjectId(AUTHOR),
-      visibility: ItineraryVisibility.Public,
-      moderation: ItineraryModeration.Visible,
-      authorDeactivated: false,
-    }),
+    findOwnerAndVisibilityOrThrow: jest
+      .fn()
+      .mockResolvedValue({ ownerId: AUTHOR, publiclyVisible: true }),
   };
   const service = new ReportsService(
     reports as never,
@@ -94,7 +90,9 @@ describe('ReportsService (GEN-09)', () => {
 
       const result = await service.create(itineraryDto, REPORTER);
 
-      expect(itineraries.findEntityOrThrow).toHaveBeenCalledWith(TARGET);
+      expect(itineraries.findOwnerAndVisibilityOrThrow).toHaveBeenCalledWith(
+        TARGET,
+      );
       expect(reports.create).toHaveBeenCalledWith(
         expect.objectContaining({ targetType: ReportTargetType.Itinerary }),
       );
@@ -141,7 +139,7 @@ describe('ReportsService (GEN-09)', () => {
 
     it('passes on the 404 of a missing itinerary', async () => {
       const { service, itineraries } = setup();
-      itineraries.findEntityOrThrow.mockRejectedValue(
+      itineraries.findOwnerAndVisibilityOrThrow.mockRejectedValue(
         new NotFoundException('Itinerary not found'),
       );
 
@@ -150,28 +148,18 @@ describe('ReportsService (GEN-09)', () => {
       );
     });
 
-    it.each([
-      ['private', { visibility: ItineraryVisibility.Private }],
-      ['hidden by an admin', { moderation: ItineraryModeration.Hidden }],
-      ['of a deactivated author', { authorDeactivated: true }],
-    ])(
-      'answers 404 for an itinerary of someone else that is %s',
-      async (_label, change) => {
-        const { service, itineraries, reports } = setup();
-        itineraries.findEntityOrThrow.mockResolvedValue({
-          ownerId: new Types.ObjectId(AUTHOR),
-          visibility: ItineraryVisibility.Public,
-          moderation: ItineraryModeration.Visible,
-          authorDeactivated: false,
-          ...change,
-        });
+    it('answers 404 for an itinerary of someone else that is not publicly visible (private, hidden or by a deactivated author)', async () => {
+      const { service, itineraries, reports } = setup();
+      itineraries.findOwnerAndVisibilityOrThrow.mockResolvedValue({
+        ownerId: AUTHOR,
+        publiclyVisible: false,
+      });
 
-        await expect(service.create(itineraryDto, REPORTER)).rejects.toThrow(
-          new NotFoundException('Itinerary not found'),
-        );
-        expect(reports.create).not.toHaveBeenCalled();
-      },
-    );
+      await expect(service.create(itineraryDto, REPORTER)).rejects.toThrow(
+        new NotFoundException('Itinerary not found'),
+      );
+      expect(reports.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('own content', () => {
@@ -202,11 +190,9 @@ describe('ReportsService (GEN-09)', () => {
 
     it('refuses my own itinerary with 400, even a private one', async () => {
       const { service, itineraries } = setup();
-      itineraries.findEntityOrThrow.mockResolvedValue({
-        ownerId: new Types.ObjectId(REPORTER),
-        visibility: ItineraryVisibility.Private,
-        moderation: ItineraryModeration.Visible,
-        authorDeactivated: false,
+      itineraries.findOwnerAndVisibilityOrThrow.mockResolvedValue({
+        ownerId: REPORTER,
+        publiclyVisible: false,
       });
 
       await expect(service.create(itineraryDto, REPORTER)).rejects.toThrow(
