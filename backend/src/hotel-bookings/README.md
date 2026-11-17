@@ -49,3 +49,9 @@ Hotel reservations (`hotel_bookings`). The rooms and their nights belong to the 
 ## Completed stays (HTL-23, GEN-11)
 
 - `HotelBookingCompletionService` runs every hour. It finds up to 100 Confirmed reservations whose check-out date is before today (UTC) and sets each to Completed with an update that matches only while it is still Confirmed, so a reservation cancelled in the meantime stays Cancelled.
+
+## A hotel's reviews, for everyone (HTL-24)
+
+- `GET /api/hotels/:id/reviews` is public, in the same `ReviewsController`. It lists the reviews of an active hotel, newest first and paginated, each with its rating, text, author's name and dates. A deactivated or missing hotel answers 404, the same as the hotel page (ACC-15).
+- Reviews hidden by an admin (GEN-10) are left out of this list. The (`hotelId`, `createdAt`) index serves the query, and the authors' names of one page are read with one query.
+- The average rating and the number of ratings are not repeated in each page: they are `averageRating` and `ratingCount` on the hotel page (`GET /api/hotels/:id`) and in the search results, kept up to date by HTL-23. This keeps the list in the paginated shape every list of the API has.
