@@ -25,6 +25,7 @@ import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
 import { Notification } from './../src/notifications/models/notification.schema';
 import { User } from './../src/users/models/user.schema';
+import { deleteAuditLogsOf } from './support/delete-audit-logs';
 import { deleteSessionsOf } from './support/delete-sessions';
 import { sessionCookieFor } from './support/session-cookie';
 
@@ -143,6 +144,8 @@ describe('Suspend and reactivate users (e2e, ACC-16)', () => {
     for (const id of createdUserIds) {
       await deleteSessionsOf(app, id);
     }
+    // The audit records (GEN-07) of the suspensions, by target or admin.
+    await deleteAuditLogsOf(app, createdUserIds);
     for (const id of createdUserIds) {
       await users.findByIdAndDelete(id);
     }

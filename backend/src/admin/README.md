@@ -7,6 +7,7 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 | Route                                             | Requirement    | Access |
 | ------------------------------------------------- | -------------- | ------ |
 | `POST /api/admin/users/:id/reset-password`        | ACC-07a        | Admin  |
+| `GET /api/admin/audit-logs`                       | GEN-07         | Admin  |
 | `GET /api/admin/accounts`                         | ACC-14         | Admin  |
 | `POST /api/admin/moderators`                      | ACC-13         | Admin  |
 | `PATCH /api/admin/accounts/:id/suspend`           | ACC-15, ACC-16 | Admin  |
@@ -19,6 +20,17 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **This module never writes to the `users` collection.** `AdminService` calls `UsersService`, which owns it and hashes passwords. The service maps the entity with `toUserResponse` before it returns.
 - **The route is the one of section 8 of the project description** (`/api/admin/users/:id/reset-password`), even though the account list (ACC-14) is `/api/admin/accounts`.
 
+## Audit log (GEN-07)
+
+`GET /api/admin/audit-logs?page=1&limit=10&action=reset_password&adminId=…&targetType=user&targetId=…`
+
+- **The route is here, the records are in `audit`.** The module table gives `admin` the "audit log views" and `audit` the records. `AuditService.list` returns entities; `AdminService.listAuditLogs` maps them with `toAuditLogResponse` and builds the page with `paginate`, like the account list.
+- **Newest first**, by `createdAt` and then `_id`. 10 per page by default, at most 50, `{ items, meta }`, `items: []` when nothing matches (GEN-05).
+- **Filters:** `action` and `targetType` must be values of their enums, `adminId` and `targetId` must be ObjectIds, and all given filters must match. Anything else, or an unknown parameter, answers 400.
+- **Each item:** `id`, `adminId`, `action`, `targetType`, `targetId`, `details` (or `null`) and `createdAt` in UTC.
+- **The admin's id comes from the login** (`@CurrentUser('id')`), passed from the controller to `resetPassword` and `createModerator` as their last parameter. The client never sends it.
+- **Read-only.** No route changes or deletes an audit record.
+
 ## Admin password reset (ACC-07a)
 
 - **The admin chooses the temporary password** and sends it as `temporaryPassword`. The workbook says "reset to a temporary password" and ACC-13 says the temporary password of a moderator is "set by the admin", so both work the same way. The admin gives it to the owner outside the platform. The server never generates or returns a password, so no password appears in a response or a log.
@@ -30,7 +42,8 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **Errors:** an id that is not an ObjectId answers 400 (`ParseObjectIdPipe`), an unknown account 404 "Account not found", a caller who is not an admin 403 (`RolesGuard`).
 - **Every session of the account ends** (ACC-06 sessions). `SessionsService.revokeAllOfUser` sets `revokedAt` on all of them, with no exception, so the old access and refresh cookies get 401 and whoever held a session, the owner or someone who stole it, must log in with the temporary password. The filter always names that one account. The admin's own session is never touched, because an administrator's password cannot be reset here. `AdminModule` imports `AuthModule`, which exports `SessionsService`; `AuthModule` does not import `AdminModule`, so there is no cycle.
 - **The password is saved first, then the sessions end.** If the second step fails, the temporary password is in place but the old sessions stay alive until they log out or run out (30 minutes idle). The other order would end the sessions while the old password still works.
-- **Not built here:** the audit record of the reset (GEN-07, wave 3) and a notification to the owner.
+- **The reset is recorded in the audit log** (GEN-07) as soon as the password has changed, before the sessions end, so a failure in ending them cannot leave a completed reset unlogged. The record has the admin, the action `reset_password` and the account, never the password. See `backend/src/audit/README.md`.
+- **Not built here:** a notification to the owner.
 
 ## Account list (ACC-14)
 
@@ -52,6 +65,7 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **Exactly one provider per moderator.** The provider type follows the role, and the account stores `assignment: { providerType, providerId }`, which the airline and hotel routes already check on every edit. `providerId` must be an existing airline for an airline moderator and an existing hotel for a hotel moderator; otherwise 400 with `providerId` in `errors` ("must be the id of an existing airline/hotel"), so a hotel id sent for an airline moderator is refused too. The lookups use `AirlinesService.findEntityOrThrow` and `HotelsService.findEntityOrThrow`; `AdminModule` imports `FlightsModule` and `HotelsModule`, neither of which imports it back.
 - **Several moderators per airline or hotel are allowed** (team decision): the workbook limits the moderator to one provider, not the provider to one moderator.
 - **The temporary password works like the admin reset (ACC-07a):** the admin chooses it, it follows the password rule, it is hashed in `UsersService.createModerator`, and the account starts with `mustChangePassword: true`, so the moderator sets a new one at the first login (ACC-08). The response never contains it.
+- **The creation is recorded in the audit log** (GEN-07) with the admin, the action `create_moderator`, the new account and a note with the role and the provider (`hotel_moderator of hotel <id>`), never the password.
 - **An email that is already registered answers 409**, checked first and again by the unique index, as in registration.
 - **The response is `UserResponseDto` with `assignment`** (`providerType`, `providerId` as a string). It is left out for accounts that are not moderators, so other responses keep their shape.
 - **The client cannot set** the status (always active), `mustChangePassword` or the assignment directly; those fields answer 400.
@@ -68,7 +82,7 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **What it does not change.** Bookings stay valid and the user's posts, comments, reviews and itineraries stay visible, as the requirement says. Hiding content is GEN-10.
 - **Status rules.** Suspending a suspended account or reactivating an active one answers 409. A deactivated account (closed by its owner, ACC-12) answers 409 to both: an admin does not reopen it.
 - **Two admins at once.** `UsersService.changeStatus(id, from, to)` changes the status only if it still is `from`, in one `findOneAndUpdate`. The request that loses answers 409 ("changed by another request") and ends no session.
-- **Not here:** the audit record (GEN-07), added after GEN-07 merges.
+- **Audit (GEN-07):** a suspension and a reactivation are each recorded after the status change (`suspend_user`, `reactivate_user`, target the account, note its role). A refused change (404, 403, 409) records nothing.
 
 ## Suspend moderators and deactivate providers (ACC-15)
 
@@ -87,4 +101,4 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
   - Flight search (FLT-11) and hotel search (HTL-11) must leave out providers with `active: false` (the hotels collection already has the index `(cityId, active)`).
   - Flight booking (FLT-21) and hotel booking (HTL-16) must refuse a provider with `active: false`, while existing Confirmed bookings stay valid.
   - When bookings exist, travellers with upcoming bookings of a deactivated provider are affected parties too: the booking issues should notify them from `deactivateProvider` (`provider_deactivated`, with a link to the booking).
-- **Not here:** the audit record of these actions (GEN-07).
+- **Audit (GEN-07):** a provider deactivation and reactivation are each recorded after the change (`deactivate_provider`, `reactivate_provider`, target type `hotel` or `airline`, note the provider's name). A refused change records nothing.

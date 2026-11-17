@@ -26,6 +26,7 @@ import { Airline } from './../src/flights/models/airline.schema';
 import { Hotel } from './../src/hotels/models/hotel.schema';
 import { Notification } from './../src/notifications/models/notification.schema';
 import { User } from './../src/users/models/user.schema';
+import { deleteAuditLogsOf } from './support/delete-audit-logs';
 import { deleteSessionsOf } from './support/delete-sessions';
 
 const PASSWORD = 'Passw0rdOK';
@@ -203,6 +204,12 @@ describe('Suspend moderators and deactivate providers (e2e, ACC-15)', () => {
         await notifications.findByIdAndDelete(_id);
       }
     }
+    // The audit records (GEN-07) of these actions, by target or admin.
+    await deleteAuditLogsOf(app, [
+      ...createdUserIds,
+      hotelId.toString(),
+      airlineId.toString(),
+    ]);
     for (const id of createdUserIds) {
       await users.findByIdAndDelete(id);
     }
