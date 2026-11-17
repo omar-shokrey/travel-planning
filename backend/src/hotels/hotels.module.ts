@@ -3,6 +3,8 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceModule } from '../reference/reference.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { UsersModule } from '../users/users.module';
+import { HotelAvailableRoomsController } from './hotel-available-rooms.controller';
+import { HotelAvailableRoomsService } from './hotel-available-rooms.service';
 import { HotelDetailsController } from './hotel-details.controller';
 import { HotelDetailsService } from './hotel-details.service';
 import { HotelPoliciesController } from './hotel-policies.controller';
@@ -35,6 +37,7 @@ import { HotelsService } from './hotels.service';
     HotelPoliciesController,
     HotelRoomsController,
     HotelRoomStatusController,
+    HotelAvailableRoomsController,
     HotelDetailsController,
   ],
   providers: [
@@ -43,6 +46,7 @@ import { HotelsService } from './hotels.service';
     HotelPoliciesService,
     HotelRoomsService,
     HotelRoomStatusService,
+    HotelAvailableRoomsService,
   ],
   exports: [HotelsService],
 })
