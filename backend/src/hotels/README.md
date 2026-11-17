@@ -106,3 +106,14 @@ hotel before its file is removed.
 - Deactivating and reactivating use `PATCH /api/hotels/:id/rooms/:roomId/deactivate` and `/reactivate`. The endpoint table has no route for them; the names follow the provider routes of ACC-15. A room with a reserved night from today (UTC) on cannot be deactivated; past stays do not count. A deactivated room keeps its blocks and availability. HTL-11 (search) and HTL-16 (reservation) must leave out rooms whose `active` is false.
 - `DELETE /api/hotels/:id/rooms/:roomId` deletes a room only if no `room_nights` document with a reservation (`bookingId`) was ever stored for it, and removes its blocks with it. When the reservations of HTL-16 exist, the check should also look at `hotel_bookings`, because an expired hold may have been cleaned up.
 - The checks and the writes of deactivation and deletion are separate steps. A hold inserted between them could end up on a deactivated or deleted room; the hold of HTL-18 must therefore check that the room still exists and is active.
+
+## Room status for a date range (HTL-08)
+
+- `GET /api/hotels/:id/availability?from=YYYY-MM-DD&to=YYYY-MM-DD` is the route of the endpoint table. Only the moderator assigned to the hotel may call it. `from` is the first night and `to` the day after the last night, as for the availability ranges of HTL-04.
+- Every room of the hotel is listed, deactivated ones too (with `active: false`), because the moderator manages them all. The rooms are paginated (GEN-05) and sorted by room number.
+- Each room has `segments`: the whole range in order, with no gap. Consecutive nights with the same status and the same reservation are joined, so a long range stays short.
+- The statuses are the three of the workbook plus one: `available`, `booked`, `blocked`, and `unavailable` for a night outside every availability range of the room. Calling such a night "available" would be wrong, because it cannot be booked.
+- A night held by a reservation in Pending Payment whose hold has not expired is `booked` with `pendingPayment: true`, because HTL-06 also treats it as reserved. A hold whose time has passed is ignored, as everywhere else.
+- The workbook asks for the reservation reference on a booked night. The reservations of HTL-16 and HTL-17 do not exist yet, so a booked segment shows the `bookingId` stored on the night. HTL-17 should add the `reference` next to it once `hotel_bookings` exists.
+- A range has at most 366 nights (`ROOM_QUERY_MAX_NIGHTS`). The workbook gives no limit; this one keeps a page of rooms small.
+- The status of each night is computed by the pure function `roomStatusSegments` in `room-status.ts`, so it is unit tested without a database. The service reads one page of rooms and their nights in the range with one query each.
