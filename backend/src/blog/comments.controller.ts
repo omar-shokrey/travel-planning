@@ -1,10 +1,23 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiTags,
@@ -21,8 +34,9 @@ import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { CommentsService } from './comments.service';
 import { CommentResponseDto } from './dto/comment-response.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
+import { UpdateCommentDto } from './dto/update-comment.dto';
 
-/** Comments on blog posts (BLG-05). */
+/** Comments on blog posts (BLG-05, BLG-07). */
 @ApiTags('Blog')
 @Controller()
 export class CommentsController {
@@ -80,5 +94,64 @@ export class CommentsController {
     @Query() query: PaginationQueryDto,
   ): Promise<PaginatedResponse<CommentResponseDto>> {
     return this.comments.listForPost(postId, query);
+  }
+
+  @Patch('comments/:id')
+  @Roles(Role.User)
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Edit my comment (BLG-07)',
+    description:
+      'BLG-07. A registered user changes the text of their own comment. The new text must not be empty and has at most 500 characters. `updatedAt` shows when the comment was edited.',
+  })
+  @ApiParam({ name: 'id', description: 'The id of the comment' })
+  @ApiOkResponse({ type: CommentResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'The comment id is not a valid id, the text is empty or longer than 500 characters, or the body has a field that is not allowed',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Not logged in, or the access token is invalid or expired',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The comment was written by another user, or the account is not a registered user',
+  })
+  @ApiNotFoundResponse({ description: 'No comment has this id' })
+  update(
+    @Param('id', ParseObjectIdPipe) commentId: string,
+    @Body() dto: UpdateCommentDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<CommentResponseDto> {
+    return this.comments.update(commentId, dto, userId);
+  }
+
+  @Delete('comments/:id')
+  @Roles(Role.User)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Delete my comment (BLG-07)',
+    description:
+      'BLG-07. A registered user deletes their own comment. The comment count of the post goes down by one.',
+  })
+  @ApiParam({ name: 'id', description: 'The id of the comment' })
+  @ApiNoContentResponse({ description: 'The comment was deleted' })
+  @ApiBadRequestResponse({
+    description: 'The comment id is not a valid id',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Not logged in, or the access token is invalid or expired',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The comment was written by another user, or the account is not a registered user',
+  })
+  @ApiNotFoundResponse({ description: 'No comment has this id' })
+  remove(
+    @Param('id', ParseObjectIdPipe) commentId: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<void> {
+    return this.comments.remove(commentId, userId);
   }
 }

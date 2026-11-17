@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -8,12 +12,13 @@ import {
 import type { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import type { CommentResponseDto } from './dto/comment-response.dto';
 import type { CreateCommentDto } from './dto/create-comment.dto';
+import type { UpdateCommentDto } from './dto/update-comment.dto';
 import { toCommentResponse } from './mappers/comment.mapper';
 import { BlogPost } from './models/blog-post.schema';
-import { Comment } from './models/comment.schema';
+import { Comment, type CommentDocument } from './models/comment.schema';
 import { PostStatus } from './models/post-status.enum';
 
-/** Comments on blog posts (BLG-05). */
+/** Comments on blog posts (BLG-05, BLG-07). */
 @Injectable()
 export class CommentsService {
   constructor(
@@ -65,6 +70,67 @@ export class CommentsService {
     ]);
 
     return paginate(comments.map(toCommentResponse), total, query);
+  }
+
+  /** BLG-07: the logged-in user edits the text of their own comment. */
+  async update(
+    commentId: string,
+    dto: UpdateCommentDto,
+    userId: string,
+  ): Promise<CommentResponseDto> {
+    const comment = await this.findOwnCommentOrThrow(
+      commentId,
+      userId,
+      'You can only edit your own comments',
+    );
+
+    comment.body = dto.body;
+    await comment.save();
+
+    return toCommentResponse(comment);
+  }
+
+  /** BLG-07: the logged-in user deletes their own comment. */
+  async remove(commentId: string, userId: string): Promise<void> {
+    const comment = await this.findOwnCommentOrThrow(
+      commentId,
+      userId,
+      'You can only delete your own comments',
+    );
+
+    // Deletes exactly one record, by id.
+    const { deletedCount } = await this.comments
+      .deleteOne({ _id: comment._id })
+      .exec();
+
+    // Of two delete requests at the same moment only one removes the comment,
+    // so the counter goes down once. The `$gt` guard keeps it from going below 0.
+    if (deletedCount === 1) {
+      await this.posts
+        .updateOne(
+          { _id: comment.postId, commentCount: { $gt: 0 } },
+          { $inc: { commentCount: -1 } },
+        )
+        .exec();
+    }
+  }
+
+  /** 404 when the comment does not exist, 403 when it is someone else's. */
+  private async findOwnCommentOrThrow(
+    commentId: string,
+    userId: string,
+    notOwnerMessage: string,
+  ): Promise<CommentDocument> {
+    const comment = await this.comments.findById(commentId).exec();
+
+    if (!comment) {
+      throw new NotFoundException('Comment not found');
+    }
+    if (comment.authorId.toString() !== userId) {
+      throw new ForbiddenException(notOwnerMessage);
+    }
+
+    return comment;
   }
 
   /**

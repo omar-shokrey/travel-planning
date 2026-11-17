@@ -37,3 +37,11 @@
 - Only a published post can be liked. A draft answers 404, the same as a missing post.
 - The post keeps a `likeCount`, as in the data model of the spec. It changes with one `$inc` update only after the like was really stored or deleted, and the decrement is guarded so the counter never goes below 0.
 - Both routes return `{ postId, liked, likeCount }`, so the client can show the like count without a second request. `likeCount` is not part of `PostResponseDto` yet; BLG-02 adds it to the post page.
+
+## Editing and deleting comments (BLG-07)
+
+- `PATCH /api/comments/:id` and `DELETE /api/comments/:id` are for registered users (`user` role) and only for the comment's own author. The service compares the comment's `authorId` with the logged-in user: a comment of someone else answers 403, a missing comment 404.
+- The author of a post cannot edit or delete other users' comments on it. Removing other people's content is moderation and belongs to the admin (GEN-10).
+- `UpdateCommentDto` extends `CreateCommentDto` instead of using `PartialType`: a comment has only its text, so an edit must carry it, with the same rules (non-empty, at most 500 characters).
+- An edited comment keeps its place in the list, because the list is ordered by `createdAt`. `updatedAt` shows that it was edited.
+- Delete answers 204 with no body and removes exactly one record, by id. The post's `commentCount` goes down with one guarded `$inc` update only if this request really deleted the comment, so two delete requests at the same moment lower it once and it never goes below 0.
