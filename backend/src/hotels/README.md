@@ -43,6 +43,16 @@ hotel before its file is removed.
 - A hotel has no policies until its moderator sets them. The hotel page (`GET /api/hotels/:id`) then shows `policy: null`; no default times are invented.
 - The hotel page returns `HotelDetailsResponseDto`: the `HotelResponseDto` of HTL-01 plus `policy`. `HotelResponseDto` and its mapper are unchanged.
 - `HotelsService.findManagedEntityOrThrow(hotelId, userId)` is new: it returns the hotel entity after the same "is this the moderator's hotel" check that HTL-01 uses (404 for a missing hotel, 403 for another moderator). The policy service calls it, and the room services of this module can use it too, so the ownership rule lives in one place.
+
+## Cancellation tiers (HTL-10)
+
+- The tiers are embedded in the hotel's `policy` as `cancellationTiers`, as in the data model of the spec. Each tier has `daysBefore` (whole days before check-in, 0 or more) and `refundPercent` (a whole number from 0 to 100).
+- They are set with the same `PUT /api/hotels/:id/policies` as the times, because the endpoint table gives HTL-09 and HTL-10 one route. `PUT` replaces the policies as a whole, so `cancellationTiers` is required; an empty list means "no refund".
+- Two tiers of one hotel cannot have the same `daysBefore`; the request answers 400. A hotel has at most 10 tiers (`HOTEL_CANCELLATION_TIERS_MAX_COUNT`), a limit I chose because the workbook gives none.
+- The tiers are stored and returned with the highest threshold first, whatever order they were sent in.
+- `selectRefundPercent(tiers, daysRemaining)` in `cancellation-tiers.ts` is the selection rule of FLT-09: the tier with the highest threshold that does not exceed the days remaining, and 0% if no tier applies. It is a pure function with its own tests, for the cancellation of a reservation (HTL-21) and the refund (PAY-03) to call.
+- The percentages are not forced to rise with the threshold. The workbook does not ask for it, and the rule above gives one clear answer for any list.
+- The hotel page (`GET /api/hotels/:id`) shows the tiers inside `policy`.
 ## Rooms (HTL-03)
 
 - `POST /api/hotels/:id/rooms` is limited to the moderator assigned to that

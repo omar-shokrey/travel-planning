@@ -5,10 +5,24 @@ import type { HotelsService } from './hotels.service';
 const HOTEL_ID = '6740f1c2a4b5c6d7e8f90123';
 const USER_ID = '6740f1c2a4b5c6d7e8f90124';
 
+const POLICIES = {
+  checkInTime: '14:00',
+  checkOutTime: '12:00',
+  cancellationTiers: [
+    { daysBefore: 30, refundPercent: 100 },
+    { daysBefore: 7, refundPercent: 50 },
+  ],
+};
+
+interface StoredPolicy {
+  checkInTime: string;
+  checkOutTime: string;
+  cancellationTiers: { daysBefore: number; refundPercent: number }[];
+}
+
 const setup = () => {
   const hotel = {
-    policy: undefined as
-      { checkInTime: string; checkOutTime: string } | undefined,
+    policy: undefined as StoredPolicy | undefined,
     save: jest.fn().mockResolvedValue(undefined),
   };
   const hotelsService = {
@@ -21,48 +35,63 @@ const setup = () => {
 };
 
 describe('HotelPoliciesService', () => {
-  describe('set (HTL-09)', () => {
-    it('stores the check-in and check-out times on the hotel and returns them', async () => {
+  describe('set (HTL-09, HTL-10)', () => {
+    it('stores the times and the tiers on the hotel and returns them', async () => {
+      const { service, hotel } = setup();
+
+      const result = await service.set(HOTEL_ID, POLICIES, USER_ID);
+
+      expect(hotel.policy).toEqual(POLICIES);
+      expect(hotel.save).toHaveBeenCalledTimes(1);
+      expect(result).toEqual(POLICIES);
+    });
+
+    it('stores the tiers with the highest threshold first, whatever order they came in', async () => {
       const { service, hotel } = setup();
 
       const result = await service.set(
         HOTEL_ID,
-        { checkInTime: '14:00', checkOutTime: '12:00' },
+        {
+          ...POLICIES,
+          cancellationTiers: [
+            { daysBefore: 1, refundPercent: 10 },
+            { daysBefore: 30, refundPercent: 100 },
+            { daysBefore: 7, refundPercent: 50 },
+          ],
+        },
         USER_ID,
       );
 
-      expect(hotel.policy).toEqual({
-        checkInTime: '14:00',
-        checkOutTime: '12:00',
-      });
-      expect(hotel.save).toHaveBeenCalledTimes(1);
-      expect(result).toEqual({ checkInTime: '14:00', checkOutTime: '12:00' });
+      const expected = [
+        { daysBefore: 30, refundPercent: 100 },
+        { daysBefore: 7, refundPercent: 50 },
+        { daysBefore: 1, refundPercent: 10 },
+      ];
+      expect(hotel.policy?.cancellationTiers).toEqual(expected);
+      expect(result.cancellationTiers).toEqual(expected);
     });
 
-    it('replaces the times that were set before', async () => {
+    it('replaces the policies that were set before, including the tiers', async () => {
       const { service, hotel } = setup();
-      hotel.policy = { checkInTime: '14:00', checkOutTime: '12:00' };
+      hotel.policy = POLICIES;
 
       await service.set(
         HOTEL_ID,
-        { checkInTime: '15:30', checkOutTime: '11:00' },
+        { checkInTime: '15:30', checkOutTime: '11:00', cancellationTiers: [] },
         USER_ID,
       );
 
       expect(hotel.policy).toEqual({
         checkInTime: '15:30',
         checkOutTime: '11:00',
+        cancellationTiers: [],
       });
     });
 
     it('asks for the hotel as the logged-in moderator', async () => {
       const { service, hotelsService } = setup();
 
-      await service.set(
-        HOTEL_ID,
-        { checkInTime: '14:00', checkOutTime: '12:00' },
-        USER_ID,
-      );
+      await service.set(HOTEL_ID, POLICIES, USER_ID);
 
       expect(hotelsService.findManagedEntityOrThrow).toHaveBeenCalledWith(
         HOTEL_ID,
@@ -76,13 +105,9 @@ describe('HotelPoliciesService', () => {
         new ForbiddenException('You do not manage this hotel'),
       );
 
-      await expect(
-        service.set(
-          HOTEL_ID,
-          { checkInTime: '14:00', checkOutTime: '12:00' },
-          USER_ID,
-        ),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(service.set(HOTEL_ID, POLICIES, USER_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
 
       expect(hotel.save).not.toHaveBeenCalled();
     });
@@ -93,13 +118,9 @@ describe('HotelPoliciesService', () => {
         new NotFoundException('Hotel not found'),
       );
 
-      await expect(
-        service.set(
-          HOTEL_ID,
-          { checkInTime: '14:00', checkOutTime: '12:00' },
-          USER_ID,
-        ),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.set(HOTEL_ID, POLICIES, USER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });
