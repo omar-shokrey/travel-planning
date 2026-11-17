@@ -88,3 +88,15 @@ A login starts a **session**, one document in `sessions` (`userId`, `refreshToke
 - **No new production code.** ACC-04 already makes every route private unless it is marked `@Public()`, so ACC-10 adds tests that keep it that way.
 - **The tests read the real route table** (`test/guest-access.e2e-spec.ts`) instead of a hand-made list. Every route that is not public must answer a guest with 401 and document the 401 in Swagger, so a booking, review or comment route added later is checked without anyone editing the test.
 - **A route that changes data cannot become public by accident.** The test allows only the account routes and the Stripe webhook (`PUBLIC_WRITES`). A pull request that adds a new public route that changes data must add it to that list, in plain view of the reviewer. The same test also keeps the private areas (bookings, payments, refunds, notifications, accounts, private itineraries) closed to guests.
+
+## Owner-only bookings and private itineraries (ACC-11)
+
+- **The rule.** A booking or a private itinerary belongs to one user and only that user opens or changes it. The only exceptions are the ones in the workbook: an administrator may read every booking (ACC-17) and a moderator the bookings of their own hotel or airline (FLT-29, HTL-22). Nobody else gets in, and no role gets into a private itinerary: an administrator or a moderator who asks for one gets 403 like any other user.
+- **Missing is 404, someone else's is 403.** The service loads the record by id (404 if there is none) and then compares its owner with the user from the login cookie (403). The pattern is `findOwnedOrThrow` in `ItinerariesService`. A malformed id is 400 (`ParseObjectIdPipe`), before any lookup.
+- **The owner always comes from the login, never from the client.** A request cannot send an owner id, and a list filters by the owner id of the logged-in user, so a list can never contain someone else's records.
+- **What this issue adds.** `GET /api/users/me` (section 8 lists it under ACC-11) and `test/owner-access.e2e-spec.ts`. The tests run the five itinerary routes as the owner, another user, an administrator and both moderator types, on private and public itineraries, and check that nothing changed after a refused request. No production code of `itineraries` changed: its ownership check was already correct, and the tests now keep it that way.
+- **The booking routes do not exist yet,** so their half of ACC-11 is checked by the pull requests that add them (FLT-22, HTL-18, FLT-25, FLT-29, HTL-20, HTL-22, ACC-17). Each of them must:
+  - find a booking by id and compare its owner with the logged-in user, as above;
+  - list only the bookings of the logged-in user, except on the admin list (ACC-17), which is `@Roles(Role.Admin)`;
+  - give a moderator only the bookings whose provider is the `assignment` of that moderator, read from the user's document and not from the request;
+  - add an end-to-end test as the owner, another user, an administrator, and a moderator of another provider, and remove the matching `it.todo` line in `test/owner-access.e2e-spec.ts`.

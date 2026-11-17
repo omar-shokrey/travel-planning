@@ -4,18 +4,36 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 
 ## Built so far
 
-| Route                                      | Requirement | Access |
-| ------------------------------------------ | ----------- | ------ |
-| `POST /api/admin/users/:id/reset-password` | ACC-07a     | Admin  |
-| `GET /api/admin/accounts`                  | ACC-14      | Admin  |
-| `POST /api/admin/moderators`               | ACC-13      | Admin  |
-| `PATCH /api/admin/accounts/:id/suspend`    | ACC-16      | Admin  |
-| `PATCH /api/admin/accounts/:id/reactivate` | ACC-16      | Admin  |
+| Route                                             | Requirement    | Access |
+| ------------------------------------------------- | -------------- | ------ |
+| `POST /api/admin/users/:id/reset-password`        | ACC-07a        | Admin  |
+| `GET /api/admin/audit-logs`                       | GEN-07         | Admin  |
+| `GET /api/admin/accounts`                         | ACC-14         | Admin  |
+| `POST /api/admin/moderators`                      | ACC-13         | Admin  |
+| `PATCH /api/admin/accounts/:id/suspend`           | ACC-15, ACC-16 | Admin  |
+| `PATCH /api/admin/accounts/:id/reactivate`        | ACC-15, ACC-16 | Admin  |
+| `PATCH /api/admin/providers/:type/:id/deactivate` | ACC-15         | Admin  |
+| `PATCH /api/admin/providers/:type/:id/reactivate` | ACC-15         | Admin  |
+| `GET /api/admin/reports`                          | GEN-10         | Admin  |
+| `PATCH /api/admin/reports/:id`                    | GEN-10         | Admin  |
+| `PATCH /api/admin/content/:type/:id`              | GEN-10         | Admin  |
+| `DELETE /api/admin/content/:type/:id`             | GEN-10         | Admin  |
 
 ## Design decisions
 
 - **This module never writes to the `users` collection.** `AdminService` calls `UsersService`, which owns it and hashes passwords. The service maps the entity with `toUserResponse` before it returns.
 - **The route is the one of section 8 of the project description** (`/api/admin/users/:id/reset-password`), even though the account list (ACC-14) is `/api/admin/accounts`.
+
+## Audit log (GEN-07)
+
+`GET /api/admin/audit-logs?page=1&limit=10&action=reset_password&adminId=…&targetType=user&targetId=…`
+
+- **The route is here, the records are in `audit`.** The module table gives `admin` the "audit log views" and `audit` the records. `AuditService.list` returns entities; `AdminService.listAuditLogs` maps them with `toAuditLogResponse` and builds the page with `paginate`, like the account list.
+- **Newest first**, by `createdAt` and then `_id`. 10 per page by default, at most 50, `{ items, meta }`, `items: []` when nothing matches (GEN-05).
+- **Filters:** `action` and `targetType` must be values of their enums, `adminId` and `targetId` must be ObjectIds, and all given filters must match. Anything else, or an unknown parameter, answers 400.
+- **Each item:** `id`, `adminId`, `action`, `targetType`, `targetId`, `details` (or `null`) and `createdAt` in UTC.
+- **The admin's id comes from the login** (`@CurrentUser('id')`), passed from the controller to `resetPassword` and `createModerator` as their last parameter. The client never sends it.
+- **Read-only.** No route changes or deletes an audit record.
 
 ## Admin password reset (ACC-07a)
 
@@ -28,7 +46,8 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **Errors:** an id that is not an ObjectId answers 400 (`ParseObjectIdPipe`), an unknown account 404 "Account not found", a caller who is not an admin 403 (`RolesGuard`).
 - **Every session of the account ends** (ACC-06 sessions). `SessionsService.revokeAllOfUser` sets `revokedAt` on all of them, with no exception, so the old access and refresh cookies get 401 and whoever held a session, the owner or someone who stole it, must log in with the temporary password. The filter always names that one account. The admin's own session is never touched, because an administrator's password cannot be reset here. `AdminModule` imports `AuthModule`, which exports `SessionsService`; `AuthModule` does not import `AdminModule`, so there is no cycle.
 - **The password is saved first, then the sessions end.** If the second step fails, the temporary password is in place but the old sessions stay alive until they log out or run out (30 minutes idle). The other order would end the sessions while the old password still works.
-- **Not built here:** the audit record of the reset (GEN-07, wave 3) and a notification to the owner.
+- **The reset is recorded in the audit log** (GEN-07) as soon as the password has changed, before the sessions end, so a failure in ending them cannot leave a completed reset unlogged. The record has the admin, the action `reset_password` and the account, never the password. See `backend/src/audit/README.md`.
+- **Not built here:** a notification to the owner.
 
 ## Account list (ACC-14)
 
@@ -42,6 +61,32 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **The query is in `UsersService.listAccounts`**, which owns the collection and returns entities; `AdminService` maps them with `toUserResponse` and builds the page with `paginate`. Documents are not read with `lean()`, so schema defaults (such as `mustChangePassword: false`) apply to older accounts.
 - **The search uses the `$regex` string form** (`{ $regex, $options: 'i' }`), not a RegExp object. In our e2e runs against Atlas, a count with RegExp objects and the `i` flag inside `$or` never got an answer, while the string form always did. Both mean the same to MongoDB.
 
+## Report handling and moderation (GEN-10)
+
+| Route                                 | Requirement    | Access |
+| ------------------------------------- | -------------- | ------ |
+| `GET /api/admin/reports`              | GEN-09, GEN-10 | Admin  |
+| `PATCH /api/admin/reports/:id`        | GEN-10         | Admin  |
+| `PATCH /api/admin/content/:type/:id`  | GEN-10         | Admin  |
+| `DELETE /api/admin/content/:type/:id` | GEN-10         | Admin  |
+
+- **Own files.** `AdminModerationController` (`@Controller('admin')`, `@Roles(Role.Admin)` on the class) and `AdminModerationService` sit next to `AdminController` and `AdminService`, so this feature and the account features (ACC-15, GEN-07 audit) change different files. `AdminModule` imports `ReportsModule`, `BlogModule`, `ItinerariesModule` and `UploadsModule`; none of them imports `AdminModule`.
+- **The owning modules do the writes.** `ReportsService` reads and resolves reports, `PostsService` and `ItinerariesService` hide and delete their content (`existsById`, `setHidden`, `removeByAdmin`), and `UploadsService` deletes image files. `AdminModerationService` only decides the order and maps the answers.
+- **Posts and itineraries only (team decision).** `:type` is `post` or `itinerary` (the values of `ReportTargetType`), checked with `ParseEnumPipe`; anything else answers 400 "type must be one of: post, itinerary". Comments (BLG-05, PR #142) and hotel reviews are added with GEN-09's `comment` and `review` report types by a later PR, which adds them here too.
+- **The report list** (`?page&limit&status&targetType`): open reports by default, because the list is the admin's work queue; `status` shows `dismissed`, `hidden` or `deleted` reports instead. **Oldest first** (`createdAt`, then `_id`), so the report that has waited longest is handled first. Each item: `id`, `targetType`, `targetId`, `reason`, `status`, `reporterId`, `createdAt`, and `resolvedBy` and `resolvedAt` once resolved. Pagination follows GEN-05.
+- **Resolving a report** (`{ "action": "dismiss" | "hide" | "delete" }`) sets its status to `dismissed`, `hidden` or `deleted`, `resolvedBy` (the admin, from the login) and `resolvedAt`.
+  - **Only an open report can be resolved: 409 otherwise.** The report is claimed first with a conditional update on `status: open`, and the content changes only after that, so of two admins at the same moment one wins and the other gets 409 "This report has already been resolved" without touching the content.
+  - **`hide` and `delete` also resolve the other open reports of the same content** with the same status, admin and time, because the content they point at has changed and nobody needs to handle them again. **`dismiss` affects this report only**: another user's report of the same content may have a better reason.
+  - **Content that is already gone** (its author deleted it since): `hide` answers 409 ("The reported post no longer exists, so it cannot be hidden. Dismiss the report or delete it instead.") and the report stays open; `delete` is idempotent and just closes the report as `deleted`, because what the admin wanted (the content is gone) is already true; nothing is written to the audit log then, because the admin deleted nothing (the report itself keeps who closed it and when). Content that is already hidden is fine for `hide`. If the author deletes the content between the check and the hide (a race), `setHidden` changes nothing and the content is missing: the report is then closed as `deleted` (`ReportsService.changeResolvedStatus`), its other open reports too, and nothing is audited.
+  - An unknown report answers 404 "Report not found"; an id that is not an ObjectId 400; a missing, `null` or unknown `action` 400.
+- **`PATCH /api/admin/content/:type/:id` with `{ "moderation": "hidden" | "visible" }` is not in section 8 of the project description**, which only has the `DELETE` route. The workbook asks that an admin can "hide or delete any post, comment, review or itinerary directly", so the hide needs a route; it follows the `DELETE` route's path, and `visible` lets an admin undo a mistaken hide. 404 for unknown content, 409 when it already has that state. Hiding resolves its open reports as `hidden`; showing it again does not reopen reports that were resolved. The answer is `{ type, id, moderation }`. A moderation change does not touch the content's `updatedAt`, which means "last changed by its author" (BLG-03 shows it, ITN-03 sorts by it).
+- **`DELETE /api/admin/content/:type/:id`** deletes any post or itinerary (204), whoever wrote it, and resolves its open reports as `deleted`; 404 for unknown content. **Reports are kept** as history. A clone of a deleted itinerary is a separate document and stays.
+- **Images of deleted content are deleted** with `UploadsService.deleteImage`, after the database work. A file that cannot be removed is logged (the count only) and does not fail the request, since the content is already gone. An itinerary's activity images that a clone still uses (ITN-21 copies the file names) are kept.
+- **What "hidden" changes today:** a hidden post or itinerary answers 404 to anyone but its author in GEN-09 reporting; its author still sees it ("my posts" shows `moderation: hidden`; `GET /api/itineraries/:id` is owner-only). Public search and view of itineraries (ITN-21, merged) filter on `moderation: visible`, so a hidden itinerary leaves them at once. The public blog routes (BLG-02, BLG-09, BLG-12) do not exist yet; the blog README says they must leave hidden posts out.
+- **One enum per module.** `ContentModeration` (here), `PostModeration` (blog) and `ItineraryModeration` (itineraries) have the same two values. The services take `hidden: boolean`, so no module imports another's enum. A shared-layer PR can move one `Moderation` enum to `backend/src/common/enums/` later.
+- **No notification to the author.** The notification types of the data model (GEN-01) have no moderation type, and adding one changes the shared spec; GEN-10 does not ask for one. It can be added later if the team wants it.
+- **Audit (GEN-07):** every action is recorded after it succeeded, with the admin id: `dismiss_report` (target: the report; note: the reported item, `post <id>`), `hide_content` and `delete_content` (target: the post or itinerary; note `report <id>` when it came from a report), and `show_content` for showing content again (a new action value, so that un-hiding is logged too). A refused action (404, 409) records nothing.
+
 ## Moderator accounts (ACC-13)
 
 `POST /api/admin/moderators` with `name`, `email`, `role`, `providerId` and `temporaryPassword` answers 201 with the new account.
@@ -50,6 +95,7 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **Exactly one provider per moderator.** The provider type follows the role, and the account stores `assignment: { providerType, providerId }`, which the airline and hotel routes already check on every edit. `providerId` must be an existing airline for an airline moderator and an existing hotel for a hotel moderator; otherwise 400 with `providerId` in `errors` ("must be the id of an existing airline/hotel"), so a hotel id sent for an airline moderator is refused too. The lookups use `AirlinesService.findEntityOrThrow` and `HotelsService.findEntityOrThrow`; `AdminModule` imports `FlightsModule` and `HotelsModule`, neither of which imports it back.
 - **Several moderators per airline or hotel are allowed** (team decision): the workbook limits the moderator to one provider, not the provider to one moderator.
 - **The temporary password works like the admin reset (ACC-07a):** the admin chooses it, it follows the password rule, it is hashed in `UsersService.createModerator`, and the account starts with `mustChangePassword: true`, so the moderator sets a new one at the first login (ACC-08). The response never contains it.
+- **The creation is recorded in the audit log** (GEN-07) with the admin, the action `create_moderator`, the new account and a note with the role and the provider (`hotel_moderator of hotel <id>`), never the password.
 - **An email that is already registered answers 409**, checked first and again by the unique index, as in registration.
 - **The response is `UserResponseDto` with `assignment`** (`providerType`, `providerId` as a string). It is left out for accounts that are not moderators, so other responses keep their shape.
 - **The client cannot set** the status (always active), `mustChangePassword` or the assignment directly; those fields answer 400.
@@ -58,12 +104,31 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 
 `PATCH /api/admin/accounts/:id/suspend` and `PATCH /api/admin/accounts/:id/reactivate` answer 200 with the account.
 
-- **Registered users only, for now.** These routes are shared with ACC-15, which suspends moderators. Until ACC-15 extends them, a moderator answers 400 ("Only registered user accounts can be suspended or reactivated here"). An administrator answers 403.
+- **Users and moderators.** These routes are shared with ACC-15, which extends them to `airline_moderator` and `hotel_moderator` accounts with the same rules (see the ACC-15 section). An administrator answers 403.
 - **What suspension does.** Login and refresh already refuse a suspended account with 403 "Your account is suspended", and the authentication guard refuses its requests. Suspending also ends every session of the account (`SessionsService.revokeAllOfUser`), so its old cookies stop at once (the access cookie gets 401, because the session is checked first) and the user logs in again after a reactivation. The status changes first and the sessions end second, so a failure in between never leaves the account active.
 - **Reactivating ends every session again, first.** Two cases leave a session alive through a suspension: ending the sessions failed after the status changed (a retry then answers 409 "already suspended"), or a login that read `active` saved its session just after the suspension ended the others. The guard refuses such a session while the account is suspended, but it would work again after a reactivation. So `reactivate` ends every session of the account while it is still suspended (no new login can happen then), and only then changes the status. If that fails, the account stays suspended and the admin retries.
-- **The user is notified (GEN-01).** After the status change, the user gets an `account_suspended` in-app notification ("Your account was suspended by an administrator."). They cannot log in while suspended, so they read it after a reactivation. `notify` never throws, so it cannot fail the suspension. Reactivating sends nothing.
-- **One helper for both changes.** `changeUserStatus` holds the shared rules (exists, registered user, not deactivated, expected status, conditional update); `suspend` and `reactivate` only add their session and notification steps.
+- **The account is notified (GEN-01).** After the status change, the user or moderator gets an `account_suspended` in-app notification ("Your account was suspended by an administrator."). They cannot log in while suspended, so they read it after a reactivation. `notify` never throws, so it cannot fail the suspension. Reactivating sends nothing.
+- **One helper for both changes.** `changeUserStatus` holds the shared rules (exists, registered user or moderator, not deactivated, expected status, conditional update); `suspend` and `reactivate` only add their session and notification steps.
 - **What it does not change.** Bookings stay valid and the user's posts, comments, reviews and itineraries stay visible, as the requirement says. Hiding content is GEN-10.
 - **Status rules.** Suspending a suspended account or reactivating an active one answers 409. A deactivated account (closed by its owner, ACC-12) answers 409 to both: an admin does not reopen it.
 - **Two admins at once.** `UsersService.changeStatus(id, from, to)` changes the status only if it still is `from`, in one `findOneAndUpdate`. The request that loses answers 409 ("changed by another request") and ends no session.
-- **Not here:** the audit record (GEN-07), added after GEN-07 merges.
+- **Audit (GEN-07):** a suspension and a reactivation are each recorded after the status change (`suspend_user`, `reactivate_user`, target the account, note its role). A refused change (404, 403, 409) records nothing.
+
+## Suspend moderators and deactivate providers (ACC-15)
+
+`PATCH /api/admin/accounts/:id/suspend` and `/reactivate` now also take moderator accounts. `PATCH /api/admin/providers/:type/:id/deactivate` and `/reactivate` change a hotel or an airline and answer 200 with `{ type, id, name, active }`.
+
+- **A moderator is suspended like a user (ACC-16).** Same routes, same rules: 409 when already suspended, not suspended, or deactivated (ACC-12); every session ends on suspension; the status changes with the conditional `UsersService.changeStatus`, so of two admins at once one gets 409 and ends no session; an administrator answers 403. The moderator's hotel or airline stays active.
+- **A suspended moderator gets the same in-app notification as a user** (`account_suspended`, see ACC-16 above), because ACC-15 says affected parties are notified. One notification per suspension, for every role. Reactivation sends no notification: the account can log in again, which says it.
+- **Deactivating a provider is separate from suspending its moderators.** The provider routes change only `active` on the hotel or airline. The moderators keep their status and their sessions; an admin who also wants them out suspends them with the account routes.
+- **`:type` is `hotel` or `airline`** (`ProviderType`), checked with `ParseEnumPipe`: anything else answers 400 "type must be one of: hotel, airline". `:id` uses `ParseObjectIdPipe` (400). A provider that does not exist answers 404 from the owning service ("Hotel not found", "Airline not found").
+- **The owning module writes the flag.** `AdminService` reads the provider with `findEntityOrThrow` and changes it with `HotelsService.setActive` or `AirlinesService.setActive`, which update only when `active` is not already the new value (`active: { $ne: value }` in one `findOneAndUpdate`, so an old airline without the field counts as active). Deactivating a deactivated provider or reactivating an active one answers 409; if another admin changed it between the read and the update, 409 "changed by another request" and no notification is sent.
+- **The moderators of a deactivated provider are notified** (`provider_deactivated`) in one `notifyMany`, after the update. `UsersService.findModeratorIdsOfProvider` finds them by `assignment.providerId` (indexed) and `assignment.providerType`, leaving out accounts closed by their owner (ACC-12). The message names the provider and says that, while it is deactivated, it is hidden from search and cannot be booked, and that confirmed bookings remain valid. It describes the deactivation only and promises no later notice, so it stays true if the provider is reactivated before the moderator reads it, with no second read of the provider. **No link, for hotels and airlines alike:** the notification link kinds of the data model (`flight_booking`, `hotel_booking`, `flight`, `hotel`) have no airline, and a link to a hidden hotel helps no one, so both kinds get the same notice.
+- **A failure after the change is logged, not answered as a 500.** The deactivation has already happened when the moderators are looked up and notified, so an error there is logged (`Logger.error`) and the route still answers 200; a 500 would tell the admin the change failed, and a retry would then answer 409. The same holds for suspension: if ending the sessions fails after the status changed, it is logged and the account is still notified. The guard refuses those sessions while the account is suspended, and `reactivate` ends them first.
+- **Reactivating a provider sends no notification.** The data model has no `provider_reactivated` type, and changing it is a shared-layer change. It can be added later if the team wants it.
+- **Response: a small `ProviderStatusResponseDto`** (`type`, `id`, `name`, `active`), mapped by `toProviderStatusResponse`. One shape for both kinds keeps the two routes and Swagger simple, and the admin module does not need to build the full hotel or airline profile, which belongs to the hotels and flights modules. The full profile stays at the provider's own routes.
+- **Follow-ups for other issues (these features do not exist yet), so this PR is "Part of #21":** the hotels and flights READMEs state the rule for whoever builds them.
+  - Flight search (FLT-11) and hotel search (HTL-11) must leave out providers with `active: false` (the hotels collection already has the index `(cityId, active)`).
+  - Flight booking (FLT-21) and hotel booking (HTL-16) must refuse a provider with `active: false`, while existing Confirmed bookings stay valid.
+  - When bookings exist, travellers with upcoming bookings of a deactivated provider are affected parties too: the booking issues should notify them from `deactivateProvider` (`provider_deactivated`, with a link to the booking).
+- **Audit (GEN-07):** a provider deactivation and reactivation are each recorded after the change (`deactivate_provider`, `reactivate_provider`, target type `hotel` or `airline`, note the provider's name). A refused change records nothing.

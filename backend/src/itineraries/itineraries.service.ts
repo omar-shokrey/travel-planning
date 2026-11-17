@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Error as MongooseError, Model, Types } from 'mongoose';
 import {
   paginate,
   type PaginatedResponse,
@@ -14,17 +14,24 @@ import {
 import type { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
+import { ItineraryModeration } from './enums/itinerary-moderation.enum';
 import type { AddDayDto } from './dto/add-day.dto';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto';
+import type { MoveDayDto } from './dto/move-day.dto';
 import type { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
 import type { ItineraryResponseDto } from './dto/itinerary-response.dto';
 import type { UpdateDayDto } from './dto/update-day.dto';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto';
-import { ITINERARY_MAX_DAYS } from './itineraries.constants';
+import {
+  ITINERARY_CHANGED_MESSAGE,
+  ITINERARY_MAX_DAYS,
+} from './itineraries.constants';
 import {
   toItineraryDetailResponse,
   toItineraryResponse,
 } from './mappers/itinerary.mapper';
+import type { ItineraryDay } from './models/itinerary-day.schema';
+import { PUBLICLY_VISIBLE } from './public-itineraries.service';
 import { Itinerary, type ItineraryDocument } from './models/itinerary.schema';
 
 @Injectable()
@@ -126,7 +133,8 @@ export class ItinerariesService {
    * ITN-05: add a day at the end of your own itinerary. One conditional update
    * adds the day and counts it, and only while there are fewer than 60, so two
    * requests at the same moment cannot pass the limit or leave `dayCount`
-   * different from the number of days.
+   * different from the number of days. It bumps the version, so a delete or a
+   * move that read the itinerary before this day existed cannot drop it.
    */
   async addDay(
     id: string,
@@ -142,7 +150,7 @@ export class ItinerariesService {
     };
     const itinerary = await this.itineraries.findOneAndUpdate(
       { _id: id, dayCount: { $lt: ITINERARY_MAX_DAYS } },
-      { $push: { days: day }, $inc: { dayCount: 1 } },
+      { $push: { days: day }, $inc: { dayCount: 1, __v: 1 } },
       { returnDocument: 'after', runValidators: true },
     );
     if (!itinerary) {
@@ -177,8 +185,125 @@ export class ItinerariesService {
       day.notes = dto.notes;
     }
 
-    await itinerary.save();
+    await this.saveOrConflict(itinerary);
     return toItineraryDetailResponse(itinerary);
+  }
+
+  /**
+   * ITN-07: delete a day of your own itinerary. The days after it move up one
+   * place, so their numbers and dates change; both are computed when read.
+   *
+   * One update writes the remaining days and their count, and only if the
+   * itinerary is still at the version that was read, so `dayCount` always
+   * equals the number of days and a day added or moved in the meantime is
+   * never lost. The update bumps the version, so any save that still holds
+   * the old positions is refused too.
+   */
+  async removeDay(
+    id: string,
+    dayId: string,
+    userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    const itinerary = await this.findOwnedOrThrow(id, userId);
+    this.findDayOrThrow(itinerary, dayId);
+
+    const remaining = this.daysAsObjects(itinerary).filter(
+      (day) => day._id.toString() !== dayId,
+    );
+    const updated = await this.writeDays(itinerary, remaining);
+    return toItineraryDetailResponse(updated);
+  }
+
+  /**
+   * ITN-08: move a day of your own itinerary to a new position. The days in
+   * between shift by one, and every number and date follows from the new
+   * order when read. The new order is written with the same version check as
+   * a delete (ITN-07).
+   */
+  async moveDay(
+    id: string,
+    dto: MoveDayDto,
+    userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    const itinerary = await this.findOwnedOrThrow(id, userId);
+    this.findDayOrThrow(itinerary, dto.dayId);
+    if (dto.position > itinerary.days.length) {
+      throw new BadRequestException(
+        `position must be between 1 and ${itinerary.days.length}, the number of days`,
+      );
+    }
+
+    const days = this.daysAsObjects(itinerary);
+    const from = days.findIndex((day) => day._id.toString() === dto.dayId);
+    const to = dto.position - 1;
+    if (from === to) {
+      return toItineraryDetailResponse(itinerary);
+    }
+    const [moved] = days.splice(from, 1);
+    days.splice(to, 0, moved);
+
+    return toItineraryDetailResponse(await this.writeDays(itinerary, days));
+  }
+
+  /** The days of an itinerary as plain objects that keep their ids. */
+  private daysAsObjects(
+    itinerary: ItineraryDocument,
+  ): (Record<string, unknown> & { _id: Types.ObjectId })[] {
+    return itinerary.days.map((day) =>
+      (
+        day as unknown as {
+          toObject(): Record<string, unknown> & { _id: Types.ObjectId };
+        }
+      ).toObject(),
+    );
+  }
+
+  /**
+   * Replaces the days of an itinerary in one update, only if it is still at
+   * the version that was read, and bumps the version (ITN-07, ITN-08). A
+   * request that lost the race gets 409.
+   */
+  private async writeDays(
+    itinerary: ItineraryDocument,
+    days: Record<string, unknown>[],
+  ): Promise<ItineraryDocument> {
+    const updated = await this.itineraries.findOneAndUpdate(
+      { _id: itinerary._id, __v: itinerary.__v },
+      { $set: { days, dayCount: days.length }, $inc: { __v: 1 } },
+      { returnDocument: 'after' },
+    );
+    if (!updated) {
+      throw new ConflictException(ITINERARY_CHANGED_MESSAGE);
+    }
+    return updated;
+  }
+
+  /**
+   * Saves an itinerary that was changed in memory. If another request changed
+   * the order of its days in the meantime, Mongoose refuses the save (the
+   * version no longer matches), because a change by position could hit the
+   * wrong day. That is a 409, so the client reloads and tries again.
+   */
+  async saveOrConflict(itinerary: ItineraryDocument): Promise<void> {
+    try {
+      await itinerary.save();
+    } catch (error) {
+      if (error instanceof MongooseError.VersionError) {
+        throw new ConflictException(ITINERARY_CHANGED_MESSAGE);
+      }
+      throw error;
+    }
+  }
+
+  /** The day of this itinerary with this id, or 404. */
+  findDayOrThrow(itinerary: ItineraryDocument, dayId: string): ItineraryDay {
+    const day = itinerary.days.find(
+      (candidate) => candidate._id.toString() === dayId,
+    );
+    if (!day) {
+      throw new NotFoundException('Day not found');
+    }
+    return day;
   }
 
   /** For other services, which need the entity. Never return it from a controller. */
@@ -190,8 +315,39 @@ export class ItinerariesService {
     return itinerary;
   }
 
-  /** Loads an itinerary and checks that the caller owns it: 404, then 403. */
-  private async findOwnedOrThrow(
+  /**
+   * For other services (reports, GEN-09): the owner of an itinerary and
+   * whether everyone may see it, by the same rule as public search (ITN-21,
+   * `PUBLICLY_VISIBLE`), so the two cannot disagree. Reads only those four
+   * fields, not the days. 404 when the itinerary does not exist.
+   */
+  async findOwnerAndVisibilityOrThrow(
+    id: string,
+  ): Promise<{ ownerId: string; publiclyVisible: boolean }> {
+    const itinerary = await this.itineraries
+      .findById(id)
+      .select('ownerId visibility moderation authorDeactivated')
+      .lean()
+      .exec();
+    if (!itinerary) {
+      throw new NotFoundException('Itinerary not found');
+    }
+    const fields = Object.keys(
+      PUBLICLY_VISIBLE,
+    ) as (keyof typeof PUBLICLY_VISIBLE)[];
+    return {
+      ownerId: itinerary.ownerId.toString(),
+      publiclyVisible: fields.every(
+        (field) => itinerary[field] === PUBLICLY_VISIBLE[field],
+      ),
+    };
+  }
+
+  /**
+   * Loads an itinerary and checks that the caller owns it: 404, then 403.
+   * Also used by the activity and transport cost services of this module.
+   */
+  async findOwnedOrThrow(
     id: string,
     userId: string,
     forbiddenMessage = 'You can only change your own itineraries',
@@ -219,11 +375,93 @@ export class ItinerariesService {
     }
   }
 
-  /** ITN-05: a day's city comes from the seeded city list (GEN-12). */
-  private async assertCityExists(cityId: string): Promise<void> {
+  /**
+   * ITN-10, ITN-14, ITN-16: money in an itinerary uses a supported currency,
+   * one of the currency codes in the seeded country list (GEN-12).
+   */
+  async assertCurrencySupported(currency: string): Promise<void> {
+    const country = await this.countries.exists({ currency });
+    if (!country) {
+      throw new BadRequestException(`Unsupported currency: ${currency}`);
+    }
+  }
+
+  /** ITN-05, ITN-16: a city comes from the seeded city list (GEN-12). */
+  async assertCityExists(cityId: string): Promise<void> {
     const city = await this.cities.exists({ _id: cityId });
     if (!city) {
       throw new BadRequestException(`Unknown city id: ${cityId}`);
     }
   }
+
+  /** For the admin module (GEN-10): whether an itinerary with this id exists. */
+  async existsById(id: string): Promise<boolean> {
+    // A count, not exists(): a findOne that matched stalled in local e2e runs
+    // against the Atlas test database.
+    return (await this.itineraries.countDocuments({ _id: id }).exec()) > 0;
+  }
+
+  /**
+   * For the admin module (GEN-10): hides an itinerary, or shows it again. Its
+   * owner and admins still see a hidden itinerary; reports (GEN-09) and public
+   * search (ITN-21, `PUBLICLY_VISIBLE`) leave it out for others. One conditional
+   * update, so of two admins at the same moment only one changes it. Returns
+   * false when nothing changed: the itinerary is missing or already in that
+   * state.
+   */
+  async setHidden(id: string, hidden: boolean): Promise<boolean> {
+    const filter = hidden
+      ? { _id: id, moderation: { $ne: ItineraryModeration.Hidden } }
+      : { _id: id, moderation: ItineraryModeration.Hidden };
+    const moderation = hidden
+      ? ItineraryModeration.Hidden
+      : ItineraryModeration.Visible;
+    const itinerary = await this.itineraries
+      // Not an edit by the owner, so `updatedAt` ("last changed") stays.
+      .findOneAndUpdate(filter, { $set: { moderation } }, { timestamps: false })
+      .select('_id')
+      .lean()
+      .exec();
+    return itinerary !== null;
+  }
+
+  /**
+   * For the admin module (GEN-10): deletes an itinerary, whoever owns it.
+   * Returns the file names of its activity images that no other itinerary
+   * uses, which the caller deletes, or null when there was no such itinerary.
+   * Clones are separate documents and are not touched (as in ITN-01); a clone
+   * keeps the image file names of its source (ITN-21), so a file a clone
+   * still uses is not returned.
+   */
+  async removeByAdmin(id: string): Promise<string[] | null> {
+    const itinerary = await this.itineraries
+      .findByIdAndDelete(id)
+      .select('days.activities.images')
+      .lean()
+      .exec();
+    if (!itinerary) {
+      return null;
+    }
+    const images = activityImages(itinerary);
+    if (images.length === 0) {
+      return [];
+    }
+    const others = await this.itineraries
+      .find({ 'days.activities.images': { $in: images } })
+      .select('days.activities.images')
+      .lean()
+      .exec();
+    const stillUsed = new Set(others.flatMap(activityImages));
+    return images.filter((image) => !stillUsed.has(image));
+  }
+}
+
+/** The image file names of every activity of an itinerary, each once. */
+function activityImages(itinerary: {
+  days?: { activities?: { images?: string[] }[] }[];
+}): string[] {
+  const names = (itinerary.days ?? []).flatMap((day) =>
+    (day.activities ?? []).flatMap((activity) => activity.images ?? []),
+  );
+  return [...new Set(names)];
 }

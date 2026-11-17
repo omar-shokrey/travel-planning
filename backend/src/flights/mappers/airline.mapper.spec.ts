@@ -23,6 +23,7 @@ describe('toAirlineResponse', () => {
       logo: source.logo,
       logoUrl: imageUrl(source.logo),
       active: true,
+      cancellationTiers: [],
       createdAt: '2026-11-05T11:00:00.000Z',
       updatedAt: '2026-11-06T12:30:00.000Z',
     });
@@ -40,6 +41,7 @@ describe('toAirlineResponse', () => {
 
     expect(Object.keys(toAirlineResponse(stored)).sort()).toEqual([
       'active',
+      'cancellationTiers',
       'code',
       'createdAt',
       'id',
@@ -48,5 +50,32 @@ describe('toAirlineResponse', () => {
       'name',
       'updatedAt',
     ]);
+  });
+
+  it('returns the stored cancellation tiers as plain objects, in the stored order (FLT-09)', () => {
+    const tiers = [
+      { daysBefore: 30, refundPercent: 100 },
+      { daysBefore: 7, refundPercent: 50 },
+    ];
+    const stored = {
+      ...source,
+      policy: {
+        cancellationTiers: tiers.map((tier) => ({ ...tier, _internal: 1 })),
+      },
+    };
+
+    const response = toAirlineResponse(stored);
+
+    expect(response.cancellationTiers).toEqual(tiers);
+    expect(response.cancellationTiers).not.toBe(
+      stored.policy.cancellationTiers,
+    );
+  });
+
+  it('shows an empty policy for an airline stored before FLT-09', () => {
+    expect(toAirlineResponse(source).cancellationTiers).toEqual([]);
+    expect(
+      toAirlineResponse({ ...source, policy: undefined }).cancellationTiers,
+    ).toEqual([]);
   });
 });

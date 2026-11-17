@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { type HydratedDocument } from 'mongoose';
+import { AirlinePolicy, AirlinePolicySchema } from './airline-policy.schema';
 
 @Schema({ collection: 'airlines', timestamps: true })
 export class Airline {
@@ -14,6 +15,13 @@ export class Airline {
 
   @Prop({ default: true })
   active: boolean;
+
+  /**
+   * The cancellation tiers (FLT-09), later also the baggage rules. An airline
+   * stored before FLT-09 has none, so readers treat a missing policy as empty.
+   */
+  @Prop({ type: AirlinePolicySchema, default: () => ({}) })
+  policy?: AirlinePolicy;
 
   /** Written by Mongoose (`timestamps: true`). Declared here only for the types. */
   createdAt: Date;
