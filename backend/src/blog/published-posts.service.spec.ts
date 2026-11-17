@@ -1,8 +1,9 @@
 import { Types, type Model } from 'mongoose';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import type { User } from '../users/models/user.schema';
-import { DELETED_USER_NAME } from './blog.constants';
+import { DELETED_USER_NAME, SEARCH_AUTHORS_MAX_COUNT } from './blog.constants';
 import type { BlogPost } from './models/blog-post.schema';
 import { PostStatus } from './models/post-status.enum';
 import { PublishedPostsService } from './published-posts.service';
@@ -46,8 +47,10 @@ function queryOf(result: unknown): QueryChain {
 function setup(stored = [post('6740f1c2a4b5c6d7e8f9aaa1', sara)]) {
   const postsQuery = queryOf(stored);
   const usersQuery = queryOf([{ _id: sara, name: 'Sara Ahmed' }]);
+  const aggregateExec = jest.fn().mockResolvedValue(stored);
   const posts = {
     find: jest.fn(() => postsQuery),
+    aggregate: jest.fn(() => ({ exec: aggregateExec })),
     countDocuments: jest.fn(() => ({
       exec: jest.fn().mockResolvedValue(stored.length),
     })),
@@ -57,7 +60,7 @@ function setup(stored = [post('6740f1c2a4b5c6d7e8f9aaa1', sara)]) {
     posts as unknown as Model<BlogPost>,
     users as unknown as Model<User>,
   );
-  return { posts, postsQuery, users, service };
+  return { posts, postsQuery, users, usersQuery, service };
 }
 
 describe('PublishedPostsService', () => {
@@ -119,6 +122,113 @@ describe('PublishedPostsService', () => {
         meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
       });
       expect(users.find).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listNewest (BLG-09 without a keyword)', () => {
+    it('lists every published post, newest first', async () => {
+      const { posts, postsQuery, service } = setup();
+
+      await service.listNewest(new PaginationQueryDto());
+
+      expect(posts.find).toHaveBeenCalledWith({ status: PostStatus.Published });
+      expect(postsQuery.sort).toHaveBeenCalledWith({
+        publishedAt: -1,
+        _id: -1,
+      });
+    });
+  });
+
+  describe('search (BLG-09)', () => {
+    // The dot of the keyword is escaped, so it matches only a dot.
+    const pattern = { $regex: 'cai\\.ro', $options: 'i' };
+
+    it('finds the matching authors by name first, active registered users only', async () => {
+      const { users, usersQuery, service } = setup();
+
+      await service.search('cai.ro', new PaginationQueryDto());
+
+      expect(users.find).toHaveBeenNthCalledWith(1, {
+        role: Role.User,
+        status: { $ne: UserStatus.Deactivated },
+        name: pattern,
+      });
+      expect(usersQuery.sort).toHaveBeenCalledWith({ _id: 1 });
+      expect(usersQuery.limit).toHaveBeenCalledWith(SEARCH_AUTHORS_MAX_COUNT);
+    });
+
+    it('matches the title, the tags or the posts of those authors, published only, with the keyword escaped', async () => {
+      const { posts, service } = setup();
+
+      await service.search('cai.ro', new PaginationQueryDto());
+
+      const match = {
+        status: PostStatus.Published,
+        $or: [
+          { title: pattern },
+          { tags: pattern },
+          { authorId: { $in: [sara] } },
+        ],
+      };
+      expect(posts.countDocuments).toHaveBeenCalledWith(match);
+      const [pipeline] = posts.aggregate.mock.calls[0] as unknown as [
+        Record<string, unknown>[],
+      ];
+      expect(pipeline[0]).toEqual({ $match: match });
+    });
+
+    it('leaves the author condition out when no author name matches', async () => {
+      const { posts, usersQuery, service } = setup();
+      usersQuery.exec.mockResolvedValueOnce([]);
+
+      await service.search('nobody', new PaginationQueryDto());
+
+      expect(posts.countDocuments).toHaveBeenCalledWith({
+        status: PostStatus.Published,
+        $or: [
+          { title: { $regex: 'nobody', $options: 'i' } },
+          { tags: { $regex: 'nobody', $options: 'i' } },
+        ],
+      });
+    });
+
+    it('orders by likes plus comments, then newest first, then id, and pages', async () => {
+      const { posts, service } = setup();
+      const query = Object.assign(new PaginationQueryDto(), {
+        page: 3,
+        limit: 4,
+      });
+
+      await service.search('cairo', query);
+
+      const [pipeline] = posts.aggregate.mock.calls[0] as unknown as [
+        Record<string, unknown>[],
+      ];
+      expect(pipeline.slice(1, 5)).toEqual([
+        {
+          $addFields: {
+            score: {
+              $add: [
+                { $ifNull: ['$likeCount', 0] },
+                { $ifNull: ['$commentCount', 0] },
+              ],
+            },
+          },
+        },
+        { $sort: { score: -1, publishedAt: -1, _id: -1 } },
+        { $skip: 8 },
+        { $limit: 4 },
+      ]);
+    });
+
+    it('returns summary rows and the total of all matches', async () => {
+      const { service } = setup();
+
+      const page = await service.search('cairo', new PaginationQueryDto());
+
+      expect(page.items).toHaveLength(1);
+      expect(page.items[0].author.name).toBe('Sara Ahmed');
+      expect(page.meta.total).toBe(1);
     });
   });
 });

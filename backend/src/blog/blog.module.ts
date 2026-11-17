@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { UsersModule } from '../users/users.module';
+import { PostSearchController } from './post-search.controller';
 import { PostsController } from './posts.controller';
 import { PostsService } from './posts.service';
 import { BlogPost, BlogPostSchema } from './models/blog-post.schema';
@@ -15,7 +16,7 @@ import { TagsController } from './tags.controller';
     // The User model, read only, for the author names of the public lists (BLG-08).
     UsersModule,
   ],
-  controllers: [PostsController, TagsController],
+  controllers: [PostsController, PostSearchController, TagsController],
   providers: [PostsService, PublishedPostsService],
   exports: [PostsService],
 })

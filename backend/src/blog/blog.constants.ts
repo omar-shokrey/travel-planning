@@ -7,3 +7,13 @@ export const POST_EXCERPT_LENGTH = 200;
 
 /** The name shown for an author whose account is gone or deactivated. */
 export const DELETED_USER_NAME = 'Deleted user';
+
+/** The longest search keyword (BLG-09). The workbook sets no limit. */
+export const POST_SEARCH_MAX_LENGTH = 100;
+
+/**
+ * How many matching authors a search reads at most (BLG-09). A keyword that
+ * matches more author names still finds their posts by title and tag; the
+ * limit keeps the `$in` list of one query bounded.
+ */
+export const SEARCH_AUTHORS_MAX_COUNT = 500;
