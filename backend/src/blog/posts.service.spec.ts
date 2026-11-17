@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { PostsService } from './posts.service';
 
@@ -166,6 +167,24 @@ describe('PostsService', () => {
       const filter = { postId: new Types.ObjectId(postId) };
       expect(comments.deleteMany).toHaveBeenCalledWith(filter);
       expect(likes.deleteMany).toHaveBeenCalledWith(filter);
+    });
+
+    it('still returns the images when deleting the comments and likes fails, and logs it', async () => {
+      const { service, comments } = model({ images: ['a.jpg'] });
+      comments.deleteMany.mockImplementation(() => ({
+        exec: () => Promise.reject(new Error('database down')),
+      }));
+      const logError = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation();
+
+      // The post is already deleted, so this is not a 500: a retry would
+      // answer 404 and the images would never be removed.
+      await expect(
+        service.removeByAdmin('6740f1c2a4b5c6d7e8f90abc'),
+      ).resolves.toEqual(['a.jpg']);
+      expect(logError).toHaveBeenCalledTimes(1);
+      logError.mockRestore();
     });
 
     it('removeEngagementOfPost returns how many comments and likes it deleted', async () => {

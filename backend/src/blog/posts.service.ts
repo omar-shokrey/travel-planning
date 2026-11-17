@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -18,6 +18,8 @@ import { PostModeration } from './models/post-moderation.enum';
 
 @Injectable()
 export class PostsService {
+  private readonly logger = new Logger(PostsService.name);
+
   constructor(
     @InjectModel(BlogPost.name)
     private readonly posts: Model<BlogPost>,
@@ -97,7 +99,18 @@ export class PostsService {
     if (!post) {
       return null;
     }
-    await this.removeEngagementOfPost(postId);
+    // The post is already deleted, so a failure here is logged, not answered
+    // as a 500: a retry would answer 404, and the images would never be
+    // removed. The comments and likes left behind point at a missing post,
+    // which every comment and like route already answers with 404.
+    try {
+      await this.removeEngagementOfPost(postId);
+    } catch (error) {
+      this.logger.error(
+        `Deleting the comments and likes of deleted post ${postId} failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
     return [...(post.images ?? [])];
   }
 
