@@ -334,17 +334,38 @@ describe('Admin report handling and moderation (e2e, GEN-10)', () => {
     });
 
     it('pages through the reports (GEN-05)', async () => {
+      // Compared with the whole list, so open reports that other suites or an
+      // interrupted run left in the shared test database cannot change it.
+      const all: Row[] = [];
+      let page = 1;
+      let items: Row[];
+      do {
+        const response = await call(
+          'admin',
+          'get',
+          `${REPORTS}?page=${page}&limit=50`,
+        );
+        expect(response.status).toBe(200);
+        items = response.body.items as Row[];
+        all.push(...items);
+        page += 1;
+      } while (items.length === 50);
+
       const first = await call('admin', 'get', `${REPORTS}?page=1&limit=2`);
       const second = await call('admin', 'get', `${REPORTS}?page=2&limit=2`);
 
-      expect(first.body.items.map((row: Row) => row.id)).toEqual([
-        id('rDismiss'),
-        id('rDismissOther'),
-      ]);
-      expect(second.body.items.map((row: Row) => row.id)).toEqual([
-        id('rHide'),
-        id('rHideOther'),
-      ]);
+      const idsOf = (rows: Row[]) => rows.map((row) => row.id);
+      expect(idsOf(first.body.items)).toEqual(idsOf(all.slice(0, 2)));
+      expect(idsOf(second.body.items)).toEqual(idsOf(all.slice(2, 4)));
+      // This suite's four oldest reports come in this order (oldest first).
+      const positions = [
+        'rDismiss',
+        'rDismissOther',
+        'rHide',
+        'rHideOther',
+      ].map((label) => all.findIndex((row) => row.id === id(label)));
+      expect(positions).not.toContain(-1);
+      expect(positions).toEqual([...positions].sort((a, b) => a - b));
       expect(second.body.meta).toMatchObject({ page: 2, limit: 2 });
       expect(second.body.meta.total).toBeGreaterThanOrEqual(
         createdReportIds.length,

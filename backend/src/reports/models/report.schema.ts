@@ -6,8 +6,9 @@ import { ReportTargetType } from '../enums/report-target-type.enum';
 import { REPORT_REASON_MAX_LENGTH } from '../reports.constants';
 
 /**
- * A user's report of a post, a comment or an itinerary (GEN-09). An admin handles it
- * later (GEN-10), which sets the final status, who resolved it and when.
+ * A user's report of a post, a comment or an itinerary (GEN-09). An admin
+ * handles it later (GEN-10), which sets the final status, who resolved it and
+ * when.
  */
 @Schema({ collection: 'reports', timestamps: true })
 export class Report {

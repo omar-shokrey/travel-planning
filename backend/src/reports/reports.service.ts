@@ -36,9 +36,8 @@ export class ReportsService {
 
   /**
    * GEN-09: a registered user reports a post, a comment or an itinerary with
-   * a reason,
-   * at most once per item. The target must be visible to the reporter (404
-   * otherwise) and must not be the reporter's own (400).
+   * a reason, at most once per item. The target must be visible to the
+   * reporter (404 otherwise) and must not be the reporter's own (400).
    */
   async create(
     dto: CreateReportDto,

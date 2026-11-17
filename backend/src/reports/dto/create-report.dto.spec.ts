@@ -63,7 +63,7 @@ describe('CreateReportDto (GEN-09)', () => {
 
   it.each([
     ['targetType', undefined],
-    ['targetType', 'review'],
+    ['targetType', null],
     ['targetType', 'review'],
     ['targetId', undefined],
     ['targetId', null],
