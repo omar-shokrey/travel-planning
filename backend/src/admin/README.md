@@ -82,7 +82,7 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **What it does not change.** Bookings stay valid and the user's posts, comments, reviews and itineraries stay visible, as the requirement says. Hiding content is GEN-10.
 - **Status rules.** Suspending a suspended account or reactivating an active one answers 409. A deactivated account (closed by its owner, ACC-12) answers 409 to both: an admin does not reopen it.
 - **Two admins at once.** `UsersService.changeStatus(id, from, to)` changes the status only if it still is `from`, in one `findOneAndUpdate`. The request that loses answers 409 ("changed by another request") and ends no session.
-- **Not here:** the audit record (GEN-07), added after GEN-07 merges.
+- **Audit (GEN-07):** a suspension and a reactivation are each recorded after the status change (`suspend_user`, `reactivate_user`, target the account, note its role). A refused change (404, 403, 409) records nothing.
 
 ## Suspend moderators and deactivate providers (ACC-15)
 
@@ -101,4 +101,4 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
   - Flight search (FLT-11) and hotel search (HTL-11) must leave out providers with `active: false` (the hotels collection already has the index `(cityId, active)`).
   - Flight booking (FLT-21) and hotel booking (HTL-16) must refuse a provider with `active: false`, while existing Confirmed bookings stay valid.
   - When bookings exist, travellers with upcoming bookings of a deactivated provider are affected parties too: the booking issues should notify them from `deactivateProvider` (`provider_deactivated`, with a link to the booking).
-- **Not here:** the audit record of these actions (GEN-07).
+- **Audit (GEN-07):** a provider deactivation and reactivation are each recorded after the change (`deactivate_provider`, `reactivate_provider`, target type `hotel` or `airline`, note the provider's name). A refused change records nothing.

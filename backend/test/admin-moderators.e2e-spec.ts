@@ -100,8 +100,15 @@ describe('POST /api/admin/moderators (e2e, ACC-13)', () => {
 
     // One insertMany per collection: single creates in a row have stalled
     // against the Atlas test database (ACC-14, BLG-01).
+    // A unique code: `code` has a unique index, and the team shares the
+    // `-test` database, so a fixed code clashes with another run at the
+    // same moment (or one left by a run that crashed).
     const [airline] = await airlines.insertMany([
-      { name: 'ACC-13 Test Air', code: 'QZ', logo: 'acc13-logo.png' },
+      {
+        name: 'ACC-13 Test Air',
+        code: `Q${randomUUID().slice(0, 6).toUpperCase()}`,
+        logo: 'acc13-logo.png',
+      },
     ]);
     airlineId = airline._id.toString();
     const [hotel] = await hotels.insertMany([
@@ -150,8 +157,13 @@ describe('POST /api/admin/moderators (e2e, ACC-13)', () => {
     for (const id of createdUserIds) {
       await users.findByIdAndDelete(id);
     }
-    await hotels.findByIdAndDelete(hotelId);
-    await airlines.findByIdAndDelete(airlineId);
+    // Only what was created: when the set-up failed, an id is still empty.
+    if (hotelId) {
+      await hotels.findByIdAndDelete(hotelId);
+    }
+    if (airlineId) {
+      await airlines.findByIdAndDelete(airlineId);
+    }
     await app.close();
   });
 

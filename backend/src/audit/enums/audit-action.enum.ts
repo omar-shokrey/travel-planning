@@ -1,9 +1,9 @@
 /**
  * What an administrator did (GEN-07). Recorded today: `ResetPassword`
- * (ACC-07a) and `CreateModerator` (ACC-13). The others are reserved for the
- * admin actions still being built, which add their own `AuditService.record`
- * call: suspension and reactivation of accounts (ACC-15, ACC-16), provider
- * deactivation (ACC-15) and report handling (GEN-10).
+ * (ACC-07a), `CreateModerator` (ACC-13), `SuspendUser` and `ReactivateUser`
+ * (ACC-15, ACC-16), `DeactivateProvider` and `ReactivateProvider` (ACC-15).
+ * The report actions are reserved for GEN-10, which adds its own
+ * `AuditService.record` calls.
  */
 export enum AuditAction {
   ResetPassword = 'reset_password',

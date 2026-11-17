@@ -511,7 +511,7 @@ describe('AdminService', () => {
     it('suspends an active user and ends every session of the account', async () => {
       const { usersService, sessions, service } = setup();
 
-      const account = await service.suspend(accountId);
+      const account = await service.suspend(accountId, adminId);
 
       expect(usersService.changeStatus).toHaveBeenCalledWith(
         accountObjectId,
@@ -535,7 +535,7 @@ describe('AdminService', () => {
         .spyOn(Logger.prototype, 'error')
         .mockImplementation();
 
-      const account = await service.suspend(accountId);
+      const account = await service.suspend(accountId, adminId);
 
       expect(account.status).toBe('suspended');
       expect(notifications.notify).toHaveBeenCalledTimes(1);
@@ -546,7 +546,7 @@ describe('AdminService', () => {
     it('sends the user an account_suspended notification, after the status change', async () => {
       const { usersService, notifications, service } = setup();
 
-      await service.suspend(accountId);
+      await service.suspend(accountId, adminId);
 
       expect(notifications.notify).toHaveBeenCalledTimes(1);
       expect(notifications.notify).toHaveBeenCalledWith(
@@ -565,7 +565,7 @@ describe('AdminService', () => {
         UserStatus.Suspended,
       );
 
-      const account = await service.reactivate(accountId);
+      const account = await service.reactivate(accountId, adminId);
 
       expect(sessions.revokeAllOfUser).toHaveBeenCalledWith(
         accountId,
@@ -591,7 +591,9 @@ describe('AdminService', () => {
       const failure = new Error('database down');
       sessions.revokeAllOfUser.mockRejectedValue(failure);
 
-      await expect(service.reactivate(accountId)).rejects.toBe(failure);
+      await expect(service.reactivate(accountId, adminId)).rejects.toBe(
+        failure,
+      );
       expect(usersService.changeStatus).not.toHaveBeenCalled();
     });
 
@@ -608,7 +610,7 @@ describe('AdminService', () => {
           status,
         );
 
-        const attempt = service[action](accountId);
+        const attempt = service[action](accountId, adminId);
 
         await expect(attempt).rejects.toBeInstanceOf(ConflictException);
         await expect(attempt).rejects.toThrow(message);
@@ -623,7 +625,7 @@ describe('AdminService', () => {
       async (action) => {
         const { usersService, service } = setup(Role.Admin);
 
-        await expect(service[action](accountId)).rejects.toThrow(
+        await expect(service[action](accountId, adminId)).rejects.toThrow(
           ADMIN_STATUS_FORBIDDEN_MESSAGE,
         );
         expect(usersService.changeStatus).not.toHaveBeenCalled();
@@ -634,7 +636,7 @@ describe('AdminService', () => {
       const { usersService, service } = setup();
       usersService.findEntityById.mockResolvedValue(null);
 
-      await expect(service.suspend(accountId)).rejects.toBeInstanceOf(
+      await expect(service.suspend(accountId, adminId)).rejects.toBeInstanceOf(
         NotFoundException,
       );
     });
@@ -643,7 +645,7 @@ describe('AdminService', () => {
       const { usersService, sessions, service } = setup();
       usersService.changeStatus.mockResolvedValue(null);
 
-      await expect(service.suspend(accountId)).rejects.toBeInstanceOf(
+      await expect(service.suspend(accountId, adminId)).rejects.toBeInstanceOf(
         ConflictException,
       );
       expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
@@ -656,7 +658,7 @@ describe('AdminService', () => {
       async (role) => {
         const { usersService, sessions, notifications, service } = setup(role);
 
-        const account = await service.suspend(accountId);
+        const account = await service.suspend(accountId, adminId);
 
         expect(usersService.changeStatus).toHaveBeenCalledWith(
           accountObjectId,
@@ -687,7 +689,7 @@ describe('AdminService', () => {
           UserStatus.Suspended,
         );
 
-        const account = await service.reactivate(accountId);
+        const account = await service.reactivate(accountId, adminId);
 
         expect(usersService.changeStatus).toHaveBeenCalledWith(
           accountObjectId,
@@ -714,7 +716,9 @@ describe('AdminService', () => {
           status,
         );
 
-        await expect(service[action](accountId)).rejects.toThrow(message);
+        await expect(service[action](accountId, adminId)).rejects.toThrow(
+          message,
+        );
         expect(usersService.changeStatus).not.toHaveBeenCalled();
         expect(notifications.notify).not.toHaveBeenCalled();
       },
@@ -726,10 +730,47 @@ describe('AdminService', () => {
       );
       usersService.changeStatus.mockResolvedValue(null);
 
-      await expect(service.suspend(accountId)).rejects.toBeInstanceOf(
+      await expect(service.suspend(accountId, adminId)).rejects.toBeInstanceOf(
         ConflictException,
       );
       expect(notifications.notify).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('audit records of status changes (GEN-07)', () => {
+    it.each([
+      ['suspend', UserStatus.Active, 'suspend_user'],
+      ['reactivate', UserStatus.Suspended, 'reactivate_user'],
+    ] as const)(
+      'records %s with the admin, the account and its role, after the change',
+      async (action, status, recorded) => {
+        const { usersService, audit, service } = setup(
+          Role.HotelModerator,
+          status,
+        );
+
+        await service[action](accountId, adminId);
+
+        expect(audit.record).toHaveBeenCalledWith({
+          adminId,
+          action: recorded,
+          targetType: 'user',
+          targetId: accountObjectId,
+          details: 'hotel_moderator',
+        });
+        expect(
+          usersService.changeStatus.mock.invocationCallOrder[0],
+        ).toBeLessThan(audit.record.mock.invocationCallOrder[0]);
+      },
+    );
+
+    it('records nothing when the change is refused', async () => {
+      const { audit, service } = setup(Role.User, UserStatus.Suspended);
+
+      await expect(service.suspend(accountId, adminId)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 
@@ -758,7 +799,11 @@ describe('AdminService', () => {
       async (type) => {
         const { owner, setActive, service } = setupProvider(type, true);
 
-        const provider = await service.deactivateProvider(type, providerId);
+        const provider = await service.deactivateProvider(
+          type,
+          providerId,
+          adminId,
+        );
 
         expect(owner.findEntityOrThrow).toHaveBeenCalledWith(providerId);
         expect(setActive).toHaveBeenCalledWith(providerId, false);
@@ -775,7 +820,7 @@ describe('AdminService', () => {
       const { findModeratorIdsOfProvider, notifications, service } =
         setupProvider(ProviderType.Hotel, true);
 
-      await service.deactivateProvider(ProviderType.Hotel, providerId);
+      await service.deactivateProvider(ProviderType.Hotel, providerId, adminId);
 
       expect(findModeratorIdsOfProvider).toHaveBeenCalledWith(
         ProviderType.Hotel,
@@ -794,7 +839,11 @@ describe('AdminService', () => {
         true,
       );
 
-      await service.deactivateProvider(ProviderType.Airline, providerId);
+      await service.deactivateProvider(
+        ProviderType.Airline,
+        providerId,
+        adminId,
+      );
 
       expect(notifications.notifyMany).toHaveBeenCalledWith(
         moderatorIds,
@@ -814,6 +863,7 @@ describe('AdminService', () => {
       const result = await service.deactivateProvider(
         ProviderType.Hotel,
         providerId,
+        adminId,
       );
 
       expect(result).toMatchObject({ type: 'hotel', active: false });
@@ -839,7 +889,7 @@ describe('AdminService', () => {
         true,
       );
 
-      await service.deactivateProvider(ProviderType.Hotel, providerId);
+      await service.deactivateProvider(ProviderType.Hotel, providerId, adminId);
 
       expect(usersService.changeStatus).not.toHaveBeenCalled();
       expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
@@ -853,7 +903,11 @@ describe('AdminService', () => {
           false,
         );
 
-        const provider = await service.reactivateProvider(type, providerId);
+        const provider = await service.reactivateProvider(
+          type,
+          providerId,
+          adminId,
+        );
 
         expect(setActive).toHaveBeenCalledWith(providerId, true);
         expect(provider.active).toBe(true);
@@ -872,7 +926,11 @@ describe('AdminService', () => {
           active,
         );
 
-        const attempt = service[action](ProviderType.Hotel, providerId);
+        const attempt = service[action](
+          ProviderType.Hotel,
+          providerId,
+          adminId,
+        );
 
         await expect(attempt).rejects.toBeInstanceOf(ConflictException);
         await expect(attempt).rejects.toThrow(message);
@@ -891,10 +949,45 @@ describe('AdminService', () => {
       const attempt = service.deactivateProvider(
         ProviderType.Airline,
         providerId,
+        adminId,
       );
 
       await expect(attempt).rejects.toThrow(PROVIDER_STATUS_CHANGED_MESSAGE);
       expect(notifications.notifyMany).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['deactivateProvider', true, 'deactivate_provider', ProviderType.Hotel],
+      [
+        'reactivateProvider',
+        false,
+        'reactivate_provider',
+        ProviderType.Airline,
+      ],
+    ] as const)(
+      '%s records the admin, the provider kind, its id and its name (GEN-07)',
+      async (action, active, recorded, type) => {
+        const { audit, service } = setupProvider(type, active);
+
+        await service[action](type, providerId, adminId);
+
+        expect(audit.record).toHaveBeenCalledWith({
+          adminId,
+          action: recorded,
+          targetType: type,
+          targetId: providerObjectId,
+          details: 'Nile View',
+        });
+      },
+    );
+
+    it('records nothing when the provider already has that state', async () => {
+      const { audit, service } = setupProvider(ProviderType.Hotel, false);
+
+      await expect(
+        service.deactivateProvider(ProviderType.Hotel, providerId, adminId),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(audit.record).not.toHaveBeenCalled();
     });
 
     it('passes on the 404 of a provider that does not exist', async () => {
@@ -907,7 +1000,7 @@ describe('AdminService', () => {
       );
 
       await expect(
-        service.deactivateProvider(ProviderType.Hotel, providerId),
+        service.deactivateProvider(ProviderType.Hotel, providerId, adminId),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(setActive).not.toHaveBeenCalled();
     });

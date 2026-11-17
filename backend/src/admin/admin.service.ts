@@ -209,8 +209,9 @@ export class AdminService {
    * every session of the account ends at once. The account gets an
    * `account_suspended` notification (GEN-01), read after a reactivation.
    * Bookings stay valid and content stays visible: nothing else changes.
+   * The suspension is recorded in the audit log (GEN-07).
    */
-  async suspend(accountId: string): Promise<UserResponseDto> {
+  async suspend(accountId: string, adminId: string): Promise<UserResponseDto> {
     const updated = await this.changeUserStatus(accountId, {
       from: UserStatus.Active,
       to: UserStatus.Suspended,
@@ -235,6 +236,8 @@ export class AdminService {
       NotificationType.AccountSuspended,
       ACCOUNT_SUSPENDED_NOTIFICATION,
     );
+    // `record` never throws.
+    await this.recordStatusChange(adminId, AuditAction.SuspendUser, updated);
     return toUserResponse(updated);
   }
 
@@ -243,16 +246,40 @@ export class AdminService {
    * can log in again, with a new login. Every session of the account ends
    * first, while it is still suspended, so no old session comes back,
    * including one a failed or racing suspension missed. If ending them fails,
-   * the account stays suspended and the admin can retry.
+   * the account stays suspended and the admin can retry. The reactivation
+   * is recorded in the audit log (GEN-07).
    */
-  async reactivate(accountId: string): Promise<UserResponseDto> {
+  async reactivate(
+    accountId: string,
+    adminId: string,
+  ): Promise<UserResponseDto> {
     const updated = await this.changeUserStatus(accountId, {
       from: UserStatus.Suspended,
       to: UserStatus.Active,
       wrongStatusMessage: ACCOUNT_NOT_SUSPENDED_MESSAGE,
       beforeChange: () => this.sessions.revokeAllOfUser(accountId, new Date()),
     });
+    await this.recordStatusChange(adminId, AuditAction.ReactivateUser, updated);
     return toUserResponse(updated);
+  }
+
+  /**
+   * GEN-07: one audit record of a suspension or reactivation, with the role
+   * of the account as the note (no name or email). Only after the change
+   * succeeded, so a 404, 403 or 409 records nothing.
+   */
+  private recordStatusChange(
+    adminId: string,
+    action: AuditAction.SuspendUser | AuditAction.ReactivateUser,
+    account: { _id: Types.ObjectId; role: Role },
+  ): Promise<void> {
+    return this.audit.record({
+      adminId,
+      action,
+      targetType: AuditTargetType.User,
+      targetId: account._id,
+      details: account.role,
+    });
   }
 
   /**
@@ -314,11 +341,13 @@ export class AdminService {
    * Deactivates a hotel or airline (ACC-15): it is hidden from search and
    * cannot be booked, while its existing confirmed bookings remain valid. Its
    * moderator accounts keep their status (suspending them is separate), and
-   * each of them gets an in-app notification.
+   * each of them gets an in-app notification. The deactivation is recorded
+   * in the audit log (GEN-07).
    */
   async deactivateProvider(
     type: ProviderType,
     id: string,
+    adminId: string,
   ): Promise<ProviderStatusResponseDto> {
     const updated = await this.changeProviderActive(type, id, false);
     // After the update, so a notification never announces a change that
@@ -342,16 +371,55 @@ export class AdminService {
         error instanceof Error ? error.stack : String(error),
       );
     }
+    await this.recordProviderChange(
+      adminId,
+      AuditAction.DeactivateProvider,
+      type,
+      updated,
+    );
     return toProviderStatusResponse(type, updated);
   }
 
-  /** Makes a deactivated hotel or airline active again (ACC-15). */
+  /**
+   * Makes a deactivated hotel or airline active again (ACC-15), recorded in
+   * the audit log (GEN-07).
+   */
   async reactivateProvider(
     type: ProviderType,
     id: string,
+    adminId: string,
   ): Promise<ProviderStatusResponseDto> {
     const updated = await this.changeProviderActive(type, id, true);
+    await this.recordProviderChange(
+      adminId,
+      AuditAction.ReactivateProvider,
+      type,
+      updated,
+    );
     return toProviderStatusResponse(type, updated);
+  }
+
+  /**
+   * GEN-07: one audit record of a provider status change. The target type
+   * is the provider's own kind (`hotel` or `airline`) and the note is its
+   * name, which is public. Only after the change succeeded.
+   */
+  private recordProviderChange(
+    adminId: string,
+    action: AuditAction.DeactivateProvider | AuditAction.ReactivateProvider,
+    type: ProviderType,
+    provider: { _id: Types.ObjectId; name: string },
+  ): Promise<void> {
+    return this.audit.record({
+      adminId,
+      action,
+      targetType:
+        type === ProviderType.Airline
+          ? AuditTargetType.Airline
+          : AuditTargetType.Hotel,
+      targetId: provider._id,
+      details: provider.name,
+    });
   }
 
   /**

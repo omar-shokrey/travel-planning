@@ -95,12 +95,12 @@ describe('AdminController', () => {
 
   describe('suspend and reactivate (ACC-16)', () => {
     it.each(['suspend', 'reactivate'] as const)(
-      'gives the service the account id to %s and returns its answer',
+      'gives the service the account id and the admin id to %s, and returns its answer',
       async (action) => {
         const { adminService, controller } = setup();
 
-        expect(await controller[action](account.id)).toBe(account);
-        expect(adminService[action]).toHaveBeenCalledWith(account.id);
+        expect(await controller[action](account.id, adminId)).toBe(account);
+        expect(adminService[action]).toHaveBeenCalledWith(account.id, adminId);
       },
     );
   });
@@ -114,17 +114,18 @@ describe('AdminController', () => {
     };
 
     it.each(['deactivateProvider', 'reactivateProvider'] as const)(
-      '%s gives the service the type and the id, and returns its answer',
+      '%s gives the service the type, the id and the admin id, and returns its answer',
       async (action) => {
         const { adminService, controller } = setup();
         adminService[action].mockResolvedValue(provider);
 
-        expect(await controller[action](ProviderType.Hotel, provider.id)).toBe(
-          provider,
-        );
+        expect(
+          await controller[action](ProviderType.Hotel, provider.id, adminId),
+        ).toBe(provider);
         expect(adminService[action]).toHaveBeenCalledWith(
           ProviderType.Hotel,
           provider.id,
+          adminId,
         );
       },
     );

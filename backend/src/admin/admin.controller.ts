@@ -81,7 +81,7 @@ export class AdminController {
   @ApiOperation({
     summary: 'List the audit log of admin actions (GEN-07)',
     description:
-      'Admin only. Every recorded admin action, newest first, 10 per page by default (GEN-05): who acted (`adminId`), what they did (`action`), on which record (`targetType`, `targetId`), a short note (`details`) and when (`createdAt`, UTC). `action`, `adminId`, `targetType` and `targetId` filter, and all given filters must match. The log is append-only: no route changes or deletes a record. Recorded today: password resets (ACC-07a) and moderator creation (ACC-13).',
+      'Admin only. Every recorded admin action, newest first, 10 per page by default (GEN-05): who acted (`adminId`), what they did (`action`), on which record (`targetType`, `targetId`), a short note (`details`) and when (`createdAt`, UTC). `action`, `adminId`, `targetType` and `targetId` filter, and all given filters must match. The log is append-only: no route changes or deletes a record. Recorded today: password resets (ACC-07a), moderator creation (ACC-13), account suspension and reactivation (ACC-15, ACC-16), and provider deactivation and reactivation (ACC-15).',
   })
   @ApiPaginatedResponse(AuditLogResponseDto)
   @ApiBadRequestResponse({
@@ -149,8 +149,9 @@ export class AdminController {
   })
   suspend(
     @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') adminId: string,
   ): Promise<UserResponseDto> {
-    return this.adminService.suspend(id);
+    return this.adminService.suspend(id, adminId);
   }
 
   @Patch('accounts/:id/reactivate')
@@ -180,8 +181,9 @@ export class AdminController {
   })
   reactivate(
     @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') adminId: string,
   ): Promise<UserResponseDto> {
-    return this.adminService.reactivate(id);
+    return this.adminService.reactivate(id, adminId);
   }
 
   @Post('users/:id/reset-password')
@@ -250,8 +252,9 @@ export class AdminController {
   deactivateProvider(
     @Param('type', PROVIDER_TYPE_PIPE) type: ProviderType,
     @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') adminId: string,
   ): Promise<ProviderStatusResponseDto> {
-    return this.adminService.deactivateProvider(type, id);
+    return this.adminService.deactivateProvider(type, id, adminId);
   }
 
   @Patch('providers/:type/:id/reactivate')
@@ -285,7 +288,8 @@ export class AdminController {
   reactivateProvider(
     @Param('type', PROVIDER_TYPE_PIPE) type: ProviderType,
     @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') adminId: string,
   ): Promise<ProviderStatusResponseDto> {
-    return this.adminService.reactivateProvider(type, id);
+    return this.adminService.reactivateProvider(type, id, adminId);
   }
 }

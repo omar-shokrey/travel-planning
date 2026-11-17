@@ -8,7 +8,7 @@ The audit log of administrator actions (GEN-07): "The system shall keep an audit
 - **Field names follow the spec's `AUDIT_LOG` entity:** `adminId`, `action`, `targetType`, `targetId`, `details`, plus `createdAt`. `adminId` is an ObjectId; `targetId` is a string, as in the spec, so any kind of target fits. `details` is a short public note (at most 500 characters), not a free object, so nothing private can slip in by accident.
 - **Append-only.** `AuditService` has two methods, `record` and `list`; there is no update or delete method and no route that changes a record. The schema keeps `createdAt` only (`timestamps: { createdAt: true, updatedAt: false }`). Only the e2e tests delete the records their own actions wrote, by id, in the `-test` database (`test/support/delete-audit-logs.ts`).
 - **A failed audit write does not fail the admin's request.** `record` is called after the admin action has been saved. If the write fails, the action has already happened and cannot be rolled back here (a password reset has also ended sessions), so an error would make the admin retry something that already happened (for example a moderator creation would then answer 409). `record` catches the error and logs it on the server with the action, the target and the admin id, never the note. The same rule as `NotificationsService.notify` (GEN-01). The cost is that a record can be missing after a database failure; the server log shows it.
-- **Nothing private is recorded.** No password, hash, token, email or request body. The note of a moderator creation is the role and the provider (`hotel_moderator of hotel <id>`); a password reset has no note.
+- **Nothing private is recorded.** No password, hash, token, email or request body. The note of a moderator creation is the role and the provider (`hotel_moderator of hotel <id>`); of a suspension or reactivation, the role of the account (`user`, `hotel_moderator`, …); of a provider deactivation or reactivation, the provider's name, which is public. A password reset has no note.
 - **`action` and `targetType` are enums** (`AuditAction`, `AuditTargetType`, lowercase snake_case), so the list filters can be validated and the frontend can show a label per value.
 - **Indexes** serve the list, newest first, with or without a filter: `{ createdAt: -1, _id: -1 }`, `{ adminId: 1, createdAt: -1 }`, `{ action: 1, createdAt: -1 }` and `{ targetType: 1, targetId: 1, createdAt: -1 }`.
 
@@ -18,10 +18,10 @@ The audit log of administrator actions (GEN-07): "The system shall keep an audit
 | --------------------- | ---------------------------------------- | ----------- | --------------------------------------------------- |
 | `reset_password`      | `user`                                   | ACC-07a     | Yes, in `AdminService.resetPassword`                |
 | `create_moderator`    | `user`                                   | ACC-13      | Yes, in `AdminService.createModerator`              |
-| `suspend_user`        | `user`                                   | ACC-15/16   | Planned: the suspend route adds its `record` call   |
-| `reactivate_user`     | `user`                                   | ACC-15/16   | Planned, with the reactivate route                  |
-| `deactivate_provider` | `airline`, `hotel`                       | ACC-15      | Planned, with the provider routes                   |
-| `reactivate_provider` | `airline`, `hotel`                       | ACC-15      | Planned, with the provider routes                   |
+| `suspend_user`        | `user`                                   | ACC-15/16   | Yes, in `AdminService.suspend`                      |
+| `reactivate_user`     | `user`                                   | ACC-15/16   | Yes, in `AdminService.reactivate`                   |
+| `deactivate_provider` | `airline`, `hotel`                       | ACC-15      | Yes, in `AdminService.deactivateProvider`           |
+| `reactivate_provider` | `airline`, `hotel`                       | ACC-15      | Yes, in `AdminService.reactivateProvider`           |
 | `dismiss_report`      | `report`                                 | GEN-10      | Planned, with `PATCH /api/admin/reports/:id`        |
 | `hide_content`        | `post`, `comment`, `review`, `itinerary` | GEN-10      | Planned, with report handling and direct hiding     |
 | `delete_content`      | `post`, `comment`, `review`, `itinerary` | GEN-10      | Planned, with `DELETE /api/admin/content/:type/:id` |

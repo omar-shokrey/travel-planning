@@ -2,7 +2,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { hash } from 'bcrypt';
-import type { Model } from 'mongoose';
+import { Types, type Model } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import './support/auth-env';
@@ -14,6 +14,7 @@ import { ACCESS_TOKEN_COOKIE } from './../src/common/constants/cookies';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
 import { Hotel } from './../src/hotels/models/hotel.schema';
+import { Notification } from './../src/notifications/models/notification.schema';
 import { User } from './../src/users/models/user.schema';
 import { deleteAuditLogsOf } from './support/delete-audit-logs';
 import { deleteSessionsOf } from './support/delete-sessions';
@@ -112,6 +113,8 @@ describe('GET /api/admin/audit-logs and the recorded admin actions (e2e, GEN-07)
       ['user', Role.User],
       ['target', Role.User],
       ['second-target', Role.User],
+      // Suspended and reactivated by `other-admin` (ACC-16).
+      ['suspend-target', Role.User],
     ];
     const inserted = await users.insertMany(
       accounts.map(([label, role]) => ({
@@ -142,6 +145,20 @@ describe('GET /api/admin/audit-logs and the recorded admin actions (e2e, GEN-07)
   });
 
   afterAll(async () => {
+    // The notifications the suspension and the hotel deactivation sent (to
+    // the account and to the hotel's moderator), one by one by id.
+    const notifications = app.get<Model<Notification>>(
+      getModelToken(Notification.name),
+    );
+    for (const userId of createdUserIds) {
+      const sent = await notifications
+        .find({ userId: new Types.ObjectId(userId) })
+        .select('_id')
+        .lean();
+      for (const { _id } of sent) {
+        await notifications.findByIdAndDelete(_id);
+      }
+    }
     for (const userId of createdUserIds) {
       await deleteSessionsOf(app, userId);
     }
@@ -218,10 +235,90 @@ describe('GET /api/admin/audit-logs and the recorded admin actions (e2e, GEN-07)
       expect(JSON.stringify(response.body)).not.toContain(TEMPORARY_PASSWORD);
     });
 
+    // `other-admin` acts here, so the filters below (on `admin` and
+    // `second-admin`) are not affected.
+    it('a suspension and a reactivation (ACC-16) each write one record, with the role as the note', async () => {
+      for (const action of ['suspend', 'reactivate']) {
+        await request(app.getHttpServer())
+          .patch(`/api/admin/accounts/${id('suspend-target')}/${action}`)
+          .set('Cookie', cookies.get('other-admin') ?? '')
+          .expect(200);
+      }
+
+      const response = await list({ targetId: id('suspend-target') }, 'admin');
+
+      expect(response.status).toBe(200);
+      expect(
+        (response.body.items as AuditItem[]).map((item) => ({
+          adminId: item.adminId,
+          action: item.action,
+          targetType: item.targetType,
+          details: item.details,
+        })),
+      ).toEqual([
+        {
+          adminId: id('other-admin'),
+          action: 'reactivate_user',
+          targetType: 'user',
+          details: 'user',
+        },
+        {
+          adminId: id('other-admin'),
+          action: 'suspend_user',
+          targetType: 'user',
+          details: 'user',
+        },
+      ]);
+    });
+
+    it('a provider deactivation and reactivation (ACC-15) each write one record on the hotel, with its name', async () => {
+      for (const action of ['deactivate', 'reactivate']) {
+        await request(app.getHttpServer())
+          .patch(`/api/admin/providers/hotel/${hotelId}/${action}`)
+          .set('Cookie', cookies.get('other-admin') ?? '')
+          .expect(200);
+      }
+
+      const response = await list({ targetId: hotelId }, 'admin');
+
+      expect(response.status).toBe(200);
+      expect(
+        (response.body.items as AuditItem[]).map((item) => ({
+          adminId: item.adminId,
+          action: item.action,
+          targetType: item.targetType,
+          details: item.details,
+        })),
+      ).toEqual([
+        {
+          adminId: id('other-admin'),
+          action: 'reactivate_provider',
+          targetType: 'hotel',
+          details: 'GEN-07 Test Hotel',
+        },
+        {
+          adminId: id('other-admin'),
+          action: 'deactivate_provider',
+          targetType: 'hotel',
+          details: 'GEN-07 Test Hotel',
+        },
+      ]);
+    });
+
     it('a refused action records nothing', async () => {
       await reset('admin', id('other-admin')).expect(403);
+      // Suspending an administrator is refused too (403).
+      await request(app.getHttpServer())
+        .patch(`/api/admin/accounts/${id('second-admin')}/suspend`)
+        .set('Cookie', cookies.get('admin') ?? '')
+        .expect(403);
 
       const response = await list({ targetId: id('other-admin') }, 'admin');
+      const onSecondAdmin = await list(
+        { targetId: id('second-admin') },
+        'admin',
+      );
+      expect(onSecondAdmin.body.meta.total).toBe(0);
 
       expect(response.body).toEqual({
         items: [],
