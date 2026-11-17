@@ -17,3 +17,13 @@
 - Post images are stored as uploaded file names (`images`). Creating a post takes no images: they are added afterwards with `POST /api/posts/:id/images` (BLG-10), under the shared upload rules (GEN-08).
 - API responses use a mapper and response DTO rather than exposing the Mongoose document directly.
 - Creating posts is restricted to authenticated registered users with the `User` role.
+
+## Comments (BLG-05)
+
+- Comments are stored in their own `comments` collection (`Comment` schema), not inside the post, because a post can have any number of them.
+- `POST /api/posts/:id/comments` is for registered users (`user` role). The author is the logged-in user and the post comes from the route; the body carries only the text.
+- The text is trimmed, must not be empty and has at most 500 characters (`COMMENT_BODY_MAX` in `blog.constants.ts`). A comment of spaces only is rejected.
+- Only a published post can be commented on. A draft answers 404, the same as a missing post, so nobody can tell that a draft exists.
+- `GET /api/posts/:id/comments` is public and paginated. It returns the comments oldest first (`createdAt`, then `_id` as a tie-breaker), which is the chronological order BLG-05 asks for. The endpoint table of the project description has no route for reading comments, so this one was added; the post page (BLG-02) can call `CommentsService.listForPost` instead.
+- The post keeps a `commentCount`, as in the data model of the spec. `CommentsService` raises it with one `$inc` update after a comment is saved, so two comments at the same moment are both counted. It is not part of `PostResponseDto` yet; BLG-02 adds it to the post page.
+- Index: (`postId`, `createdAt`) for the list.
