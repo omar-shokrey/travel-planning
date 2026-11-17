@@ -24,6 +24,7 @@ function setup(currencySupported = true) {
   };
   const usersService = {
     updateProfile: jest.fn().mockResolvedValue(stored),
+    findEntityById: jest.fn().mockResolvedValue(stored),
   };
   const countries = {
     exists: jest.fn(() => ({
@@ -40,6 +41,46 @@ function setup(currencySupported = true) {
 }
 
 describe('ProfileService', () => {
+  describe('getMyProfile (ACC-11)', () => {
+    it('returns the public account of the logged-in user', async () => {
+      const { usersService, service } = setup();
+
+      const account = await service.getMyProfile(userId);
+
+      expect(usersService.findEntityById).toHaveBeenCalledWith(userId);
+      expect(account).toEqual({
+        id: userId,
+        name: 'Sara Ahmed',
+        email: 'sara@example.com',
+        role: Role.User,
+        status: UserStatus.Active,
+        mustChangePassword: false,
+        phone: '+20 10 1234 5678',
+        preferredCurrency: 'EGP',
+        createdAt: '2026-11-14T10:00:00.000Z',
+      });
+    });
+
+    it('looks up the account by the given id only and writes nothing', async () => {
+      const { usersService, countries, service } = setup();
+
+      await service.getMyProfile(userId);
+
+      expect(usersService.findEntityById).toHaveBeenCalledTimes(1);
+      expect(usersService.updateProfile).not.toHaveBeenCalled();
+      expect(countries.exists).not.toHaveBeenCalled();
+    });
+
+    it('answers 401 when the account is gone', async () => {
+      const { usersService, service } = setup();
+      usersService.findEntityById.mockResolvedValue(null);
+
+      await expect(service.getMyProfile(userId)).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+    });
+  });
+
   describe('updateMyProfile (ACC-09)', () => {
     it('saves the fields that were sent for the logged-in user', async () => {
       const { usersService, service } = setup();
