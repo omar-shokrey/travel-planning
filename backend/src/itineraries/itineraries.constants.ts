@@ -10,8 +10,19 @@ export const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 /** A time of day in 24-hour form, for example 09:30. */
 export const TIME_OF_DAY_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+/** ITN-10: limits for an activity, so one itinerary document stays small. */
+export const ACTIVITY_NAME_MAX = 100;
+export const ACTIVITY_DESCRIPTION_MAX = 1000;
+
+/** ITN-16: the longest transport mode, such as "train" or "night bus". */
+export const TRANSPORT_MODE_MAX = 50;
+
 /** A currency code as in countries.csv, for example EGP. */
 export const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
 
 /** A country code as in countries.csv, for example EG. */
 export const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/;
+
+/** The answer when an itinerary changed under a request that edits it by position. */
+export const ITINERARY_CHANGED_MESSAGE =
+  'The itinerary was changed by another request. Reload it and try again.';
