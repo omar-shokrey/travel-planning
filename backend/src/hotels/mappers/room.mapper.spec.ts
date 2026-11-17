@@ -10,6 +10,7 @@ const source: RoomSource = {
   maxOccupancy: 3,
   pricePerNight: 12500,
   active: true,
+  availability: [{ from: '2026-12-01', to: '2026-12-08' }],
   createdAt: new Date('2026-11-05T13:00:00.000+02:00'),
   updatedAt: new Date('2026-11-06T13:00:00.000+02:00'),
 };
@@ -26,6 +27,7 @@ describe('toRoomResponse (HTL-03)', () => {
       pricePerNight: 12500,
       currency: 'USD',
       active: true,
+      availability: [{ from: '2026-12-01', to: '2026-12-08' }],
       createdAt: '2026-11-05T11:00:00.000Z',
       updatedAt: '2026-11-06T11:00:00.000Z',
     });
@@ -39,6 +41,7 @@ describe('toRoomResponse (HTL-03)', () => {
 
     expect(Object.keys(response).sort()).toEqual([
       'active',
+      'availability',
       'beds',
       'createdAt',
       'currency',

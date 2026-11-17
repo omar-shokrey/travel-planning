@@ -13,6 +13,12 @@ const valid = {
   beds: 2,
   maxOccupancy: 3,
   pricePerNight: 12500,
+  availability: [],
+};
+
+const validAvailability = {
+  from: '2026-12-01',
+  to: '2026-12-08',
 };
 
 const invalidFields = (data: Record<string, unknown>): Promise<string[]> =>
@@ -22,7 +28,7 @@ const invalidFields = (data: Record<string, unknown>): Promise<string[]> =>
       Object.keys(error.errors).sort(),
   );
 
-describe('Room model (HTL-03)', () => {
+describe('Room model (HTL-03, HTL-04)', () => {
   it('sets active by default and stores timestamps', () => {
     const room = new RoomModel(valid);
 
@@ -35,6 +41,32 @@ describe('Room model (HTL-03)', () => {
 
     expect(room.number).toBe('101');
     expect(room.type).toBe('Double');
+  });
+
+  it('defaults room availability to an empty array', () => {
+    expect(new RoomModel(valid).availability).toEqual([]);
+  });
+
+  it('accepts a valid date-only availability range', async () => {
+    expect(
+      await invalidFields({
+        ...valid,
+        availability: [validAvailability],
+      }),
+    ).toEqual([]);
+  });
+
+  it.each([
+    [{ from: '2026-12-01T00:00:00Z', to: '2026-12-08' }, 'from'],
+    [{ from: '2026-12-01', to: '2026-12-08T00:00:00Z' }, 'to'],
+    [{ from: '2026-12-08', to: '2026-12-01' }, 'to'],
+  ])('rejects invalid availability range %j', async (range, field) => {
+    expect(
+      await invalidFields({
+        ...valid,
+        availability: [range],
+      }),
+    ).toContain(`availability.0.${field}`);
   });
 
   it.each([

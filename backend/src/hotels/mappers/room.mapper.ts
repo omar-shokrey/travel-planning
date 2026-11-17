@@ -12,6 +12,7 @@ export type RoomSource = Pick<
   | 'maxOccupancy'
   | 'pricePerNight'
   | 'active'
+  | 'availability'
   | 'createdAt'
   | 'updatedAt'
 > & { _id: Types.ObjectId };
@@ -27,6 +28,7 @@ export function toRoomResponse(room: RoomSource): RoomResponseDto {
     pricePerNight: room.pricePerNight,
     currency: PLATFORM_CURRENCY,
     active: room.active,
+    availability: room.availability.map(({ from, to }) => ({ from, to })),
     createdAt: room.createdAt.toISOString(),
     updatedAt: room.updatedAt.toISOString(),
   };

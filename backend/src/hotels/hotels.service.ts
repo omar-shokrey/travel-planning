@@ -14,6 +14,7 @@ import { UploadsService } from '../uploads/uploads.service';
 import type { ImageFile } from '../uploads/uploads.types';
 import { UsersService } from '../users/users.service';
 import type { CreateHotelDto } from './dto/create-hotel.dto';
+import type { CreateRoomAvailabilityDto } from './dto/create-room-availability.dto';
 import type { CreateRoomDto } from './dto/create-room.dto';
 import type { HotelResponseDto } from './dto/hotel-response.dto';
 import type { RoomResponseDto } from './dto/room-response.dto';
@@ -29,6 +30,9 @@ const HOTEL_ACCESS_DENIED_MESSAGE = 'You do not manage this hotel';
 const USER_REQUIRED_MESSAGE = 'You must log in to do this';
 const HOTEL_PHOTO_CONFLICT_MESSAGE =
   'The hotel photos changed while this upload was processing. Please retry.';
+const ROOM_NOT_FOUND_MESSAGE = 'Room not found';
+const ROOM_AVAILABILITY_CONFLICT_MESSAGE =
+  'The room availability range overlaps an existing range';
 
 @Injectable()
 export class HotelsService {
@@ -83,6 +87,54 @@ export class HotelsService {
       active: true,
     });
     return toRoomResponse(room);
+  }
+
+  async addRoomAvailability(
+    hotelId: string,
+    roomId: string,
+    dto: CreateRoomAvailabilityDto,
+    userId: string | undefined,
+  ): Promise<RoomResponseDto> {
+    const hotel = await this.findHotelOrThrow(hotelId);
+    await this.assertHotelModerator(hotel, userId);
+
+    const room = await this.rooms
+      .findOne({ _id: roomId, hotelId: hotel._id })
+      .exec();
+    if (!room) {
+      throw new NotFoundException(ROOM_NOT_FOUND_MESSAGE);
+    }
+
+    const updated = await this.rooms
+      .findOneAndUpdate(
+        {
+          _id: room._id,
+          hotelId: hotel._id,
+          availability: {
+            $not: {
+              $elemMatch: {
+                from: { $lt: dto.to },
+                to: { $gt: dto.from },
+              },
+            },
+          },
+        },
+        {
+          $push: {
+            availability: {
+              $each: [{ from: dto.from, to: dto.to }],
+              $sort: { from: 1 },
+            },
+          },
+        },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
+    if (!updated) {
+      throw new ConflictException(ROOM_AVAILABILITY_CONFLICT_MESSAGE);
+    }
+
+    return toRoomResponse(updated);
   }
 
   async update(
