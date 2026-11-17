@@ -124,33 +124,54 @@ export class AdminModerationService {
       return toAdminReportResponse(resolved);
     }
     let images: string[] = [];
+    let result = resolved;
+    let finalStatus = status;
+    // True when the content was already deleted by its author: the report is
+    // closed, but the admin changed no content, so nothing is audited.
+    let contentGone = false;
     if (action === ReportAction.Hide) {
       // False when it was already hidden: the goal holds, so that is fine.
-      await this.setHidden(targetType, targetId, true);
+      // False and missing: its author deleted it after the check above, so
+      // the report is closed as `deleted`, like a delete of gone content.
+      const changed = await this.setHidden(targetType, targetId, true);
+      if (!changed && !(await this.contentExists(targetType, targetId))) {
+        contentGone = true;
+        finalStatus = ReportStatus.Deleted;
+        result =
+          (await this.reports.changeResolvedStatus(
+            id,
+            ReportStatus.Hidden,
+            ReportStatus.Deleted,
+          )) ?? resolved;
+      }
     } else {
       // Null when it is already gone: deleting is idempotent.
-      images = (await this.removeContent(targetType, targetId)) ?? [];
+      const removed = await this.removeContent(targetType, targetId);
+      contentGone = removed === null;
+      images = removed ?? [];
     }
     await this.reports.resolveOpenOfTarget(
       targetType,
       targetId,
-      status,
+      finalStatus,
       adminId,
       resolvedAt,
     );
-    // GEN-07: the content is the target; the note names the report.
-    await this.audit.record({
-      adminId,
-      action:
-        action === ReportAction.Hide
-          ? AuditAction.HideContent
-          : AuditAction.DeleteContent,
-      targetType: CONTENT_AUDIT_TARGET[targetType],
-      targetId,
-      details: `report ${id}`,
-    });
+    if (!contentGone) {
+      // GEN-07: the content is the target; the note names the report.
+      await this.audit.record({
+        adminId,
+        action:
+          action === ReportAction.Hide
+            ? AuditAction.HideContent
+            : AuditAction.DeleteContent,
+        targetType: CONTENT_AUDIT_TARGET[targetType],
+        targetId,
+        details: `report ${id}`,
+      });
+    }
     await this.deleteImages(images);
-    return toAdminReportResponse(resolved);
+    return toAdminReportResponse(result);
   }
 
   /**

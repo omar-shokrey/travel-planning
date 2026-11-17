@@ -2,7 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { CommentsService } from './comments.service';
-import { PostStatus } from './models/post-status.enum';
+import { visiblePublishedPost } from './visible-post.filter';
 
 const POST_ID = '6740a1b2c3d4e5f601234560';
 const USER_ID = '6740a1b2c3d4e5f601234561';
@@ -96,10 +96,21 @@ describe('CommentsService', () => {
 
       await service.create(POST_ID, { body: 'Great tips!' }, USER_ID);
 
-      expect(posts.exists).toHaveBeenCalledWith({
-        _id: POST_ID,
-        status: PostStatus.Published,
-      });
+      // Published and not hidden by an admin, unless it is the user's own
+      // (GEN-10).
+      expect(posts.exists).toHaveBeenCalledWith(
+        visiblePublishedPost(POST_ID, USER_ID),
+      );
+    });
+
+    it('checks the post for a guest when listing: a hidden post is refused for everyone (GEN-10)', async () => {
+      const { service, posts } = setup();
+      posts.exists.mockReturnValue({ exec: () => Promise.resolve(null) });
+
+      await expect(
+        service.listForPost(POST_ID, { page: 1, limit: 10, skip: 0 } as never),
+      ).rejects.toThrow('Post not found');
+      expect(posts.exists).toHaveBeenCalledWith(visiblePublishedPost(POST_ID));
     });
 
     it('adds one to the comment count of the post in one atomic update', async () => {

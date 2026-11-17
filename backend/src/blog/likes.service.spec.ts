@@ -1,7 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { LikesService } from './likes.service';
-import { PostStatus } from './models/post-status.enum';
+import { visiblePublishedPost } from './visible-post.filter';
 
 const POST_ID = '6740a1b2c3d4e5f601234560';
 const USER_ID = '6740a1b2c3d4e5f601234561';
@@ -56,10 +56,23 @@ describe('LikesService', () => {
 
       await service.like(POST_ID, USER_ID);
 
-      expect(posts.exists).toHaveBeenCalledWith({
-        _id: POST_ID,
-        status: PostStatus.Published,
-      });
+      // Published and not hidden by an admin, unless it is the user's own
+      // (GEN-10).
+      expect(posts.exists).toHaveBeenCalledWith(
+        visiblePublishedPost(POST_ID, USER_ID),
+      );
+    });
+
+    it('checks the post the same way to unlike (GEN-10)', async () => {
+      const { service, posts, likes } = setup();
+      likes.deleteOne.mockReturnValue(query({ deletedCount: 1 }));
+      posts.findOneAndUpdate.mockReturnValue(query({ likeCount: 0 }));
+
+      await service.unlike(POST_ID, USER_ID);
+
+      expect(posts.exists).toHaveBeenCalledWith(
+        visiblePublishedPost(POST_ID, USER_ID),
+      );
     });
 
     it('answers 409 and leaves the count alone on a second like', async () => {

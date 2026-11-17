@@ -10,6 +10,8 @@ import { CreatePostDto } from './dto/create-post.dto';
 import type { MyPostResponseDto } from './dto/my-post-response.dto';
 import { PostResponseDto } from './dto/post-response.dto';
 import { BlogPost } from './models/blog-post.schema';
+import { Comment } from './models/comment.schema';
+import { Like } from './models/like.schema';
 import { PostStatus } from './models/post-status.enum';
 import { toMyPostResponse, toPostResponse } from './mappers/post.mapper';
 import { PostModeration } from './models/post-moderation.enum';
@@ -19,6 +21,10 @@ export class PostsService {
   constructor(
     @InjectModel(BlogPost.name)
     private readonly posts: Model<BlogPost>,
+    @InjectModel(Comment.name)
+    private readonly comments: Model<Comment>,
+    @InjectModel(Like.name)
+    private readonly likes: Model<Like>,
   ) {}
 
   /**
@@ -88,7 +94,28 @@ export class PostsService {
       .select('images')
       .lean()
       .exec();
-    return post ? [...(post.images ?? [])] : null;
+    if (!post) {
+      return null;
+    }
+    await this.removeEngagementOfPost(postId);
+    return [...(post.images ?? [])];
+  }
+
+  /**
+   * Deletes the comments (BLG-05) and likes (BLG-06) of a post that was just
+   * deleted, so none are left pointing at it. For every post delete: the
+   * admin's (GEN-10) and the author's own (BLG-04). Each filter names that one
+   * post, never a broad set. Returns how many of each were deleted.
+   */
+  async removeEngagementOfPost(
+    postId: string,
+  ): Promise<{ comments: number; likes: number }> {
+    const filter = { postId: new Types.ObjectId(postId) };
+    const [comments, likes] = await Promise.all([
+      this.comments.deleteMany(filter).exec(),
+      this.likes.deleteMany(filter).exec(),
+    ]);
+    return { comments: comments.deletedCount, likes: likes.deletedCount };
   }
 
   async create(dto: CreatePostDto, userId: string): Promise<PostResponseDto> {

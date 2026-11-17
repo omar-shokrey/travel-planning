@@ -341,6 +341,26 @@ describe('ReportsService, admin methods (GEN-10)', () => {
     });
   });
 
+  describe('changeResolvedStatus', () => {
+    it('changes the status only when it is still the expected one', async () => {
+      const changed = { _id: new Types.ObjectId() };
+      const findOneAndUpdate = jest.fn().mockReturnValue(chain(changed));
+
+      const result = await setup({ findOneAndUpdate }).changeResolvedStatus(
+        'r1',
+        ReportStatus.Hidden,
+        ReportStatus.Deleted,
+      );
+
+      expect(result).toBe(changed);
+      expect(findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: 'r1', status: ReportStatus.Hidden },
+        { $set: { status: ReportStatus.Deleted } },
+        { returnDocument: 'after' },
+      );
+    });
+  });
+
   describe('resolveOpenOfTarget', () => {
     it('resolves the open reports of one item only, and counts them', async () => {
       const updateMany = jest.fn().mockReturnValue(chain({ modifiedCount: 2 }));

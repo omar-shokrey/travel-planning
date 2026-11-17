@@ -1,4 +1,12 @@
+import { Types } from 'mongoose';
 import { PostsService } from './posts.service';
+
+/** A comments or likes model whose deleteMany removes `count` records. */
+const engagement = (count = 0) => ({
+  deleteMany: jest.fn(() => ({
+    exec: () => Promise.resolve({ deletedCount: count }),
+  })),
+});
 import { PostModeration } from './models/post-moderation.enum';
 import { PostStatus } from './models/post-status.enum';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
@@ -12,7 +20,15 @@ describe('PostsService', () => {
         exec: jest.fn().mockResolvedValue(found),
       };
       const posts = { findOne: jest.fn().mockReturnValue(query) };
-      return { service: new PostsService(posts as never), posts, query };
+      return {
+        service: new PostsService(
+          posts as never,
+          engagement() as never,
+          engagement() as never,
+        ),
+        posts,
+        query,
+      };
     };
 
     it('returns the author id and the moderation of a published post', async () => {
@@ -63,7 +79,19 @@ describe('PostsService', () => {
         findOneAndUpdate: jest.fn().mockReturnValue(query),
         findByIdAndDelete: jest.fn().mockReturnValue(query),
       };
-      return { service: new PostsService(posts as never), posts, query };
+      const comments = engagement(2);
+      const likes = engagement(3);
+      return {
+        service: new PostsService(
+          posts as never,
+          comments as never,
+          likes as never,
+        ),
+        posts,
+        query,
+        comments,
+        likes,
+      };
     };
 
     it.each([
@@ -107,21 +135,45 @@ describe('PostsService', () => {
     it('deletes any post and returns its image file names', async () => {
       const { service, posts, query } = model({ images: ['a.jpg', 'b.png'] });
 
-      expect(await service.removeByAdmin('post-1')).toEqual(['a.jpg', 'b.png']);
-      expect(posts.findByIdAndDelete).toHaveBeenCalledWith('post-1');
+      const postId = '6740f1c2a4b5c6d7e8f90abc';
+      expect(await service.removeByAdmin(postId)).toEqual(['a.jpg', 'b.png']);
+      expect(posts.findByIdAndDelete).toHaveBeenCalledWith(postId);
       expect(query.select).toHaveBeenCalledWith('images');
     });
 
     it('returns an empty list for a post without images', async () => {
       const { service } = model({});
 
-      expect(await service.removeByAdmin('post-1')).toEqual([]);
+      expect(await service.removeByAdmin('6740f1c2a4b5c6d7e8f90abc')).toEqual(
+        [],
+      );
     });
 
-    it('returns null when there was no such post', async () => {
-      const { service } = model(null);
+    it('returns null when there was no such post, and deletes no comments or likes', async () => {
+      const { service, comments, likes } = model(null);
 
       expect(await service.removeByAdmin('post-1')).toBeNull();
+      expect(comments.deleteMany).not.toHaveBeenCalled();
+      expect(likes.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('also deletes the comments and likes of the deleted post, and only those', async () => {
+      const { service, comments, likes } = model({ images: [] });
+      const postId = '6740f1c2a4b5c6d7e8f90abc';
+
+      await service.removeByAdmin(postId);
+
+      const filter = { postId: new Types.ObjectId(postId) };
+      expect(comments.deleteMany).toHaveBeenCalledWith(filter);
+      expect(likes.deleteMany).toHaveBeenCalledWith(filter);
+    });
+
+    it('removeEngagementOfPost returns how many comments and likes it deleted', async () => {
+      const { service } = model(null);
+
+      expect(
+        await service.removeEngagementOfPost('6740f1c2a4b5c6d7e8f90abc'),
+      ).toEqual({ comments: 2, likes: 3 });
     });
   });
 
@@ -145,7 +197,11 @@ describe('PostsService', () => {
       create: jest.fn().mockResolvedValue(createdPost),
     };
 
-    const service = new PostsService(posts as never);
+    const service = new PostsService(
+      posts as never,
+      engagement() as never,
+      engagement() as never,
+    );
 
     const result = await service.create(
       {
@@ -200,7 +256,11 @@ describe('PostsService', () => {
       create: jest.fn().mockResolvedValue(createdPost),
     };
 
-    const service = new PostsService(posts as never);
+    const service = new PostsService(
+      posts as never,
+      engagement() as never,
+      engagement() as never,
+    );
 
     const result = await service.create(
       {
@@ -262,7 +322,11 @@ describe('PostsService', () => {
         find: jest.fn(() => ({ sort })),
         countDocuments: jest.fn(() => ({ exec: countExec })),
       };
-      const service = new PostsService(posts as never);
+      const service = new PostsService(
+        posts as never,
+        engagement() as never,
+        engagement() as never,
+      );
       return { posts, sort, skip, limit, service };
     }
 

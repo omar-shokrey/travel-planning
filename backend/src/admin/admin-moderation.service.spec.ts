@@ -54,6 +54,12 @@ function setup(targetType = ReportTargetType.Post) {
           }),
       ),
     resolveOpenOfTarget: jest.fn().mockResolvedValue(0),
+    changeResolvedStatus: jest
+      .fn()
+      .mockImplementation(
+        (_id: string, _from: ReportStatus, to: ReportStatus) =>
+          Promise.resolve({ ...storedReport(targetType), status: to }),
+      ),
   };
   const content = () => ({
     existsById: jest.fn().mockResolvedValue(true),
@@ -262,6 +268,62 @@ describe('AdminModerationService (GEN-10)', () => {
       expect(result.status).toBe('deleted');
       expect(uploads.deleteImage).not.toHaveBeenCalled();
       expect(reports.resolveOpenOfTarget).toHaveBeenCalled();
+    });
+
+    it('audits nothing when the content to delete was already gone: the admin deleted nothing', async () => {
+      const { service, posts, audit } = setup();
+      posts.removeByAdmin.mockResolvedValue(null);
+
+      await service.resolveReport(
+        REPORT_ID.toString(),
+        ReportAction.Delete,
+        ADMIN,
+      );
+
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('closes the report as deleted when the author deletes the content between the check and the hide', async () => {
+      const { service, posts, reports, audit } = setup();
+      // Present at the check, gone when the update runs.
+      posts.existsById.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      posts.setHidden.mockResolvedValue(false);
+
+      const result = await service.resolveReport(
+        REPORT_ID.toString(),
+        ReportAction.Hide,
+        ADMIN,
+      );
+
+      expect(reports.changeResolvedStatus).toHaveBeenCalledWith(
+        REPORT_ID.toString(),
+        ReportStatus.Hidden,
+        ReportStatus.Deleted,
+      );
+      expect(reports.resolveOpenOfTarget).toHaveBeenCalledWith(
+        ReportTargetType.Post,
+        TARGET.toString(),
+        ReportStatus.Deleted,
+        ADMIN,
+        expect.any(Date),
+      );
+      expect(result.status).toBe('deleted');
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('keeps the report hidden when the content was already hidden (still there)', async () => {
+      const { service, posts, reports, audit } = setup();
+      posts.setHidden.mockResolvedValue(false);
+
+      const result = await service.resolveReport(
+        REPORT_ID.toString(),
+        ReportAction.Hide,
+        ADMIN,
+      );
+
+      expect(reports.changeResolvedStatus).not.toHaveBeenCalled();
+      expect(result.status).toBe('hidden');
+      expect(audit.record).toHaveBeenCalledTimes(1);
     });
 
     it('does not fail when an image file cannot be removed, and logs the count', async () => {

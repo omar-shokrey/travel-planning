@@ -13,6 +13,8 @@ import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
 import { LOGIN_REQUIRED_MESSAGE } from './../src/auth/auth.constants';
 import { BlogPost } from './../src/blog/models/blog-post.schema';
+import { Comment } from './../src/blog/models/comment.schema';
+import { Like } from './../src/blog/models/like.schema';
 import { PostModeration } from './../src/blog/models/post-moderation.enum';
 import { PostStatus } from './../src/blog/models/post-status.enum';
 import { ACCESS_TOKEN_COOKIE } from './../src/common/constants/cookies';
@@ -57,6 +59,8 @@ describe('Admin report handling and moderation (e2e, GEN-10)', () => {
   let posts: Model<BlogPost>;
   let itineraries: Model<Itinerary>;
   let reports: Model<Report>;
+  let comments: Model<Comment>;
+  let likes: Model<Like>;
   const createdUserIds: string[] = [];
   const createdPostIds: string[] = [];
   const createdItineraryIds: string[] = [];
@@ -112,6 +116,8 @@ describe('Admin report handling and moderation (e2e, GEN-10)', () => {
     posts = app.get<Model<BlogPost>>(getModelToken(BlogPost.name));
     itineraries = app.get<Model<Itinerary>>(getModelToken(Itinerary.name));
     reports = app.get<Model<Report>>(getModelToken(Report.name));
+    comments = app.get<Model<Comment>>(getModelToken(Comment.name));
+    likes = app.get<Model<Like>>(getModelToken(Like.name));
 
     mkdirSync(uploadsDir, { recursive: true });
     for (const name of [
@@ -165,6 +171,9 @@ describe('Admin report handling and moderation (e2e, GEN-10)', () => {
       'pRace',
       'pDirect',
       'pDirectDelete',
+      // BLG-05/06 with GEN-10: hidden, then deleted with its comments and likes.
+      'pEngageHide',
+      'pEngageDelete',
     ];
     const insertedPosts = await posts.insertMany(
       postLabels.map((label) => ({
@@ -251,6 +260,16 @@ describe('Admin report handling and moderation (e2e, GEN-10)', () => {
   });
 
   afterAll(async () => {
+    // Comments and likes made on the test posts (BLG-05/06), one by one by id.
+    for (const postId of createdPostIds) {
+      const filter = { postId: new Types.ObjectId(postId) };
+      for (const { _id } of await comments.find(filter).select('_id').lean()) {
+        await comments.findByIdAndDelete(_id);
+      }
+      for (const { _id } of await likes.find(filter).select('_id').lean()) {
+        await likes.findByIdAndDelete(_id);
+      }
+    }
     // Includes the reports of other users made through GEN-09 below.
     for (const reportId of createdReportIds) {
       await reports.findByIdAndDelete(reportId);
@@ -706,6 +725,54 @@ describe('Admin report handling and moderation (e2e, GEN-10)', () => {
           )
         ).status,
       ).toBe(401);
+    });
+  });
+
+  describe('comments and likes of hidden and deleted posts (BLG-05, BLG-06)', () => {
+    const comment = (who: string | undefined, postId: string) =>
+      call(who, 'post', `/api/posts/${postId}/comments`).send({
+        body: 'Nice trip',
+      });
+    const like = (who: string, postId: string) =>
+      call(who, 'post', `/api/posts/${postId}/like`);
+
+    it('a hidden post answers 404 to comments, the comment list and likes, except for its author', async () => {
+      const postId = id('pEngageHide');
+      expect((await comment('viewer', postId)).status).toBe(201);
+      expect((await like('viewer', postId)).status).toBe(201);
+
+      expect(
+        (await moderate('post', postId, { moderation: 'hidden' })).status,
+      ).toBe(200);
+
+      expect((await comment('viewer', postId)).status).toBe(404);
+      expect(
+        (await call(undefined, 'get', `/api/posts/${postId}/comments`)).status,
+      ).toBe(404);
+      expect(
+        (await call('viewer', 'get', `/api/posts/${postId}/comments`)).status,
+      ).toBe(404);
+      expect((await like('reporter1', postId)).status).toBe(404);
+      expect(
+        (await call('viewer', 'delete', `/api/posts/${postId}/like`)).status,
+      ).toBe(404);
+      // Its author still reaches their own hidden post.
+      expect((await comment('author', postId)).status).toBe(201);
+    });
+
+    it('deleting a post as admin also deletes its comments and likes', async () => {
+      const postId = id('pEngageDelete');
+      expect((await comment('viewer', postId)).status).toBe(201);
+      expect((await comment('reporter1', postId)).status).toBe(201);
+      expect((await like('viewer', postId)).status).toBe(201);
+      const filter = { postId: new Types.ObjectId(postId) };
+      expect(await comments.countDocuments(filter)).toBe(2);
+      expect(await likes.countDocuments(filter)).toBe(1);
+
+      expect((await remove('post', postId)).status).toBe(204);
+
+      expect(await comments.countDocuments(filter)).toBe(0);
+      expect(await likes.countDocuments(filter)).toBe(0);
     });
   });
 

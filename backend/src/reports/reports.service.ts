@@ -133,6 +133,27 @@ export class ReportsService {
   }
 
   /**
+   * GEN-10, for the admin module: changes the status of a report that is
+   * still `from`, in one conditional update, and returns it (null when it is
+   * not). Used when the content of a report claimed as `hidden` turns out to
+   * have been deleted by its author in the meantime: the report becomes
+   * `deleted`.
+   */
+  async changeResolvedStatus(
+    id: string,
+    from: ReportStatus,
+    to: ReportStatus,
+  ): Promise<ReportDocument | null> {
+    return this.reports
+      .findOneAndUpdate(
+        { _id: id, status: from },
+        { $set: { status: to } },
+        { returnDocument: 'after' },
+      )
+      .exec();
+  }
+
+  /**
    * GEN-10, for the admin module: after an item was hidden or deleted, its
    * other open reports get the same status. The filter always names one item,
    * never a broad set. Returns how many reports changed.
