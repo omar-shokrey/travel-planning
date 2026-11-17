@@ -74,7 +74,7 @@ describe('ListReportsQueryDto (GEN-10)', () => {
   it.each([
     ['an unknown status', { status: 'closed' }, ['status']],
     ['an empty status', { status: '' }, ['status']],
-    ['an unknown target type', { targetType: 'comment' }, ['targetType']],
+    ['an unknown target type', { targetType: 'review' }, ['targetType']],
     ['a page size over 50', { limit: '51' }, ['limit']],
     ['page 0', { page: '0' }, ['page']],
     ['a parameter that is not allowed', { reporterId: 'x' }, ['reporterId']],

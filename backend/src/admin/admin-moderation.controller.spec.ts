@@ -22,6 +22,7 @@ describe('AdminModerationController (GEN-10)', () => {
     const service = {
       listReports: jest.fn().mockResolvedValue('page'),
       resolveReport: jest.fn().mockResolvedValue('report'),
+      viewContent: jest.fn().mockResolvedValue('view'),
       moderateContent: jest.fn().mockResolvedValue('content'),
       deleteContent: jest.fn().mockResolvedValue(undefined),
     };
@@ -46,6 +47,7 @@ describe('AdminModerationController (GEN-10)', () => {
   it.each([
     ['listReports', 'reports', RequestMethod.GET],
     ['resolveReport', 'reports/:id', RequestMethod.PATCH],
+    ['viewContent', 'content/:type/:id', RequestMethod.GET],
     ['moderateContent', 'content/:type/:id', RequestMethod.PATCH],
     ['deleteContent', 'content/:type/:id', RequestMethod.DELETE],
   ] as const)('%s is %s', (name, path, method) => {
@@ -89,6 +91,18 @@ describe('AdminModerationController (GEN-10)', () => {
     );
   });
 
+  it('passes the content to view to the service and returns its answer', async () => {
+    const { service, controller } = setup();
+
+    expect(await controller.viewContent(ReportTargetType.Comment, 'c1')).toBe(
+      'view',
+    );
+    expect(service.viewContent).toHaveBeenCalledWith(
+      ReportTargetType.Comment,
+      'c1',
+    );
+  });
+
   it('passes the content, the moderation and the admin id to the service', async () => {
     const { service, controller } = setup();
 
@@ -121,7 +135,7 @@ describe('AdminModerationController (GEN-10)', () => {
   });
 
   describe('CONTENT_TYPE_PIPE', () => {
-    it.each(['post', 'itinerary'])('accepts %s', async (type) => {
+    it.each(['post', 'itinerary', 'comment'])('accepts %s', async (type) => {
       expect(
         await CONTENT_TYPE_PIPE.transform(type, {
           type: 'param',
@@ -130,15 +144,14 @@ describe('AdminModerationController (GEN-10)', () => {
       ).toBe(type);
     });
 
-    it.each(['comment', 'review', 'POST', ''])(
-      'refuses %p with 400',
-      async (type) => {
-        await expect(
-          CONTENT_TYPE_PIPE.transform(type, { type: 'param', data: 'type' }),
-        ).rejects.toThrow(
-          new BadRequestException('type must be one of: post, itinerary'),
-        );
-      },
-    );
+    it.each(['review', 'POST', ''])('refuses %p with 400', async (type) => {
+      await expect(
+        CONTENT_TYPE_PIPE.transform(type, { type: 'param', data: 'type' }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'type must be one of: post, itinerary, comment',
+        ),
+      );
+    });
   });
 });

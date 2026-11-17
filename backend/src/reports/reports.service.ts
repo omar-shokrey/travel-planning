@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { CommentsService } from '../blog/comments.service';
+import { CommentModeration } from '../blog/models/comment-moderation.enum';
 import { PostModeration } from '../blog/models/post-moderation.enum';
 import { PostsService } from '../blog/posts.service';
 import { ItinerariesService } from '../itineraries/itineraries.service';
@@ -29,10 +31,12 @@ export class ReportsService {
     @InjectModel(Report.name) private readonly reports: Model<Report>,
     private readonly posts: PostsService,
     private readonly itineraries: ItinerariesService,
+    private readonly comments: CommentsService,
   ) {}
 
   /**
-   * GEN-09: a registered user reports a post or an itinerary with a reason,
+   * GEN-09: a registered user reports a post, a comment or an itinerary with
+   * a reason,
    * at most once per item. The target must be visible to the reporter (404
    * otherwise) and must not be the reporter's own (400).
    */
@@ -194,6 +198,9 @@ export class ReportsService {
     targetId: string,
     reporterId: string,
   ): Promise<string> {
+    if (targetType === ReportTargetType.Comment) {
+      return this.findVisibleCommentAuthorOrThrow(targetId, reporterId);
+    }
     if (targetType === ReportTargetType.Post) {
       // A draft answers like a missing post (BLG-01, BLG-02), and so does a
       // post an admin hid, except to its author (GEN-10).
@@ -218,6 +225,29 @@ export class ReportsService {
       throw new NotFoundException('Itinerary not found');
     }
     return ownerId;
+  }
+
+  /**
+   * The author of a comment the reporter may see, or 404. A comment an admin
+   * hid (GEN-10) is seen only by its author. Its post must be published and
+   * not hidden, except to the post's author: the rule of comments and likes
+   * (`visiblePublishedPost`), applied by `PostsService.isVisibleTo`. All three
+   * cases answer like a missing comment, so nothing hidden is revealed.
+   */
+  private async findVisibleCommentAuthorOrThrow(
+    commentId: string,
+    reporterId: string,
+  ): Promise<string> {
+    const comment = await this.comments.findSummary(commentId);
+    const visibleToReporter =
+      comment !== null &&
+      (comment.moderation === CommentModeration.Visible ||
+        comment.authorId === reporterId) &&
+      (await this.posts.isVisibleTo(comment.postId, reporterId));
+    if (!visibleToReporter) {
+      throw new NotFoundException('Comment not found');
+    }
+    return comment.authorId;
   }
 }
 

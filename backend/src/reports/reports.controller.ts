@@ -26,9 +26,9 @@ export class ReportsController {
   @Post()
   @Roles(Role.User)
   @ApiOperation({
-    summary: 'Report a post or an itinerary (GEN-09)',
+    summary: 'Report a post, a comment or an itinerary (GEN-09)',
     description:
-      'Registered users only. Send `targetType` (`post` or `itinerary`), the `targetId` and a `reason` (1 to 500 characters after trimming); all three are required. A post must be published and an itinerary must be one you can see (public, or your own). You cannot report your own content, and you can report each item only once. The reporter, the status (`open`) and the dates are set by the server; an admin handles the report later (GEN-10).',
+      'Registered users only. Send `targetType` (`post`, `comment` or `itinerary`), the `targetId` and a `reason` (1 to 500 characters after trimming); all three are required. A post must be published, a comment must be one you can see (not hidden, on a published post that is not hidden) and an itinerary must be one you can see (public, or your own). You cannot report your own content, and you can report each item only once. The reporter, the status (`open`) and the dates are set by the server; an admin handles the report later (GEN-10).',
   })
   @ApiCreatedResponse({
     description: 'The report was saved with status `open`',
@@ -47,7 +47,7 @@ export class ReportsController {
   })
   @ApiNotFoundResponse({
     description:
-      'No such post or itinerary, or one you cannot see (a draft post, or an itinerary that is private, hidden or of a deactivated author)',
+      'No such post, comment or itinerary, or one you cannot see (a draft or hidden post, a hidden comment or one on a draft or hidden post, or an itinerary that is private, hidden or of a deactivated author)',
   })
   @ApiConflictResponse({
     description: 'You have already reported this item',
