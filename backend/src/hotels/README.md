@@ -138,3 +138,12 @@ hotel before its file is removed.
 - Results are sorted by hotel name. The free rooms of every hotel of the destination are found with two queries in all (`findFreeRoomsOfHotels`), then the list is paginated in memory, because whether a hotel qualifies depends on its rooms and their nights.
 - A `(countryCode, active)` index was added next to the existing `(cityId, active)` one, for the country search.
 
+## Price and rating filters (HTL-12)
+
+- The filters are more query parameters of `GET /api/hotels/search` (the endpoint table gives HTL-11 and HTL-12 one route): `minPrice`, `maxPrice`, `minRating`, `sort` and `order`.
+- The price of a hotel is the price per night of its cheapest room that is free for the stay, as the workbook says ("price of the cheapest qualifying room"), the same `cheapestPricePerNight` the results show. Both limits are inclusive whole minor units of 0 or more; `maxPrice` below `minPrice` answers 400.
+- `minRating` is a number from 1 to 5 (decimals allowed, as the average is). When it is sent, unrated hotels (`ratingCount` 0) are left out; this filter runs in the database query, together with the destination and `active`.
+- `sort` is `name` (the HTL-11 order, default), `price` or `rating`. The default direction is cheapest first for price and best first for rating; `order=asc|desc` overrides it. Equal prices or ratings stay in name order, because the list is read sorted by name and JavaScript's sort is stable.
+- The price filter and the sort run in memory before pagination, because the price depends on the free rooms of the stay. `inPriceRange` and `sortCandidates` in `hotel-search.ts` are pure functions with unit tests.
+- `HotelSearchSort` and `SortOrder` are in the hotels module, not in `common/`, so this PR does not touch the shared layer. If another module needs a sort order, the team can move `SortOrder` to `common/enums/` in a shared-layer PR.
+
