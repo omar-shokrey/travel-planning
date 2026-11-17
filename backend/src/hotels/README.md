@@ -63,7 +63,7 @@ hotel before its file is removed.
 - It lives in its own `HotelDetailsController` and `HotelDetailsService`, so it does not collide with the profile and search work in the same module. The controller is registered last in `HotelsModule`: a controller with a fixed path such as `GET /hotels/search` must be matched before `GET /hotels/:id`, or "search" would be read as an id and answer 400.
 - Only an active hotel is shown. A deactivated hotel answers 404, the same as a missing one, because ACC-15 hides it from the public.
 - The response is the `HotelResponseDto` of HTL-01: profile, photos with their URLs, amenities, `averageRating` and `ratingCount`.
-- The other parts of the hotel page come from the issues that own their data: check-in and check-out times and the cancellation policy are added to this response by HTL-09 and HTL-10, the reviews are read from `GET /api/hotels/:id/reviews` (HTL-24), and the rooms free for chosen dates from `GET /api/hotels/:id/rooms/available` (HTL-15).
+- The other parts of the hotel page come from the issues that own their data: check-in and check-out times and the cancellation policy are added to this response by HTL-09 and HTL-10, the reviews are read from `GET /api/hotels/:id/reviews` (HTL-24). The rooms free for chosen dates are on the page itself when `checkIn` and `checkOut` are sent (see HTL-15).
 
 ## Check-in and check-out times (HTL-09)
 
@@ -117,3 +117,13 @@ hotel before its file is removed.
 - The workbook asks for the reservation reference on a booked night. The reservations of HTL-16 and HTL-17 do not exist yet, so a booked segment shows the `bookingId` stored on the night. HTL-17 should add the `reference` next to it once `hotel_bookings` exists.
 - A range has at most 366 nights (`ROOM_QUERY_MAX_NIGHTS`). The workbook gives no limit; this one keeps a page of rooms small.
 - The status of each night is computed by the pure function `roomStatusSegments` in `room-status.ts`, so it is unit tested without a database. The service reads one page of rooms and their nights in the range with one query each.
+
+## Available rooms for the searched dates (HTL-15)
+
+- `GET /api/hotels/:id/rooms/available?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD` is public, as the endpoint table says. It lists every room of an active hotel that is free for the whole stay, paginated (GEN-05) and sorted by room number. A deactivated hotel answers 404, as on the hotel page.
+- HTL-02 says the hotel page shows "the available rooms when dates are provided". So `GET /api/hotels/:id` takes the same two dates as optional query parameters and then adds `availableRooms`, the full list without pagination; without dates it is `null`. Sending only one date answers 400. Both routes use the same service method, so they can never disagree.
+- A room is free when it is active (HTL-06), its availability ranges (HTL-04) cover every night from check-in up to the day before check-out, and no night of the stay has a `room_nights` document that is booked, blocked, or held with a hold that has not expired. The check-out day is not a night of the stay, so a reservation that starts that day does not matter.
+- The date rules are the ones of HTL-11 and HTL-18: check-out after check-in (checked by the DTO), and check-in not in the past (UTC, checked by the service because "today" changes). A stay has at most 366 nights (`ROOM_QUERY_MAX_NIGHTS`); the workbook gives no limit.
+- Each room shows the fields of the workbook (type, beds, maximum occupancy, price per night) plus its number, the number of nights and `totalPrice` = nights x price per night, in minor units of the platform currency.
+- The rooms are read with one query and the taken ones with one `distinct` on `room_nights`; the coverage check runs in memory on the embedded availability ranges. The free list is paginated in memory, because whether a room is free depends on both collections.
+- `findFreeRoomEntities` is the rule for hotel search (HTL-11) and booking (HTL-16), so they should call it instead of writing their own. It is only a read: a room can be taken right after it, so the hold of HTL-18 must still rely on the unique (`roomId`, `date`) index.
