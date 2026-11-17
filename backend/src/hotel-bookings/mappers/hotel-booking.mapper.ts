@@ -5,14 +5,19 @@ import type { HotelBooking } from '../models/hotel-booking.schema';
 
 export type HotelBookingSource = HotelBooking & { _id: Types.ObjectId };
 
-/** A reservation as its owner sees it (HTL-16, HTL-18). */
+/**
+ * A reservation as its owner sees it (HTL-16, HTL-18, HTL-20). The hotel's
+ * name is read by the caller, because the reservation stores only its id.
+ */
 export function toHotelBookingResponse(
   booking: HotelBookingSource,
+  hotelName: string | null,
 ): HotelBookingResponseDto {
   return {
     id: booking._id.toString(),
     reference: booking.reference ?? null,
     hotelId: booking.hotelId.toString(),
+    hotelName,
     checkIn: booking.checkIn,
     checkOut: booking.checkOut,
     nights: booking.nights,

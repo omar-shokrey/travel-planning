@@ -53,10 +53,11 @@ const booking = (fields: Partial<HotelBookingSource> = {}) =>
 
 describe('toHotelBookingResponse (HTL-16, HTL-18)', () => {
   it('returns the public fields, with ids as strings and moments in UTC', () => {
-    expect(toHotelBookingResponse(booking())).toEqual({
+    expect(toHotelBookingResponse(booking(), 'Nile Hotel')).toEqual({
       id: id.toString(),
       reference: null,
       hotelId: hotelId.toString(),
+      hotelName: 'Nile Hotel',
       checkIn: '2026-12-10',
       checkOut: '2026-12-13',
       nights: 3,
@@ -94,7 +95,7 @@ describe('toHotelBookingResponse (HTL-16, HTL-18)', () => {
   });
 
   it('never returns the owner or internal fields', () => {
-    const response = toHotelBookingResponse(booking());
+    const response = toHotelBookingResponse(booking(), 'Nile Hotel');
 
     expect(response).not.toHaveProperty('userId');
     expect(response).not.toHaveProperty('_id');
@@ -108,16 +109,19 @@ describe('toHotelBookingResponse (HTL-16, HTL-18)', () => {
         checkInTime: undefined,
         checkOutTime: undefined,
       }),
+      null,
     );
 
     expect(response.holdExpiresAt).toBeNull();
     expect(response.checkInTime).toBeNull();
     expect(response.checkOutTime).toBeNull();
+    expect(response.hotelName).toBeNull();
   });
 
   it('returns the reference once there is one', () => {
     expect(
-      toHotelBookingResponse(booking({ reference: 'HTL-7K2M9Q' })).reference,
+      toHotelBookingResponse(booking({ reference: 'HTL-7K2M9Q' }), 'Nile Hotel')
+        .reference,
     ).toBe('HTL-7K2M9Q');
   });
 });

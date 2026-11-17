@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -6,15 +6,21 @@ import {
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
 import { Role } from '../common/enums/role.enum';
+import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import { HotelBookingResponseDto } from './dto/hotel-booking-response.dto';
+import { ListHotelBookingsQueryDto } from './dto/list-hotel-bookings-query.dto';
 import { HotelBookingsService } from './hotel-bookings.service';
 
 @ApiTags('hotel-bookings')
@@ -54,5 +60,60 @@ export class HotelBookingsController {
     @CurrentUser('id') userId: string,
   ): Promise<HotelBookingResponseDto> {
     return this.hotelBookings.create(userId, dto);
+  }
+
+  @Get()
+  @Roles(Role.User)
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'My hotel reservations (HTL-20)',
+    description:
+      "HTL-20. The logged-in user's own reservations, never anyone else's, with the reference, hotel, rooms, dates, guests, total and status. `group` gives the tabs of the page: `upcoming` (confirmed and check-out not passed, or waiting for payment with a live hold; soonest first), `past` (completed, or confirmed with check-out passed; latest first) and `cancelled` (latest first). Without `group`, every reservation, expired ones included, newest first. Paginated.",
+  })
+  @ApiPaginatedResponse(HotelBookingResponseDto)
+  @ApiBadRequestResponse({
+    description: 'group is unknown, or the page parameters are wrong',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Not logged in, or the access token is invalid or expired',
+  })
+  @ApiForbiddenResponse({
+    description: 'Only a registered user (role `user`) has reservations',
+  })
+  findMine(
+    @Query() query: ListHotelBookingsQueryDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<PaginatedResponse<HotelBookingResponseDto>> {
+    return this.hotelBookings.findMine(userId, query);
+  }
+
+  @Get(':id')
+  @Roles(Role.User)
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'The full details of one of my reservations (HTL-20)',
+    description:
+      'HTL-20. Every room with its price, label and guests, the copied check-in and check-out times and cancellation tiers, the hold and the status. Only the user who made the reservation can open it (ACC-11).',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Reservation id',
+    example: '6740f1c2a4b5c6d7e8f90789',
+  })
+  @ApiOkResponse({ type: HotelBookingResponseDto })
+  @ApiBadRequestResponse({ description: 'The id is not a valid id' })
+  @ApiUnauthorizedResponse({
+    description: 'Not logged in, or the access token is invalid or expired',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The account is not a registered user, or the reservation belongs to someone else',
+  })
+  @ApiNotFoundResponse({ description: 'The reservation does not exist' })
+  findMineById(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<HotelBookingResponseDto> {
+    return this.hotelBookings.findMineById(id, userId);
   }
 }

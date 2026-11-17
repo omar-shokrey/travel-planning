@@ -1,23 +1,39 @@
-import { Injectable } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { PLATFORM_CURRENCY } from '../common/constants/currency';
+import {
+  paginate,
+  type PaginatedResponse,
+} from '../common/dto/paginated-response.dto';
 import { HotelRoomHoldsService } from '../hotels/hotel-room-holds.service';
-import { nightCount } from '../hotels/room-dates';
+import { HotelsService } from '../hotels/hotels.service';
+import { nightCount, todayUtc } from '../hotels/room-dates';
 import type { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import type { HotelBookingResponseDto } from './dto/hotel-booking-response.dto';
+import type { ListHotelBookingsQueryDto } from './dto/list-hotel-bookings-query.dto';
 import { HotelBookingStatus } from './enums/hotel-booking-status.enum';
+import { groupFilter, groupSort } from './hotel-booking-groups';
 import { HOTEL_BOOKING_HOLD_MINUTES } from './hotel-bookings.constants';
 import { toHotelBookingResponse } from './mappers/hotel-booking.mapper';
 import { HotelBooking } from './models/hotel-booking.schema';
 
-/** HTL-16 and HTL-18: hotel reservations. */
+export const RESERVATION_NOT_FOUND_MESSAGE = 'Reservation not found';
+export const NOT_YOUR_RESERVATION_MESSAGE =
+  'You can only view your own reservations';
+
+/** HTL-16, HTL-18 and HTL-20: hotel reservations. */
 @Injectable()
 export class HotelBookingsService {
   constructor(
     @InjectModel(HotelBooking.name)
     private readonly bookings: Model<HotelBooking>,
     private readonly roomHolds: HotelRoomHoldsService,
+    private readonly hotels: HotelsService,
   ) {}
 
   /**
@@ -101,6 +117,64 @@ export class HotelBookingsService {
       await this.roomHolds.release(bookingId);
       throw error;
     }
-    return toHotelBookingResponse(booking.toObject());
+    return toHotelBookingResponse(booking.toObject(), hotel.name);
+  }
+
+  /**
+   * HTL-20: one page of the user's own reservations, in one group (Upcoming,
+   * Past or Cancelled) or all of them. Nobody else's are ever read.
+   */
+  async findMine(
+    userId: string,
+    query: ListHotelBookingsQueryDto,
+  ): Promise<PaginatedResponse<HotelBookingResponseDto>> {
+    const filter = {
+      ...groupFilter(query.group, todayUtc(), new Date()),
+      userId: new Types.ObjectId(userId),
+    };
+    const [bookings, total] = await Promise.all([
+      this.bookings
+        .find(filter)
+        .sort(groupSort(query.group))
+        .skip(query.skip)
+        .limit(query.limit)
+        .lean()
+        .exec(),
+      this.bookings.countDocuments(filter).exec(),
+    ]);
+
+    const hotelIds = new Map(
+      bookings.map((booking) => [booking.hotelId.toString(), booking.hotelId]),
+    );
+    const names = await this.hotels.findNamesByIds([...hotelIds.values()]);
+    const items = bookings.map((booking) =>
+      toHotelBookingResponse(
+        booking,
+        names.get(booking.hotelId.toString()) ?? null,
+      ),
+    );
+    return paginate(items, total, query);
+  }
+
+  /**
+   * HTL-20: the full details of one of the user's reservations. 404 when it
+   * does not exist, 403 when it belongs to someone else (ACC-11).
+   */
+  async findMineById(
+    id: string,
+    userId: string,
+  ): Promise<HotelBookingResponseDto> {
+    const booking = await this.bookings.findById(id).lean().exec();
+    if (!booking) {
+      throw new NotFoundException(RESERVATION_NOT_FOUND_MESSAGE);
+    }
+    if (booking.userId.toString() !== userId) {
+      throw new ForbiddenException(NOT_YOUR_RESERVATION_MESSAGE);
+    }
+    const names = await this.hotels.findNamesByIds([booking.hotelId]);
+    return toHotelBookingResponse(
+      booking,
+      names.get(booking.hotelId.toString()) ?? null,
+    );
   }
 }

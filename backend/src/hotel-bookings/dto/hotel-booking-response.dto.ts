@@ -50,6 +50,15 @@ export class HotelBookingResponseDto {
   @ApiProperty({ example: '6740f1c2a4b5c6d7e8f90123' })
   hotelId: string;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'The name of the hotel now (HTL-20). `null` only if the hotel no longer exists.',
+    example: 'Nile View Hotel',
+  })
+  hotelName: string | null;
+
   @ApiProperty({ description: 'YYYY-MM-DD', example: '2026-12-10' })
   checkIn: string;
 

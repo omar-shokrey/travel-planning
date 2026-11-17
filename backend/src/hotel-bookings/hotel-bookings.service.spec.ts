@@ -1,8 +1,15 @@
-import { ConflictException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import type { HotelRoomHoldsService } from '../hotels/hotel-room-holds.service';
+import type { HotelsService } from '../hotels/hotels.service';
 import type { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
+import type { ListHotelBookingsQueryDto } from './dto/list-hotel-bookings-query.dto';
 import { HotelBookingStatus } from './enums/hotel-booking-status.enum';
+import { HotelBookingGroup } from './hotel-booking-groups';
 import { HotelBookingsService } from './hotel-bookings.service';
 
 const USER_ID = new Types.ObjectId().toString();
@@ -48,9 +55,31 @@ const setup = (
     hotel?: object;
     holdError?: Error;
     createError?: Error;
+    stored?: object[];
+    total?: number;
+    found?: object | null;
   } = {},
 ) => {
+  const listChain = {
+    sort: jest.fn(),
+    skip: jest.fn(),
+    limit: jest.fn(),
+    lean: jest.fn(),
+    exec: jest.fn().mockResolvedValue(options.stored ?? []),
+  };
+  for (const step of ['sort', 'skip', 'limit', 'lean'] as const) {
+    listChain[step].mockReturnValue(listChain);
+  }
   const bookings = {
+    find: jest.fn().mockReturnValue(listChain),
+    countDocuments: jest.fn().mockReturnValue({
+      exec: jest.fn().mockResolvedValue(options.total ?? 0),
+    }),
+    findById: jest.fn().mockReturnValue({
+      lean: () => ({
+        exec: () => Promise.resolve(options.found ?? null),
+      }),
+    }),
     create: jest.fn((fields: Record<string, unknown>) =>
       options.createError
         ? Promise.reject(options.createError)
@@ -75,12 +104,53 @@ const setup = (
     ),
     release: jest.fn().mockResolvedValue(undefined),
   };
+  const hotels = {
+    findNamesByIds: jest
+      .fn()
+      .mockResolvedValue(new Map([[HOTEL_ID.toString(), 'Nile Hotel']])),
+  };
   const service = new HotelBookingsService(
     bookings as never,
     roomHolds as unknown as HotelRoomHoldsService,
+    hotels as unknown as HotelsService,
   );
-  return { service, bookings, roomHolds };
+  return { service, bookings, roomHolds, hotels, listChain };
 };
+
+/** A reservation as it is stored, for the read tests (HTL-20). */
+const stored = (fields: object = {}) => ({
+  _id: new Types.ObjectId(),
+  userId: new Types.ObjectId(USER_ID),
+  hotelId: HOTEL_ID,
+  checkIn: '2026-12-10',
+  checkOut: '2026-12-13',
+  nights: 3,
+  status: HotelBookingStatus.Confirmed,
+  currency: 'USD',
+  total: 37500,
+  rooms: [
+    {
+      roomId: ROOM_A._id,
+      roomLabel: '101 (Double)',
+      pricePerNight: 12500,
+      adults: 2,
+      childAges: [],
+    },
+  ],
+  cancellationTiers: [],
+  policyAcceptedAt: new Date('2026-11-17T18:00:00.000Z'),
+  createdAt: new Date('2026-11-17T18:00:00.000Z'),
+  updatedAt: new Date('2026-11-17T18:00:00.000Z'),
+  ...fields,
+});
+
+const listQuery = (group?: HotelBookingGroup, page = 1, limit = 10) =>
+  ({
+    group,
+    page,
+    limit,
+    skip: (page - 1) * limit,
+  }) as ListHotelBookingsQueryDto;
 
 describe('HotelBookingsService (HTL-16, HTL-18)', () => {
   beforeEach(() => {
@@ -146,6 +216,7 @@ describe('HotelBookingsService (HTL-16, HTL-18)', () => {
         checkOutTime: '12:00',
         cancellationTiers: [{ daysBefore: 7, refundPercent: 50 }],
         policyAcceptedAt: '2026-11-17T18:00:00.000Z',
+        hotelName: 'Nile Hotel',
       }),
     );
     expect(response.rooms).toEqual([
@@ -227,5 +298,134 @@ describe('HotelBookingsService (HTL-16, HTL-18)', () => {
     await expect(service.create(USER_ID, dto())).rejects.toBe(failure);
     const heldFor = (roomHolds.hold.mock.calls[0] as unknown[])[3];
     expect(roomHolds.release).toHaveBeenCalledWith(heldFor);
+  });
+});
+
+describe('HotelBookingsService reads (HTL-20)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers({ now: new Date('2026-11-17T18:00:00.000Z') });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  describe('findMine', () => {
+    it("reads only the user's own reservations of the group, one page", async () => {
+      const booking = stored();
+      const { service, bookings, listChain, hotels } = setup({
+        stored: [booking],
+        total: 11,
+      });
+
+      const page = await service.findMine(
+        USER_ID,
+        listQuery(HotelBookingGroup.Cancelled, 2, 5),
+      );
+
+      const filter = {
+        status: HotelBookingStatus.Cancelled,
+        userId: new Types.ObjectId(USER_ID),
+      };
+      expect(bookings.find).toHaveBeenCalledWith(filter);
+      expect(bookings.countDocuments).toHaveBeenCalledWith(filter);
+      expect(listChain.sort).toHaveBeenCalledWith({ checkIn: -1, _id: -1 });
+      expect(listChain.skip).toHaveBeenCalledWith(5);
+      expect(listChain.limit).toHaveBeenCalledWith(5);
+      expect(hotels.findNamesByIds).toHaveBeenCalledWith([HOTEL_ID]);
+      expect(page.meta).toEqual({
+        page: 2,
+        limit: 5,
+        total: 11,
+        totalPages: 3,
+      });
+      expect(page.items).toEqual([
+        expect.objectContaining({
+          id: booking._id.toString(),
+          hotelName: 'Nile Hotel',
+          status: 'confirmed',
+        }),
+      ]);
+    });
+
+    it('uses the date and the moment of now for the upcoming group', async () => {
+      const { service, bookings } = setup();
+
+      await service.findMine(USER_ID, listQuery(HotelBookingGroup.Upcoming));
+
+      expect(bookings.find).toHaveBeenCalledWith({
+        $or: [
+          {
+            status: HotelBookingStatus.Confirmed,
+            checkOut: { $gte: '2026-11-17' },
+          },
+          {
+            status: HotelBookingStatus.PendingPayment,
+            holdExpiresAt: { $gt: new Date('2026-11-17T18:00:00.000Z') },
+          },
+        ],
+        userId: new Types.ObjectId(USER_ID),
+      });
+    });
+
+    it('asks for each hotel name once and shows null for a missing hotel', async () => {
+      const otherHotel = new Types.ObjectId();
+      const { service, hotels } = setup({
+        stored: [stored(), stored(), stored({ hotelId: otherHotel })],
+        total: 3,
+      });
+
+      const page = await service.findMine(USER_ID, listQuery());
+
+      expect(hotels.findNamesByIds).toHaveBeenCalledWith([
+        HOTEL_ID,
+        otherHotel,
+      ]);
+      expect(page.items.map((item) => item.hotelName)).toEqual([
+        'Nile Hotel',
+        'Nile Hotel',
+        null,
+      ]);
+    });
+  });
+
+  describe('findMineById', () => {
+    it('returns the full reservation to its owner', async () => {
+      const booking = stored();
+      const { service, bookings } = setup({ found: booking });
+
+      const response = await service.findMineById(
+        booking._id.toString(),
+        USER_ID,
+      );
+
+      expect(bookings.findById).toHaveBeenCalledWith(booking._id.toString());
+      expect(response).toEqual(
+        expect.objectContaining({
+          id: booking._id.toString(),
+          hotelName: 'Nile Hotel',
+          total: 37500,
+        }),
+      );
+    });
+
+    it('answers 404 for a reservation that does not exist', async () => {
+      const { service } = setup({ found: null });
+
+      await expect(
+        service.findMineById(new Types.ObjectId().toString(), USER_ID),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('answers 403 for the reservation of someone else', async () => {
+      const { service, hotels } = setup({
+        found: stored({ userId: new Types.ObjectId() }),
+      });
+
+      await expect(
+        service.findMineById(new Types.ObjectId().toString(), USER_ID),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(hotels.findNamesByIds).not.toHaveBeenCalled();
+    });
   });
 });
