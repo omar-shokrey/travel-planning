@@ -178,6 +178,45 @@ describe('UsersService', () => {
     });
   });
 
+  describe('changeStatus (ACC-16)', () => {
+    function setupStatus(updated: object | null) {
+      const exec = jest.fn().mockResolvedValue(updated);
+      const model = { findOneAndUpdate: jest.fn(() => ({ exec })) };
+      const service = new UsersService(model as unknown as Model<User>);
+      return { model, service };
+    }
+
+    it('moves the status only when it is still the expected one, in one update', async () => {
+      const updated = { _id: userObjectId, status: UserStatus.Suspended };
+      const { model, service } = setupStatus(updated);
+
+      const result = await service.changeStatus(
+        userObjectId,
+        UserStatus.Active,
+        UserStatus.Suspended,
+      );
+
+      expect(result).toBe(updated);
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: userObjectId, status: UserStatus.Active },
+        { $set: { status: UserStatus.Suspended } },
+        { returnDocument: 'after' },
+      );
+    });
+
+    it('returns null when the status was already different, and changes nothing', async () => {
+      const { service } = setupStatus(null);
+
+      expect(
+        await service.changeStatus(
+          userObjectId,
+          UserStatus.Suspended,
+          UserStatus.Active,
+        ),
+      ).toBeNull();
+    });
+  });
+
   describe('findEntityByEmailWithPasswordHash (ACC-04)', () => {
     it('finds the account by its trimmed, lowercased email', async () => {
       const { model, service } = setup();
@@ -656,6 +695,49 @@ describe('UsersService', () => {
       const pattern = asRegExp(filter());
       expect(pattern.test('xa.b+(c)y')).toBe(true);
       expect(pattern.test('axbbc')).toBe(false);
+    });
+  });
+
+  describe('findModeratorIdsOfProvider (ACC-15)', () => {
+    const providerId = new Types.ObjectId('6740f1c2a4b5c6d7e8f90abc');
+
+    function setupModerators(found: { _id: Types.ObjectId }[]) {
+      const exec = jest.fn().mockResolvedValue(found);
+      const lean = jest.fn(() => ({ exec }));
+      const select = jest.fn(() => ({ lean }));
+      const model = { find: jest.fn(() => ({ select })) };
+      const service = new UsersService(model as unknown as Model<User>);
+      return { model, select, service };
+    }
+
+    it('finds the moderators of one provider that have not closed their account', async () => {
+      const { model, select, service } = setupModerators([
+        { _id: userObjectId },
+      ]);
+
+      const ids = await service.findModeratorIdsOfProvider(
+        ProviderType.Hotel,
+        providerId,
+      );
+
+      expect(ids).toEqual([userObjectId]);
+      expect(model.find).toHaveBeenCalledWith({
+        'assignment.providerId': providerId,
+        'assignment.providerType': ProviderType.Hotel,
+        status: { $ne: UserStatus.Deactivated },
+      });
+      expect(select).toHaveBeenCalledWith('_id');
+    });
+
+    it('returns an empty list when the provider has no moderator', async () => {
+      const { service } = setupModerators([]);
+
+      expect(
+        await service.findModeratorIdsOfProvider(
+          ProviderType.Airline,
+          providerId,
+        ),
+      ).toEqual([]);
     });
   });
 });

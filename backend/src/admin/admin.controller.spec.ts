@@ -1,8 +1,11 @@
+import { BadRequestException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from '../common/decorators/roles.decorator';
+import { ProviderType } from '../common/enums/provider-type.enum';
 import { Role } from '../common/enums/role.enum';
 import type { UserResponseDto } from '../users/dto/user-response.dto';
-import { AdminController } from './admin.controller';
+import { PROVIDER_TYPE_MESSAGE } from './admin.constants';
+import { AdminController, PROVIDER_TYPE_PIPE } from './admin.controller';
 import type { AdminService } from './admin.service';
 import { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
 
@@ -18,6 +21,10 @@ describe('AdminController', () => {
       resetPassword: jest.fn().mockResolvedValue(account),
       listAccounts: jest.fn().mockResolvedValue(page),
       createModerator: jest.fn().mockResolvedValue(account),
+      suspend: jest.fn().mockResolvedValue(account),
+      reactivate: jest.fn().mockResolvedValue(account),
+      deactivateProvider: jest.fn(),
+      reactivateProvider: jest.fn(),
     };
     const controller = new AdminController(
       adminService as unknown as AdminService,
@@ -65,5 +72,58 @@ describe('AdminController', () => {
       expect(await controller.createModerator(body)).toBe(account);
       expect(adminService.createModerator).toHaveBeenCalledWith(body);
     });
+  });
+
+  describe('suspend and reactivate (ACC-16)', () => {
+    it.each(['suspend', 'reactivate'] as const)(
+      'gives the service the account id to %s and returns its answer',
+      async (action) => {
+        const { adminService, controller } = setup();
+
+        expect(await controller[action](account.id)).toBe(account);
+        expect(adminService[action]).toHaveBeenCalledWith(account.id);
+      },
+    );
+  });
+
+  describe('deactivate and reactivate providers (ACC-15)', () => {
+    const provider = {
+      type: ProviderType.Hotel,
+      id: '6740f1c2a4b5c6d7e8f90abc',
+      name: 'Nile View',
+      active: false,
+    };
+
+    it.each(['deactivateProvider', 'reactivateProvider'] as const)(
+      '%s gives the service the type and the id, and returns its answer',
+      async (action) => {
+        const { adminService, controller } = setup();
+        adminService[action].mockResolvedValue(provider);
+
+        expect(await controller[action](ProviderType.Hotel, provider.id)).toBe(
+          provider,
+        );
+        expect(adminService[action]).toHaveBeenCalledWith(
+          ProviderType.Hotel,
+          provider.id,
+        );
+      },
+    );
+
+    it.each(['hotel', 'airline'])('accepts the type %s', async (type) => {
+      expect(await PROVIDER_TYPE_PIPE.transform(type, { type: 'param' })).toBe(
+        type,
+      );
+    });
+
+    it.each(['ship', 'Hotel', ''])(
+      'refuses the type "%s" with 400',
+      async (type) => {
+        const attempt = PROVIDER_TYPE_PIPE.transform(type, { type: 'param' });
+
+        await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
+        await expect(attempt).rejects.toThrow(PROVIDER_TYPE_MESSAGE);
+      },
+    );
   });
 });

@@ -1,6 +1,6 @@
 # users
 
-Owns the `users` collection: the `User` schema, `UsersService`, the public shape of an account (`UserResponseDto`) and its mapper. It also has the own-profile route `PATCH /api/users/me` (ACC-09, in `UsersController` and `ProfileService`); own-account deactivation (ACC-12) comes later.
+Owns the `users` collection: the `User` schema, `UsersService`, the public shape of an account (`UserResponseDto`) and its mapper. It also has the own-account routes `GET /api/users/me` (ACC-11) and `PATCH /api/users/me` (ACC-09), in `UsersController` and `ProfileService`; own-account deactivation (ACC-12) comes later.
 
 ## Design decisions
 
@@ -10,12 +10,22 @@ Owns the `users` collection: the `User` schema, `UsersService`, the public shape
 - **The password hash is hidden by default.** The schema marks `passwordHash` with `select: false`, so no query returns it. `findEntityByEmailWithPasswordHash` is the one lookup that asks for it (`.select('+passwordHash')`), for the login check (ACC-04). `findEntityById` never returns it. Both return entities for other services and are not exposed by a controller.
 - **`createRegisteredUser` takes no role and no status.** It always creates an active account with the `user` role. Moderator accounts (ACC-13) are made by `createModerator`: an active account with a moderator role, the `assignment` to its one airline or hotel, the hash of the temporary password and `mustChangePassword` set. `AdminService` checks the provider first. The mapper adds `assignment` (with a string `providerId`) only when the account has one.
 - **`listAccounts` is the query of the admin account list (ACC-14).** It filters by role and status, searches part of the name or the email (escaped, case-insensitive) and returns one page of entities, newest first, with the total. `AdminService` maps and paginates them.
+- **`changeStatus(id, from, to)` is the admin suspension (ACC-16).** One `findOneAndUpdate` that matches only when the account still has the `from` status, so two admins acting at once cannot both win; the loser gets `null`.
 - **`setTemporaryPassword` is the admin reset (ACC-07a).** In one update it stores the hash of the temporary password, sets `mustChangePassword` and clears the login lockout. `AdminService` calls it; no controller exposes it.
 - **A duplicate email is checked twice.** The service looks the email up first and answers 409. If two requests arrive together, the unique index on `email` rejects the second one, and the exception filter turns that error into 409 as well.
 - **`UserResponseDto` has `id`, `name`, `email`, `role`, `status`, `mustChangePassword` and `createdAt`.** `mustChangePassword` (ACC-08) tells the frontend that the account has a temporary password and must set a new one. The mapper lists these fields one by one, so the password hash, the login counters and the lock time can never be returned by accident. `phone` and `preferredCurrency` (ACC-09) are added only when the account has them.
 - **`createdAt` and `updatedAt` are declared on the `User` class without `@Prop()`.** Mongoose writes them (`timestamps: true`). The declarations only give them a type.
 - **`updatePassword` hashes the new password and clears `mustChangePassword` in one update** (ACC-08). `findEntityByIdWithPasswordHash` is the lookup by id that reads the hash, for the check of the current password.
 - **Names are limited to 100 characters** (`USER_NAME_MAX_LENGTH`). The workbook sets no limit. Reuse the constant in every DTO that accepts a name.
+
+## My account (ACC-11)
+
+`GET /api/users/me` returns the account of the logged-in user (200). Any role may use it.
+
+- **The route has no id.** The id comes from the login cookie (`@CurrentUser('id')`) and from nothing else, so a request cannot name another account, and an `id` in the query is ignored. No route reads another user's account by id. An administrator reads other accounts through the list `GET /api/admin/accounts` (ACC-14).
+- **It returns the same account as `GET /api/auth/me`.** Section 8 of the project description lists both routes. Both build the answer with `toUserResponse`, so the password hash and the login counters can never be returned. The frontend keeps using `/api/auth/me` to learn who is logged in (ACC-04, ACC-19); `/api/users/me` is the read next to the profile edit (ACC-09).
+- **401 when the account is gone.** The authentication guard already loads the account on every request: a missing or deactivated account gets 401 and a suspended one 403 before the route runs. `ProfileService.getMyProfile` answers the same 401 "You must log in to do this" as a backstop, for an account deleted between the guard and the lookup.
+- **`getMyProfile` repeats `AuthService.me` on purpose.** `auth` depends on `users`, so `users` cannot call `AuthService` without a circular import.
 
 ## Edit my profile (ACC-09)
 
