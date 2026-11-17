@@ -48,21 +48,15 @@ export class ReportsService {
       throw new BadRequestException(OWN_CONTENT_MESSAGE);
     }
 
-    const key = {
-      reporterId: new Types.ObjectId(reporterId),
-      targetType: dto.targetType,
-      targetId: new Types.ObjectId(dto.targetId),
-    };
-    // The friendly check. Two requests at the same moment both pass it, and
-    // the unique index then refuses the second one (caught below). A count,
-    // not exists(): a findOne that matched a report stalled against the Atlas
-    // test database, while the count answers at once (and is 0 or 1 here).
-    if ((await this.reports.countDocuments(key).exec()) > 0) {
-      throw new ConflictException(ALREADY_REPORTED_MESSAGE);
-    }
-
+    // No read first: the unique (reporter, target) index refuses a second
+    // report, including two sent at the same moment, and E11000 becomes 409.
     try {
-      const report = await this.reports.create({ ...key, reason: dto.reason });
+      const report = await this.reports.create({
+        reporterId: new Types.ObjectId(reporterId),
+        targetType: dto.targetType,
+        targetId: new Types.ObjectId(dto.targetId),
+        reason: dto.reason,
+      });
       return toReportResponse(report);
     } catch (error) {
       if (isDuplicateKeyError(error)) {
@@ -95,7 +89,9 @@ export class ReportsService {
     const ownerId = itinerary.ownerId.toString();
     // Another user sees an itinerary only while it is public (ITN-20), not
     // hidden by an admin (GEN-10) and its author is active (ACC-12): the same
-    // rule as public search (ITN-21).
+    // rule as public search (ITN-21). Follow-up: once ITN-21 (#167) merges,
+    // call its "publicly visible" method in ItinerariesService instead, so
+    // search and reports cannot disagree, and read only the fields needed.
     const visibleToOthers =
       itinerary.visibility === ItineraryVisibility.Public &&
       itinerary.moderation === ItineraryModeration.Visible &&

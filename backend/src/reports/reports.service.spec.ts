@@ -24,9 +24,6 @@ const CREATED_AT = new Date('2026-11-16T10:00:00.000Z');
 function setup() {
   const reportId = new Types.ObjectId();
   const reports = {
-    countDocuments: jest
-      .fn()
-      .mockReturnValue({ exec: () => Promise.resolve(0) }),
     create: jest.fn().mockImplementation((data: Record<string, unknown>) =>
       Promise.resolve({
         ...data,
@@ -99,15 +96,16 @@ describe('ReportsService (GEN-09)', () => {
       expect(result.targetType).toBe('itinerary');
     });
 
-    it('checks for an earlier report by the same user of the same item', async () => {
+    it('saves the reporter, the target and the reason, with no read first', async () => {
       const { service, reports } = setup();
 
       await service.create(postDto, REPORTER);
 
-      expect(reports.countDocuments).toHaveBeenCalledWith({
+      expect(reports.create).toHaveBeenCalledWith({
         reporterId: new Types.ObjectId(REPORTER),
         targetType: ReportTargetType.Post,
         targetId: new Types.ObjectId(TARGET),
+        reason: postDto.reason,
       });
     });
   });
@@ -185,19 +183,7 @@ describe('ReportsService (GEN-09)', () => {
   });
 
   describe('at most once per item', () => {
-    it('answers 409 when the user already reported the item', async () => {
-      const { service, reports } = setup();
-      reports.countDocuments.mockReturnValue({
-        exec: () => Promise.resolve(1),
-      });
-
-      await expect(service.create(postDto, REPORTER)).rejects.toThrow(
-        new ConflictException(ALREADY_REPORTED_MESSAGE),
-      );
-      expect(reports.create).not.toHaveBeenCalled();
-    });
-
-    it('answers 409 when the unique index refuses a report made at the same moment', async () => {
+    it('answers 409 when the unique index refuses a second report, earlier or at the same moment', async () => {
       const { service, reports } = setup();
       reports.create.mockRejectedValue(
         Object.assign(new Error('E11000 duplicate key'), { code: 11000 }),

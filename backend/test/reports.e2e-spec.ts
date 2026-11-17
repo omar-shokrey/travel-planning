@@ -8,7 +8,10 @@ import request from 'supertest';
 import './support/auth-env';
 import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
-import { LOGIN_REQUIRED_MESSAGE } from './../src/auth/auth.constants';
+import {
+  ACCOUNT_SUSPENDED_MESSAGE,
+  LOGIN_REQUIRED_MESSAGE,
+} from './../src/auth/auth.constants';
 import { BlogPost } from './../src/blog/models/blog-post.schema';
 import { PostStatus } from './../src/blog/models/post-status.enum';
 import { ACCESS_TOKEN_COOKIE } from './../src/common/constants/cookies';
@@ -91,6 +94,8 @@ describe('POST /api/reports (e2e, GEN-09)', () => {
       ['reporter', Role.User],
       ['author', Role.User],
       ['racer', Role.User],
+      // Logs in while active; a test suspends it afterwards.
+      ['suspended', Role.User],
       ['moderator', Role.HotelModerator],
       ['admin', Role.Admin],
     ];
@@ -125,6 +130,7 @@ describe('POST /api/reports (e2e, GEN-09)', () => {
       ['draft', author, PostStatus.Draft],
       ['racePost', author, PostStatus.Published],
       ['ownPost', reporter, PostStatus.Published],
+      ['ownDraft', reporter, PostStatus.Draft],
     ];
     const insertedPosts = await posts.insertMany(
       postRows.map(([label, authorId, status]) => ({
@@ -180,6 +186,13 @@ describe('POST /api/reports (e2e, GEN-09)', () => {
         reporter,
         ItineraryVisibility.Private,
         ItineraryModeration.Visible,
+        false,
+      ],
+      [
+        'ownHidden',
+        reporter,
+        ItineraryVisibility.Public,
+        ItineraryModeration.Hidden,
         false,
       ],
     ];
@@ -354,6 +367,27 @@ describe('POST /api/reports (e2e, GEN-09)', () => {
       expect(response.status).toBe(400);
       expect(response.body.message).toBe('You cannot report your own content');
     });
+
+    it('answers 400 for my own itinerary that an admin hid: I still see it', async () => {
+      const response = await created('reporter', {
+        targetType: 'itinerary',
+        targetId: id('ownHidden'),
+        reason: 'Testing',
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.body.message).toBe('You cannot report your own content');
+    });
+
+    it('answers 404 for my own draft, like any draft', async () => {
+      const response = await created('reporter', {
+        targetType: 'post',
+        targetId: id('ownDraft'),
+        reason: 'Testing',
+      });
+
+      expect(response.status).toBe(404);
+    });
   });
 
   describe('invalid input', () => {
@@ -421,6 +455,27 @@ describe('POST /api/reports (e2e, GEN-09)', () => {
 
       expect(response.status).toBe(401);
       expect(response.body.message).toBe(LOGIN_REQUIRED_MESSAGE);
+    });
+
+    it('answers 403 for a suspended user, and saves nothing', async () => {
+      // findByIdAndUpdate: updateOne in tests has stalled against the Atlas
+      // test database.
+      await users.findByIdAndUpdate(id('suspended'), {
+        status: UserStatus.Suspended,
+      });
+
+      const response = await created('suspended', {
+        targetType: 'post',
+        targetId: id('published'),
+        reason: 'Spam',
+      });
+
+      expect(response.status).toBe(403);
+      expect(response.body.message).toBe(ACCOUNT_SUSPENDED_MESSAGE);
+      const saved = await reports.countDocuments({
+        reporterId: new Types.ObjectId(id('suspended')),
+      });
+      expect(saved).toBe(0);
     });
   });
 
