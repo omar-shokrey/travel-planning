@@ -14,10 +14,14 @@ import { UploadsService } from '../uploads/uploads.service';
 import type { ImageFile } from '../uploads/uploads.types';
 import { UsersService } from '../users/users.service';
 import type { CreateHotelDto } from './dto/create-hotel.dto';
+import type { CreateRoomDto } from './dto/create-room.dto';
 import type { HotelResponseDto } from './dto/hotel-response.dto';
+import type { RoomResponseDto } from './dto/room-response.dto';
 import { nullFieldsOf, type UpdateHotelDto } from './dto/update-hotel.dto';
 import { toHotelResponse } from './mappers/hotel.mapper';
+import { toRoomResponse } from './mappers/room.mapper';
 import { Hotel, type HotelDocument } from './models/hotel.schema';
+import { Room } from './models/room.schema';
 
 const HOTEL_NOT_FOUND_MESSAGE = 'Hotel not found';
 const CITY_NOT_FOUND_MESSAGE = 'City not found';
@@ -30,6 +34,7 @@ const HOTEL_PHOTO_CONFLICT_MESSAGE =
 export class HotelsService {
   constructor(
     @InjectModel(Hotel.name) private readonly hotels: Model<Hotel>,
+    @InjectModel(Room.name) private readonly rooms: Model<Room>,
     @InjectModel(City.name) private readonly cities: Model<City>,
     private readonly usersService: UsersService,
     private readonly uploads: UploadsService,
@@ -58,6 +63,26 @@ export class HotelsService {
       averageRating: 0,
     });
     return toHotelResponse(hotel);
+  }
+
+  async createRoom(
+    hotelId: string,
+    dto: CreateRoomDto,
+    userId: string | undefined,
+  ): Promise<RoomResponseDto> {
+    const hotel = await this.findHotelOrThrow(hotelId);
+    await this.assertHotelModerator(hotel, userId);
+
+    const room = await this.rooms.create({
+      hotelId: hotel._id,
+      number: dto.number,
+      type: dto.type,
+      beds: dto.beds,
+      maxOccupancy: dto.maxOccupancy,
+      pricePerNight: dto.pricePerNight,
+      active: true,
+    });
+    return toRoomResponse(room);
   }
 
   async update(

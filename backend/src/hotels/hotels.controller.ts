@@ -30,7 +30,9 @@ import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { UploadImages } from '../uploads/decorators/upload-images.decorator';
 import type { ImageFile } from '../uploads/uploads.types';
 import { CreateHotelDto } from './dto/create-hotel.dto';
+import { CreateRoomDto } from './dto/create-room.dto';
 import { HotelResponseDto } from './dto/hotel-response.dto';
+import { RoomResponseDto } from './dto/room-response.dto';
 import { UpdateHotelDto } from './dto/update-hotel.dto';
 import { HotelsService } from './hotels.service';
 
@@ -60,6 +62,42 @@ export class HotelsController {
   })
   create(@Body() dto: CreateHotelDto): Promise<HotelResponseDto> {
     return this.hotelsService.create(dto);
+  }
+
+  @Post(':id/rooms')
+  @Roles(Role.HotelModerator)
+  @ApiOperation({
+    summary: 'Add a room to an assigned hotel',
+    description:
+      'HTL-03: The moderator assigned to this hotel adds an individually bookable room with a hotel-unique number, type, bed count, occupancy and positive nightly price.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Hotel id',
+    example: '6740f1c2a4b5c6d7e8f90123',
+  })
+  @ApiCreatedResponse({
+    description: 'The room was added',
+    type: RoomResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'A room field is invalid, an unknown field was sent, or the hotel id is malformed.',
+  })
+  @ApiUnauthorizedResponse({ description: 'You must log in to do this.' })
+  @ApiForbiddenResponse({
+    description: 'Only the moderator assigned to this hotel can add a room.',
+  })
+  @ApiNotFoundResponse({ description: 'The hotel does not exist.' })
+  @ApiConflictResponse({
+    description: 'A room with this number already exists in this hotel.',
+  })
+  createRoom(
+    @Param('id', ParseObjectIdPipe) hotelId: string,
+    @Body() dto: CreateRoomDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<RoomResponseDto> {
+    return this.hotelsService.createRoom(hotelId, dto, userId);
   }
 
   @Patch(':id')
