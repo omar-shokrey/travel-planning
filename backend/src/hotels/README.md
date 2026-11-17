@@ -147,7 +147,6 @@ hotel before its file is removed.
 - The price filter and the sort run in memory before pagination, because the price depends on the free rooms of the stay. `inPriceRange` and `sortCandidates` in `hotel-search.ts` are pure functions with unit tests.
 - `HotelSearchSort` and `SortOrder` are in the hotels module, not in `common/`, so this PR does not touch the shared layer. If another module needs a sort order, the team can move `SortOrder` to `common/enums/` in a shared-layer PR.
 
-
 ## Room holds for reservations (HTL-16, HTL-18)
 
 - The hotel-bookings module owns the reservations, and this module owns the rooms and `room_nights`. A reservation finds and holds rooms only through `HotelRoomHoldsService`, the one service besides `HotelsService` that this module exports.
