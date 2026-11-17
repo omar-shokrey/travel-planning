@@ -4,12 +4,16 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 
 ## Built so far
 
-| Route                                      | Requirement | Access |
-| ------------------------------------------ | ----------- | ------ |
-| `POST /api/admin/users/:id/reset-password` | ACC-07a     | Admin  |
-| `GET /api/admin/audit-logs`                | GEN-07      | Admin  |
-| `GET /api/admin/accounts`                  | ACC-14      | Admin  |
-| `POST /api/admin/moderators`               | ACC-13      | Admin  |
+| Route                                             | Requirement    | Access |
+| ------------------------------------------------- | -------------- | ------ |
+| `POST /api/admin/users/:id/reset-password`        | ACC-07a        | Admin  |
+| `GET /api/admin/audit-logs`                       | GEN-07         | Admin  |
+| `GET /api/admin/accounts`                         | ACC-14         | Admin  |
+| `POST /api/admin/moderators`                      | ACC-13         | Admin  |
+| `PATCH /api/admin/accounts/:id/suspend`           | ACC-15, ACC-16 | Admin  |
+| `PATCH /api/admin/accounts/:id/reactivate`        | ACC-15, ACC-16 | Admin  |
+| `PATCH /api/admin/providers/:type/:id/deactivate` | ACC-15         | Admin  |
+| `PATCH /api/admin/providers/:type/:id/reactivate` | ACC-15         | Admin  |
 
 ## Design decisions
 
@@ -65,3 +69,36 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **An email that is already registered answers 409**, checked first and again by the unique index, as in registration.
 - **The response is `UserResponseDto` with `assignment`** (`providerType`, `providerId` as a string). It is left out for accounts that are not moderators, so other responses keep their shape.
 - **The client cannot set** the status (always active), `mustChangePassword` or the assignment directly; those fields answer 400.
+
+## Suspend and reactivate users (ACC-16)
+
+`PATCH /api/admin/accounts/:id/suspend` and `PATCH /api/admin/accounts/:id/reactivate` answer 200 with the account.
+
+- **Users and moderators.** These routes are shared with ACC-15, which extends them to `airline_moderator` and `hotel_moderator` accounts with the same rules (see the ACC-15 section). An administrator answers 403.
+- **What suspension does.** Login and refresh already refuse a suspended account with 403 "Your account is suspended", and the authentication guard refuses its requests. Suspending also ends every session of the account (`SessionsService.revokeAllOfUser`), so its old cookies stop at once (the access cookie gets 401, because the session is checked first) and the user logs in again after a reactivation. The status changes first and the sessions end second, so a failure in between never leaves the account active.
+- **Reactivating ends every session again, first.** Two cases leave a session alive through a suspension: ending the sessions failed after the status changed (a retry then answers 409 "already suspended"), or a login that read `active` saved its session just after the suspension ended the others. The guard refuses such a session while the account is suspended, but it would work again after a reactivation. So `reactivate` ends every session of the account while it is still suspended (no new login can happen then), and only then changes the status. If that fails, the account stays suspended and the admin retries.
+- **The account is notified (GEN-01).** After the status change, the user or moderator gets an `account_suspended` in-app notification ("Your account was suspended by an administrator."). They cannot log in while suspended, so they read it after a reactivation. `notify` never throws, so it cannot fail the suspension. Reactivating sends nothing.
+- **One helper for both changes.** `changeUserStatus` holds the shared rules (exists, registered user or moderator, not deactivated, expected status, conditional update); `suspend` and `reactivate` only add their session and notification steps.
+- **What it does not change.** Bookings stay valid and the user's posts, comments, reviews and itineraries stay visible, as the requirement says. Hiding content is GEN-10.
+- **Status rules.** Suspending a suspended account or reactivating an active one answers 409. A deactivated account (closed by its owner, ACC-12) answers 409 to both: an admin does not reopen it.
+- **Two admins at once.** `UsersService.changeStatus(id, from, to)` changes the status only if it still is `from`, in one `findOneAndUpdate`. The request that loses answers 409 ("changed by another request") and ends no session.
+- **Not here:** the audit record (GEN-07), added after GEN-07 merges.
+
+## Suspend moderators and deactivate providers (ACC-15)
+
+`PATCH /api/admin/accounts/:id/suspend` and `/reactivate` now also take moderator accounts. `PATCH /api/admin/providers/:type/:id/deactivate` and `/reactivate` change a hotel or an airline and answer 200 with `{ type, id, name, active }`.
+
+- **A moderator is suspended like a user (ACC-16).** Same routes, same rules: 409 when already suspended, not suspended, or deactivated (ACC-12); every session ends on suspension; the status changes with the conditional `UsersService.changeStatus`, so of two admins at once one gets 409 and ends no session; an administrator answers 403. The moderator's hotel or airline stays active.
+- **A suspended moderator gets the same in-app notification as a user** (`account_suspended`, see ACC-16 above), because ACC-15 says affected parties are notified. One notification per suspension, for every role. Reactivation sends no notification: the account can log in again, which says it.
+- **Deactivating a provider is separate from suspending its moderators.** The provider routes change only `active` on the hotel or airline. The moderators keep their status and their sessions; an admin who also wants them out suspends them with the account routes.
+- **`:type` is `hotel` or `airline`** (`ProviderType`), checked with `ParseEnumPipe`: anything else answers 400 "type must be one of: hotel, airline". `:id` uses `ParseObjectIdPipe` (400). A provider that does not exist answers 404 from the owning service ("Hotel not found", "Airline not found").
+- **The owning module writes the flag.** `AdminService` reads the provider with `findEntityOrThrow` and changes it with `HotelsService.setActive` or `AirlinesService.setActive`, which update only when `active` is not already the new value (`active: { $ne: value }` in one `findOneAndUpdate`, so an old airline without the field counts as active). Deactivating a deactivated provider or reactivating an active one answers 409; if another admin changed it between the read and the update, 409 "changed by another request" and no notification is sent.
+- **The moderators of a deactivated provider are notified** (`provider_deactivated`) in one `notifyMany`, after the update. `UsersService.findModeratorIdsOfProvider` finds them by `assignment.providerId` (indexed) and `assignment.providerType`, leaving out accounts closed by their owner (ACC-12). The message names the provider and says that, while it is deactivated, it is hidden from search and cannot be booked, and that confirmed bookings remain valid. It describes the deactivation only and promises no later notice, so it stays true if the provider is reactivated before the moderator reads it, with no second read of the provider. **No link, for hotels and airlines alike:** the notification link kinds of the data model (`flight_booking`, `hotel_booking`, `flight`, `hotel`) have no airline, and a link to a hidden hotel helps no one, so both kinds get the same notice.
+- **A failure after the change is logged, not answered as a 500.** The deactivation has already happened when the moderators are looked up and notified, so an error there is logged (`Logger.error`) and the route still answers 200; a 500 would tell the admin the change failed, and a retry would then answer 409. The same holds for suspension: if ending the sessions fails after the status changed, it is logged and the account is still notified. The guard refuses those sessions while the account is suspended, and `reactivate` ends them first.
+- **Reactivating a provider sends no notification.** The data model has no `provider_reactivated` type, and changing it is a shared-layer change. It can be added later if the team wants it.
+- **Response: a small `ProviderStatusResponseDto`** (`type`, `id`, `name`, `active`), mapped by `toProviderStatusResponse`. One shape for both kinds keeps the two routes and Swagger simple, and the admin module does not need to build the full hotel or airline profile, which belongs to the hotels and flights modules. The full profile stays at the provider's own routes.
+- **Follow-ups for other issues (these features do not exist yet), so this PR is "Part of #21":** the hotels and flights READMEs state the rule for whoever builds them.
+  - Flight search (FLT-11) and hotel search (HTL-11) must leave out providers with `active: false` (the hotels collection already has the index `(cityId, active)`).
+  - Flight booking (FLT-21) and hotel booking (HTL-16) must refuse a provider with `active: false`, while existing Confirmed bookings stay valid.
+  - When bookings exist, travellers with upcoming bookings of a deactivated provider are affected parties too: the booking issues should notify them from `deactivateProvider` (`provider_deactivated`, with a link to the booking).
+- **Not here:** the audit record of these actions (GEN-07).

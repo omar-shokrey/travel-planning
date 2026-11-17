@@ -134,6 +134,25 @@ export class UsersService {
   }
 
   /**
+   * Moves an account from one status to another (ACC-16), only if it still
+   * has the `from` status: two admins acting at the same moment cannot both
+   * win, and the loser gets `null`. It returns the account after the change.
+   */
+  changeStatus(
+    id: Types.ObjectId,
+    from: UserStatus,
+    to: UserStatus,
+  ): Promise<UserDocument | null> {
+    return this.users
+      .findOneAndUpdate(
+        { _id: id, status: from },
+        { $set: { status: to } },
+        { returnDocument: 'after' },
+      )
+      .exec();
+  }
+
+  /**
    * Finds an account by email for the login check (ACC-04). It is the only
    * lookup that reads `passwordHash`, which the schema hides by default. The
    * entity is for the auth service: it never leaves the API.
@@ -357,5 +376,26 @@ export class UsersService {
         { $set: { failedLoginAttempts: 0 }, $unset: { lockedUntil: 1 } },
       )
       .exec();
+  }
+
+  /**
+   * The ids of the moderators assigned to one hotel or airline, for the
+   * notification of a deactivated provider (ACC-15). Accounts closed by their
+   * owner (ACC-12) are left out. Uses the index on `assignment.providerId`.
+   */
+  async findModeratorIdsOfProvider(
+    providerType: ProviderType,
+    providerId: Types.ObjectId,
+  ): Promise<Types.ObjectId[]> {
+    const moderators = await this.users
+      .find({
+        'assignment.providerId': providerId,
+        'assignment.providerType': providerType,
+        status: { $ne: UserStatus.Deactivated },
+      })
+      .select('_id')
+      .lean()
+      .exec();
+    return moderators.map((moderator) => moderator._id);
   }
 }
