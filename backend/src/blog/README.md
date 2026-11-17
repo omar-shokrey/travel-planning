@@ -20,16 +20,16 @@
 - Post images are stored as uploaded file names (`images`). Creating a post takes no images: they are added afterwards with `POST /api/posts/:id/images` (BLG-10), under the shared upload rules (GEN-08).
 - API responses use a mapper and response DTO rather than exposing the Mongoose document directly.
 - Creating posts is restricted to authenticated registered users with the `User` role.
-
-## BLG-04 — Edit and delete own posts
-
-- An author may edit only their own post. They may change the `title`, `body`, and `status`. Tags and images are managed by their dedicated requirements (BLG-08 and BLG-10).
-- If the post does not exist, the API returns `404 Not Found`. If the post exists but belongs to another user, the API returns `403 Forbidden`.
-- When changing a post to `published`, the server sets `publishedAt` if it does not already exist. Editing an already published post keeps its existing `publishedAt`. Changing a published post back to `draft` clears `publishedAt`.
-- `DELETE /api/posts/:id` returns `200 OK` when the author's post is successfully deleted.
-  -- Deleting a post also removes its associated comments and likes through `removeEngagementOfPost`, so no orphaned records remain. If engagement cleanup fails after the post is deleted, the error is logged instead of causing a 500 response.
-- Post image files are deleted when BLG-10 adds post images; BLG-10 must call `UploadsService.deleteImage` from both the author delete and admin delete flows.
 - `PostsService.findPublishedSummary(postId)` (GEN-09, GEN-10) is used by the reports module: it returns the author id and the moderation of a published post, or `null` for a missing post or a draft, so a draft is never revealed. Reports leave a hidden post out for everyone but its author. No controller exposes it. When posts get an author-deactivated field (ACC-12), it must return that too.
+
+## Editing and deleting posts (BLG-04)
+
+- `PATCH /api/posts/:id` and `DELETE /api/posts/:id` are for registered users (`user` role) and only for the post's own author. A missing post answers 404, someone else's post 403, a malformed id 400.
+- An author may change the `title`, `body` and `status`. Tags (BLG-08) and images (BLG-10) have their own routes, and a body with any other field answers 400.
+- Publishing sets `publishedAt` if the post has none. Editing a published post keeps its `publishedAt`. Changing a published post back to `draft` clears it. A field sent as `null` answers 400, and an empty body changes nothing.
+- `DELETE /api/posts/:id` answers 204 with no body.
+- Deleting a post also deletes its comments and likes (`removeEngagementOfPost`), so none are left pointing at it. The post is deleted first; if the cleanup then fails, the error is logged and the request still answers 204.
+- The author's delete does not delete image files yet. The admin delete (GEN-10) already does. BLG-10 (post images) adds this to the author's delete when posts can have images.
 
 ## Comments (BLG-05)
 
