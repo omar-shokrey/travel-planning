@@ -9,6 +9,7 @@ import { HotelDetailsController } from './hotel-details.controller';
 import { HotelDetailsService } from './hotel-details.service';
 import { HotelPoliciesController } from './hotel-policies.controller';
 import { HotelPoliciesService } from './hotel-policies.service';
+import { HotelRoomHoldsService } from './hotel-room-holds.service';
 import { HotelSearchController } from './hotel-search.controller';
 import { HotelSearchService } from './hotel-search.service';
 import { HotelRoomStatusController } from './hotel-room-status.controller';
@@ -51,7 +52,10 @@ import { HotelsService } from './hotels.service';
     HotelRoomStatusService,
     HotelAvailableRoomsService,
     HotelSearchService,
+    HotelRoomHoldsService,
   ],
-  exports: [HotelsService],
+  // HotelRoomHoldsService: the reservations of HTL-16 and HTL-18 find and
+  // hold rooms only through it.
+  exports: [HotelsService, HotelRoomHoldsService],
 })
 export class HotelsModule {}
