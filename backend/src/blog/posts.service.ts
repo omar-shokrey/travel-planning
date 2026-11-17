@@ -26,6 +26,11 @@ export class PostsService {
    * a published post, or null when the post is missing or a draft, so a draft
    * is never revealed to anyone but its author. The caller hides a hidden post
    * from everyone but its author (GEN-10). Not exposed by a controller.
+   *
+   * Posts have no author-deactivated field yet. When ACC-12 (the author
+   * closes the account) adds one, return it too, so the caller leaves those
+   * posts out for everyone but the author, as reports already do for
+   * itineraries; otherwise reporting such a post answers 201 instead of 404.
    */
   async findPublishedSummary(
     postId: string,

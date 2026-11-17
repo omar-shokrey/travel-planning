@@ -20,3 +20,4 @@
 - Post images are stored as uploaded file names (`images`). Creating a post takes no images: they are added afterwards with `POST /api/posts/:id/images` (BLG-10), under the shared upload rules (GEN-08).
 - API responses use a mapper and response DTO rather than exposing the Mongoose document directly.
 - Creating posts is restricted to authenticated registered users with the `User` role.
+- `PostsService.findPublishedSummary(postId)` (GEN-09, GEN-10) is used by the reports module: it returns the author id and the moderation of a published post, or `null` for a missing post or a draft, so a draft is never revealed. Reports leave a hidden post out for everyone but its author. No controller exposes it. When posts get an author-deactivated field (ACC-12), it must return that too.
