@@ -288,6 +288,34 @@ describe('PostsService', () => {
       expect(post.save).toHaveBeenCalledTimes(1);
     });
 
+    it('replaces the tags when they are sent, and clears them with [] (BLG-08)', async () => {
+      const post = createPost({ tags: ['old', 'tags'] });
+      const posts = { findById: jest.fn().mockResolvedValue(post) };
+      const service = new PostsService(posts as never);
+
+      const result = await service.update(
+        postId,
+        { tags: ['cairo', 'nile'] },
+        userId,
+      );
+      expect(post.tags).toEqual(['cairo', 'nile']);
+      expect(result.tags).toEqual(['cairo', 'nile']);
+
+      await service.update(postId, { tags: [] }, userId);
+      expect(post.tags).toEqual([]);
+      expect(post.save).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps the tags when they are not sent (BLG-08)', async () => {
+      const post = createPost({ tags: ['keep'] });
+      const posts = { findById: jest.fn().mockResolvedValue(post) };
+      const service = new PostsService(posts as never);
+
+      await service.update(postId, { title: 'New title' }, userId);
+
+      expect(post.tags).toEqual(['keep']);
+    });
+
     it('publishes a draft and sets publishedAt', async () => {
       const post = createPost();
 

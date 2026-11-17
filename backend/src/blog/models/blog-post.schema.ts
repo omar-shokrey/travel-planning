@@ -57,3 +57,6 @@ export const BlogPostSchema = SchemaFactory.createForClass(BlogPost);
 
 /** "My posts" (BLG-03): one author's posts, newest first. */
 BlogPostSchema.index({ authorId: 1, createdAt: -1, _id: -1 });
+
+/** The tag page (BLG-08): the posts of one tag, newest first. */
+BlogPostSchema.index({ tags: 1, publishedAt: -1, _id: -1 });

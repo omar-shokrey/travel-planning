@@ -20,8 +20,19 @@
 
 ## BLG-04 — Edit and delete own posts
 
-- An author may edit only their own post. They may change the `title`, `body`, and `status`. Tags and images are managed by their dedicated requirements (BLG-08 and BLG-10).
+- An author may edit only their own post. They may change the `title`, `body`, `status` and, since BLG-08, the `tags`. Images are managed by their own routes (BLG-10).
 - If the post does not exist, the API returns `404 Not Found`. If the post exists but belongs to another user, the API returns `403 Forbidden`.
 - When changing a post to `published`, the server sets `publishedAt` if it does not already exist. Editing an already published post keeps its existing `publishedAt`. Changing a published post back to `draft` clears `publishedAt`.
 - `DELETE /api/posts/:id` returns `200 OK` when the author's post is successfully deleted.
 - Once BLG-05 (comments) and BLG-06 (likes) are merged, deleting a post must also delete its associated comments and likes so no orphaned records remain.
+
+## Post tags (BLG-08)
+
+- **Adding tags at creation already worked (BLG-01).** The rules now live in one place, `PostTags()` in `dto/post-tags.decorator.ts`, used by `CreatePostDto` and `UpdatePostDto`: trimmed, lowercased, de-duplicated, empty ones dropped, at most 5 of at most 30 characters (`POST_TAGS_MAX_COUNT`, `POST_TAG_MAX_LENGTH` in `blog.constants.ts`). Creating a post behaves exactly as before.
+- **Editing tags.** `PATCH /api/posts/:id` takes an optional `tags`. The list sent replaces the old one, `[]` removes them all, leaving it out keeps them, and `null` is 400. The owner rules of BLG-04 apply (403 for another user, 404 for a missing post).
+- **The tag page.** `GET /api/tags/:tag/posts` is public. The tag is read like a saved tag (trimmed and lowercased); an empty one or one over 30 characters is 400. It lists the **published** posts that have the tag, newest first (`publishedAt`, then `_id`), 10 per page by default (GEN-05). A tag nobody uses gives an empty page, not 404.
+- **One row shape for public lists.** `PostSummaryResponseDto` (`toPostSummary`): `id`, `title`, `author: { id, name }`, `publishedAt`, `excerpt`, `tags`, `likeCount`, `commentCount`. The search (BLG-09) uses it too. The excerpt is the first 200 characters of the body (`POST_EXCERPT_LENGTH`), with line breaks and runs of spaces made one space, cut at the last space before the limit (a word that ends exactly at the limit is kept, and one long word is cut without splitting an emoji), plus "…" when something was cut.
+- **Author names come from `users`, never from the post.** `PublishedPostsService` reads the names of the authors of a page in one query by their ids, selecting only `name`. `BlogModule` imports `UsersModule`, which exports the `User` model, as the admin, flights and hotels modules do; the users module is not changed. An author whose account is gone or deactivated is shown as "Deleted user".
+- **One place says what the public may see.** Every public list starts from `PublishedPostsService.publishedFilter()`, today `status: published`. Hiding by a moderator (GEN-10) and hiding the posts of a deactivated author (ACC-12) add their conditions there, and every public list follows. Until ACC-12, a deactivated author's published posts still show, under "Deleted user". The data model says `authorDeactivated` hides the post, so ACC-12 adds that condition here and changes the matching case of `test/blog-tags.e2e-spec.ts` on purpose.
+- **Index:** (`tags`, `publishedAt`, `_id`) for the tag page, as the data model promises.
+- **Tests:** `dto/update-post.dto.spec.ts` (tag cases), `posts.service.spec.ts`, `mappers/post-summary.mapper.spec.ts`, `published-posts.service.spec.ts`, `tags.controller.spec.ts` and `test/blog-tags.e2e-spec.ts`. In `test/blog-edit-delete-post.e2e-spec.ts`, the case that refused `tags` on PATCH now refuses `images`, which still have their own routes.
