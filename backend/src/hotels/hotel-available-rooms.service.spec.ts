@@ -15,6 +15,7 @@ const range = (from: string, to: string) => ({ from, to });
 
 const storedRoom = (number: string, fields: object = {}) => ({
   _id: new Types.ObjectId(),
+  hotelId: new Types.ObjectId(HOTEL_ID),
   number,
   type: 'Double',
   beds: 2,
@@ -178,7 +179,7 @@ describe('HotelAvailableRoomsService (HTL-15)', () => {
       );
 
       expect(rooms.find).toHaveBeenCalledWith({
-        hotelId: new Types.ObjectId(HOTEL_ID),
+        hotelId: { $in: [new Types.ObjectId(HOTEL_ID)] },
         active: true,
       });
     });
@@ -270,6 +271,42 @@ describe('HotelAvailableRoomsService (HTL-15)', () => {
         'pricePerNight',
         'type',
       ]);
+    });
+  });
+
+  describe('findFreeRoomsOfHotels (HTL-11)', () => {
+    const OTHER_HOTEL_ID = '6740f1c2a4b5c6d7e8f90199';
+
+    it('groups the free rooms by hotel, and leaves out hotels with none', async () => {
+      const a1 = storedRoom('101');
+      const a2 = storedRoom('102');
+      const b1 = storedRoom('201', {
+        hotelId: new Types.ObjectId(OTHER_HOTEL_ID),
+      });
+      const { service } = setup({ rooms: [a1, a2, b1], taken: [b1._id] });
+
+      const byHotel = await service.findFreeRoomsOfHotels(
+        [new Types.ObjectId(HOTEL_ID), new Types.ObjectId(OTHER_HOTEL_ID)],
+        range(day(5), day(8)),
+      );
+
+      expect([...byHotel.keys()]).toEqual([HOTEL_ID]);
+      expect(byHotel.get(HOTEL_ID)?.map((room) => room.number)).toEqual([
+        '101',
+        '102',
+      ]);
+    });
+
+    it('reads nothing for an empty list of hotels', async () => {
+      const { service, rooms } = setup();
+
+      const byHotel = await service.findFreeRoomsOfHotels(
+        [],
+        range(day(5), day(8)),
+      );
+
+      expect(byHotel.size).toBe(0);
+      expect(rooms.find).not.toHaveBeenCalled();
     });
   });
 });

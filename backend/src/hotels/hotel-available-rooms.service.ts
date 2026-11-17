@@ -112,9 +112,29 @@ export class HotelAvailableRoomsService {
     hotelId: Types.ObjectId,
     stay: Stay,
   ): Promise<FreeRoom[]> {
+    const byHotel = await this.findFreeRoomsOfHotels([hotelId], stay);
+    return byHotel.get(hotelId.toString()) ?? [];
+  }
+
+  /**
+   * HTL-11: the free rooms of several hotels at once, by hotel id (as a
+   * string), each list by room number. A hotel with no free room has no
+   * entry. Two queries in all, whatever the number of hotels.
+   */
+  async findFreeRoomsOfHotels(
+    hotelIds: readonly Types.ObjectId[],
+    stay: Stay,
+  ): Promise<Map<string, FreeRoom[]>> {
+    const byHotel = new Map<string, FreeRoom[]>();
+    if (hotelIds.length === 0) {
+      return byHotel;
+    }
+
     const rooms = await this.rooms
-      .find({ hotelId, active: true })
-      .select('number type beds maxOccupancy pricePerNight availability')
+      .find({ hotelId: { $in: hotelIds }, active: true })
+      .select(
+        'hotelId number type beds maxOccupancy pricePerNight availability',
+      )
       .sort({ number: 1, _id: 1 })
       .lean()
       .exec();
@@ -124,7 +144,7 @@ export class HotelAvailableRoomsService {
       nights.every((date) => coversNight(room.availability, date)),
     );
     if (bookable.length === 0) {
-      return [];
+      return byHotel;
     }
 
     const taken = await this.roomNights
@@ -139,15 +159,16 @@ export class HotelAvailableRoomsService {
       .exec();
     const takenIds = new Set(taken.map((id) => id.toString()));
 
-    return bookable
-      .filter((room) => !takenIds.has(room._id.toString()))
-      .map(({ _id, number, type, beds, maxOccupancy, pricePerNight }) => ({
-        _id,
-        number,
-        type,
-        beds,
-        maxOccupancy,
-        pricePerNight,
-      }));
+    for (const room of bookable) {
+      if (takenIds.has(room._id.toString())) {
+        continue;
+      }
+      const { _id, number, type, beds, maxOccupancy, pricePerNight } = room;
+      const key = room.hotelId.toString();
+      const list = byHotel.get(key) ?? [];
+      list.push({ _id, number, type, beds, maxOccupancy, pricePerNight });
+      byHotel.set(key, list);
+    }
+    return byHotel;
   }
 }
