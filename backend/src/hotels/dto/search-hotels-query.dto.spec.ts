@@ -79,7 +79,7 @@ describe('SearchHotelsQueryDto (HTL-11)', () => {
       'a date that is not real',
       { ...STAY, cityId: 'cairo', checkIn: '2026-02-30' },
     ],
-    ['an unknown parameter', { ...STAY, cityId: 'cairo', sort: 'price' }],
+    ['an unknown parameter', { ...STAY, cityId: 'cairo', stars: '4' }],
   ])('rejects %s', async (_, query) => {
     await expect(parse(query)).rejects.toThrow(BadRequestException);
   });
@@ -91,6 +91,60 @@ describe('SearchHotelsQueryDto (HTL-11)', () => {
 
     expect(JSON.stringify(error?.getResponse())).toContain(
       'Send exactly one of cityId or countryCode',
+    );
+  });
+});
+
+describe('SearchHotelsQueryDto filters and sort (HTL-12)', () => {
+  const BASE = { ...STAY, cityId: 'cairo' };
+
+  it('sorts by name by default, with no filter', async () => {
+    const query = await parse(BASE);
+
+    expect(query.sort).toBe('name');
+    expect(query.order).toBeUndefined();
+    expect(query.minPrice).toBeUndefined();
+    expect(query.maxPrice).toBeUndefined();
+    expect(query.minRating).toBeUndefined();
+  });
+
+  it('reads the price range, the rating and the sort', async () => {
+    const query = await parse({
+      ...BASE,
+      minPrice: '5000',
+      maxPrice: '20000',
+      minRating: '4.5',
+      sort: 'price',
+      order: 'desc',
+    });
+
+    expect(query).toMatchObject({
+      minPrice: 5000,
+      maxPrice: 20000,
+      minRating: 4.5,
+      sort: 'price',
+      order: 'desc',
+    });
+  });
+
+  it('accepts an equal minimum and maximum price', async () => {
+    await expect(
+      parse({ ...BASE, minPrice: '9000', maxPrice: '9000' }),
+    ).resolves.toBeDefined();
+  });
+
+  it.each([
+    ['a maximum below the minimum', { minPrice: '9000', maxPrice: '8999' }],
+    ['a negative price', { minPrice: '-1' }],
+    ['a price that is not whole', { maxPrice: '99.5' }],
+    ['a rating below 1', { minRating: '0.5' }],
+    ['a rating above 5', { minRating: '5.1' }],
+    ['a rating that is not a number', { minRating: 'good' }],
+    ['an unknown sort', { sort: 'stars' }],
+    ['an unknown order', { order: 'up' }],
+  ])('rejects %s', async (_, extra) => {
+    await expect(parse({ ...BASE, ...extra })).rejects.toThrow(
+      BadRequestException,
     );
   });
 });
