@@ -794,3 +794,37 @@ london day to position 2 answered 200 with the order cairo, london, cairo, paris
 number of days"; moving it back to position 4 restored the order. Claude then deleted its test
 itineraries one by one by id. I changed nothing and rejected nothing.
 ================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository and my laptop)
+Branch / Issue: feature/ITN-09-city-groups / #71
+Related Requirement: ITN-09
+Prompt:
+Continuing my wave 3 issues in the same chat, I asked Claude to implement ITN-09, open its pull
+request, and test it in Swagger on my laptop.
+How the output was used:
+Claude wrote the grouping in the mapper, the response DTOs, the unit and e2e tests and the README
+section. It ran format, lint, typecheck, build and the unit tests in its own workspace, and the end-
+to-end tests against a local MongoDB-compatible stand-in (FerretDB). I applied its commits with a
+script so they carry my name.
+Accepted, changed, or rejected:
+Design choices by Claude: Every day already has a required city (ITN-05), so no change was needed
+for that part of ITN-09. Groups are computed when the itinerary is read and never stored, so adding,
+moving or deleting a day regroups at once. A city visited twice with other days in between gives two
+groups. The subtotal is one amount per currency, in minor units, sorted by currency code: activity
+costs (ITN-10), budget entries (ITN-14) and transport costs (ITN-16) of the group's days. One total
+in the user's currency comes with ITN-18. `startDate` and the day after `endDate` are what hotel
+search for a group (ITN-25) needs.
+Checked: on my laptop the checks script ran format (no changes), lint (0 warnings and 0 errors),
+typecheck, build, npm test (59 suites, 803 tests passed) and npm run test:e2e on the test database
+(25 suites, 417 tests passed). Claude tested it in Swagger in the Claude app's browser while I was
+logged in, with the API on the ITN-21 branch, which contains this branch; it sent the requests from
+the Swagger page. A test itinerary cairo, cairo, paris, london gave three groups: cairo days 1-2
+(2026-12-20 to 2026-12-21, dayCount 2), paris day 3, london day 4. After moving london to position 2
+it gave four groups (cairo, london, cairo, paris). With an activity of 2500 EGP on day 1 and a 45000
+EUR transport cost on day 2, the cairo group subtotal was [2500 EGP, 45000 EUR]; after moving the
+transport cost to day 3 it showed under the paris group. Claude then deleted its test itineraries
+one by one by id. I changed nothing and rejected nothing.
+================================================
