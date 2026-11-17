@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Error as MongooseError, Model, Types } from 'mongoose';
 import {
   paginate,
   type PaginatedResponse,
@@ -20,11 +20,15 @@ import type { ItineraryDetailResponseDto } from './dto/itinerary-detail-response
 import type { ItineraryResponseDto } from './dto/itinerary-response.dto';
 import type { UpdateDayDto } from './dto/update-day.dto';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto';
-import { ITINERARY_MAX_DAYS } from './itineraries.constants';
+import {
+  ITINERARY_CHANGED_MESSAGE,
+  ITINERARY_MAX_DAYS,
+} from './itineraries.constants';
 import {
   toItineraryDetailResponse,
   toItineraryResponse,
 } from './mappers/itinerary.mapper';
+import type { ItineraryDay } from './models/itinerary-day.schema';
 import { Itinerary, type ItineraryDocument } from './models/itinerary.schema';
 
 @Injectable()
@@ -126,7 +130,8 @@ export class ItinerariesService {
    * ITN-05: add a day at the end of your own itinerary. One conditional update
    * adds the day and counts it, and only while there are fewer than 60, so two
    * requests at the same moment cannot pass the limit or leave `dayCount`
-   * different from the number of days.
+   * different from the number of days. It bumps the version, so a delete or a
+   * move that read the itinerary before this day existed cannot drop it.
    */
   async addDay(
     id: string,
@@ -142,7 +147,7 @@ export class ItinerariesService {
     };
     const itinerary = await this.itineraries.findOneAndUpdate(
       { _id: id, dayCount: { $lt: ITINERARY_MAX_DAYS } },
-      { $push: { days: day }, $inc: { dayCount: 1 } },
+      { $push: { days: day }, $inc: { dayCount: 1, __v: 1 } },
       { returnDocument: 'after', runValidators: true },
     );
     if (!itinerary) {
@@ -177,8 +182,71 @@ export class ItinerariesService {
       day.notes = dto.notes;
     }
 
-    await itinerary.save();
+    await this.saveOrConflict(itinerary);
     return toItineraryDetailResponse(itinerary);
+  }
+
+  /**
+   * ITN-07: delete a day of your own itinerary. The days after it move up one
+   * place, so their numbers and dates change; both are computed when read.
+   *
+   * One update writes the remaining days and their count, and only if the
+   * itinerary is still at the version that was read, so `dayCount` always
+   * equals the number of days and a day added or moved in the meantime is
+   * never lost. The update bumps the version, so any save that still holds
+   * the old positions is refused too.
+   */
+  async removeDay(
+    id: string,
+    dayId: string,
+    userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    const itinerary = await this.findOwnedOrThrow(id, userId);
+    this.findDayOrThrow(itinerary, dayId);
+
+    const remaining = itinerary.days
+      .filter((day) => day._id.toString() !== dayId)
+      .map((day) => (day as unknown as { toObject(): unknown }).toObject());
+    const updated = await this.itineraries.findOneAndUpdate(
+      { _id: id, __v: itinerary.__v },
+      {
+        $set: { days: remaining, dayCount: remaining.length },
+        $inc: { __v: 1 },
+      },
+      { returnDocument: 'after' },
+    );
+    if (!updated) {
+      throw new ConflictException(ITINERARY_CHANGED_MESSAGE);
+    }
+    return toItineraryDetailResponse(updated);
+  }
+
+  /**
+   * Saves an itinerary that was changed in memory. If another request changed
+   * the order of its days in the meantime, Mongoose refuses the save (the
+   * version no longer matches), because a change by position could hit the
+   * wrong day. That is a 409, so the client reloads and tries again.
+   */
+  async saveOrConflict(itinerary: ItineraryDocument): Promise<void> {
+    try {
+      await itinerary.save();
+    } catch (error) {
+      if (error instanceof MongooseError.VersionError) {
+        throw new ConflictException(ITINERARY_CHANGED_MESSAGE);
+      }
+      throw error;
+    }
+  }
+
+  /** The day of this itinerary with this id, or 404. */
+  findDayOrThrow(itinerary: ItineraryDocument, dayId: string): ItineraryDay {
+    const day = itinerary.days.find(
+      (candidate) => candidate._id.toString() === dayId,
+    );
+    if (!day) {
+      throw new NotFoundException('Day not found');
+    }
+    return day;
   }
 
   /** For other services, which need the entity. Never return it from a controller. */

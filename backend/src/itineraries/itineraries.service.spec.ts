@@ -6,11 +6,12 @@ import {
 } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
-import { Mongoose, Types } from 'mongoose';
+import { Error as MongooseError, Mongoose, Types } from 'mongoose';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
 import { ItineraryVisibility } from './enums/itinerary-visibility.enum';
+import { ITINERARY_CHANGED_MESSAGE } from './itineraries.constants';
 import { ItinerariesService } from './itineraries.service';
 import {
   Itinerary,
@@ -468,7 +469,10 @@ describe('ItinerariesService', () => {
 
       expect(updateSpy).toHaveBeenCalledWith(
         { _id: itinerary.id, dayCount: { $lt: 60 } },
-        { $push: { days: { cityId: 'cairo' } }, $inc: { dayCount: 1 } },
+        {
+          $push: { days: { cityId: 'cairo' } },
+          $inc: { dayCount: 1, __v: 1 },
+        },
         { returnDocument: 'after', runValidators: true },
       );
     });
@@ -630,6 +634,139 @@ describe('ItinerariesService', () => {
       ).rejects.toThrow(ForbiddenException);
       expect(itinerary.days[1].notes).toBe('Museum');
       expect(itinerary.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('removeDay', () => {
+    /** An itinerary with three days. Returns it with the ids of its days. */
+    const withThreeDays = (owner = ownerId) => {
+      const itinerary = stored(owner);
+      itinerary.days.push(
+        { cityId: 'cairo' } as never,
+        { cityId: 'cairo' } as never,
+        { cityId: 'dubai' } as never,
+      );
+      itinerary.dayCount = 3;
+      return {
+        itinerary,
+        dayIds: itinerary.days.map((day) => day._id.toString()),
+      };
+    };
+
+    /** Replaces the versioned update: it writes the days it is given. */
+    const withUpdate = (itinerary: ItineraryDocument | null) =>
+      jest.spyOn(ItineraryModel, 'findOneAndUpdate').mockImplementation(((
+        _filter: unknown,
+        update: { $set: { days: unknown[]; dayCount: number } },
+      ) => {
+        if (itinerary) {
+          itinerary.set('days', update.$set.days);
+          itinerary.dayCount = update.$set.dayCount;
+        }
+        return Promise.resolve(itinerary);
+      }) as never);
+
+    it('removes the day and renumbers and redates the days after it', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      withUpdate(itinerary);
+
+      const response = await service.removeDay(
+        itinerary.id as string,
+        dayIds[0],
+        ownerId,
+      );
+
+      expect(response.dayCount).toBe(2);
+      expect(response.days).toEqual([
+        expect.objectContaining({
+          id: dayIds[1],
+          dayNumber: 1,
+          date: '2026-12-20',
+        }),
+        expect.objectContaining({
+          id: dayIds[2],
+          dayNumber: 2,
+          date: '2026-12-21',
+        }),
+      ]);
+    });
+
+    it('writes the other days and their count only at the version it read, and bumps it', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      itinerary.__v = 4;
+      const updateSpy = withUpdate(itinerary);
+
+      await service.removeDay(itinerary.id as string, dayIds[1], ownerId);
+
+      const [filter, update] = updateSpy.mock.calls[0] as unknown as [
+        Record<string, unknown>,
+        { $set: { days: { _id: Types.ObjectId }[]; dayCount: number } } & {
+          $inc: Record<string, number>;
+        },
+      ];
+      expect(filter).toEqual({ _id: itinerary.id, __v: 4 });
+      expect(update.$set.days.map((day) => day._id.toString())).toEqual([
+        dayIds[0],
+        dayIds[2],
+      ]);
+      expect(update.$set.dayCount).toBe(2);
+      expect(update.$inc).toEqual({ __v: 1 });
+    });
+
+    it('answers 404 for a day that is not in the itinerary and changes nothing', async () => {
+      const { itinerary } = withThreeDays();
+      const updateSpy = withUpdate(itinerary);
+
+      await expect(
+        service.removeDay(
+          itinerary.id as string,
+          new Types.ObjectId().toString(),
+          ownerId,
+        ),
+      ).rejects.toThrow(new NotFoundException('Day not found'));
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('answers 409 when the itinerary changed between the read and the update', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      withUpdate(null);
+
+      await expect(
+        service.removeDay(itinerary.id as string, dayIds[0], ownerId),
+      ).rejects.toThrow(new ConflictException(ITINERARY_CHANGED_MESSAGE));
+    });
+
+    it('answers 403 for an itinerary of another user and changes nothing', async () => {
+      const { itinerary, dayIds } = withThreeDays(otherUserId);
+      const updateSpy = withUpdate(itinerary);
+
+      await expect(
+        service.removeDay(itinerary.id as string, dayIds[0], ownerId),
+      ).rejects.toThrow(ForbiddenException);
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('saveOrConflict', () => {
+    it('answers 409 when the itinerary was changed by another request', async () => {
+      const itinerary = stored();
+      jest
+        .spyOn(itinerary, 'save')
+        .mockRejectedValue(
+          new MongooseError.VersionError(itinerary, 0, ['days']),
+        );
+
+      await expect(service.saveOrConflict(itinerary)).rejects.toThrow(
+        new ConflictException(ITINERARY_CHANGED_MESSAGE),
+      );
+    });
+
+    it('passes any other error on unchanged', async () => {
+      const itinerary = stored();
+      const failure = new Error('connection lost');
+      jest.spyOn(itinerary, 'save').mockRejectedValue(failure);
+
+      await expect(service.saveOrConflict(itinerary)).rejects.toBe(failure);
     });
   });
 

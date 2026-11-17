@@ -45,3 +45,12 @@ Owner: Ali Ghayesh (M8). Requirements: ITN-01 to ITN-26. Routes: `/api/itinerari
 - **Only `UpdateItineraryDto` has `visibility`.** `CreateItineraryDto` does not, so a new itinerary is always private (ITN-01) and becomes public only by an explicit edit.
 - **"Read-only to other users" is the ownership check.** Every route that changes an itinerary goes through `findOwnedOrThrow()`, so another user gets 403 on a public itinerary exactly as on a private one.
 - **"Setting Private removes it immediately" needs no extra work.** Nothing is copied when an itinerary is published: public search (ITN-21) will filter on the `visibility` field, so the next search after the change no longer returns it.
+
+## ITN-07: delete a day
+
+- **`DELETE /api/itineraries/:id/days/:dayId` returns the itinerary with its remaining days**, because the days after the deleted one get new numbers and dates. Totals are computed when read, so they change with it. The "after confirmation" step is the app's dialog (Milestone 2).
+- **One update with a version check.** The service reads the itinerary, then writes the remaining days and their count in one update that only applies if the itinerary is still at the version it read, and bumps the version. So `dayCount` always equals the number of days, a day added at the same moment is never lost, and the same day deleted twice at once gives 200 and then 404 or 409.
+- **Adding a day bumps the version too (ITN-05)**, so a delete that read the itinerary before that day existed is refused instead of dropping it.
+- **A change by position that loses the race answers 409** "The itinerary was changed by another request". `saveOrConflict()` turns the Mongoose `VersionError` into that answer, and the day edit (ITN-05) uses it now.
+- **Everything inside the day goes with it**: its activities, budget entries and transport costs. When activity images exist (ITN-12), deleting a day must also delete their files.
+- **The e2e tests share `test/support/itinerary-fixture.ts`**, which adds a test country and two test cities, makes users with a live session, and deletes everything by id at the end.
