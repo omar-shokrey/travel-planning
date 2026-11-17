@@ -16,6 +16,7 @@ import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
 import type { AddDayDto } from './dto/add-day.dto';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto';
+import type { MoveDayDto } from './dto/move-day.dto';
 import type { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
 import type { ItineraryResponseDto } from './dto/itinerary-response.dto';
 import type { UpdateDayDto } from './dto/update-day.dto';
@@ -204,21 +205,75 @@ export class ItinerariesService {
     const itinerary = await this.findOwnedOrThrow(id, userId);
     this.findDayOrThrow(itinerary, dayId);
 
-    const remaining = itinerary.days
-      .filter((day) => day._id.toString() !== dayId)
-      .map((day) => (day as unknown as { toObject(): unknown }).toObject());
+    const remaining = this.daysAsObjects(itinerary).filter(
+      (day) => day._id.toString() !== dayId,
+    );
+    const updated = await this.writeDays(itinerary, remaining);
+    return toItineraryDetailResponse(updated);
+  }
+
+  /**
+   * ITN-08: move a day of your own itinerary to a new position. The days in
+   * between shift by one, and every number and date follows from the new
+   * order when read. The new order is written with the same version check as
+   * a delete (ITN-07).
+   */
+  async moveDay(
+    id: string,
+    dto: MoveDayDto,
+    userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    const itinerary = await this.findOwnedOrThrow(id, userId);
+    this.findDayOrThrow(itinerary, dto.dayId);
+    if (dto.position > itinerary.days.length) {
+      throw new BadRequestException(
+        `position must be between 1 and ${itinerary.days.length}, the number of days`,
+      );
+    }
+
+    const days = this.daysAsObjects(itinerary);
+    const from = days.findIndex((day) => day._id.toString() === dto.dayId);
+    const to = dto.position - 1;
+    if (from === to) {
+      return toItineraryDetailResponse(itinerary);
+    }
+    const [moved] = days.splice(from, 1);
+    days.splice(to, 0, moved);
+
+    return toItineraryDetailResponse(await this.writeDays(itinerary, days));
+  }
+
+  /** The days of an itinerary as plain objects that keep their ids. */
+  private daysAsObjects(
+    itinerary: ItineraryDocument,
+  ): (Record<string, unknown> & { _id: Types.ObjectId })[] {
+    return itinerary.days.map((day) =>
+      (
+        day as unknown as {
+          toObject(): Record<string, unknown> & { _id: Types.ObjectId };
+        }
+      ).toObject(),
+    );
+  }
+
+  /**
+   * Replaces the days of an itinerary in one update, only if it is still at
+   * the version that was read, and bumps the version (ITN-07, ITN-08). A
+   * request that lost the race gets 409.
+   */
+  private async writeDays(
+    itinerary: ItineraryDocument,
+    days: Record<string, unknown>[],
+  ): Promise<ItineraryDocument> {
     const updated = await this.itineraries.findOneAndUpdate(
-      { _id: id, __v: itinerary.__v },
-      {
-        $set: { days: remaining, dayCount: remaining.length },
-        $inc: { __v: 1 },
-      },
+      { _id: itinerary._id, __v: itinerary.__v },
+      { $set: { days, dayCount: days.length }, $inc: { __v: 1 } },
       { returnDocument: 'after' },
     );
     if (!updated) {
       throw new ConflictException(ITINERARY_CHANGED_MESSAGE);
     }
-    return toItineraryDetailResponse(updated);
+    return updated;
   }
 
   /**
