@@ -15,6 +15,11 @@ hotel, so callers cannot choose a mismatched country.
 - The photo updates use `returnDocument: 'after'`, like the rest of the code; Mongoose 9 still accepts `new: true` but marks it deprecated.
 - The e2e test `hotels-profile.e2e-spec.ts` runs the whole flow on the test database: it adds its own countries and cities (unique ids), stores a hotel and its moderator, and removes them all at the end.
 
+## Deactivated hotels (ACC-15)
+
+- An admin deactivates or reactivates a hotel through `PATCH /api/admin/providers/hotel/:id/deactivate` and `/reactivate`. `HotelsService.setActive(id, active)` writes the flag for the admin module, with one conditional update. No hotels route exposes it.
+- **Every feature that shows or books hotels must respect `active`:** hotel search (HTL-11) leaves out hotels with `active: false` (the `(cityId, active)` index is there for it), and hotel booking (HTL-16) refuses them. Confirmed bookings of a deactivated hotel stay valid. These routes do not exist yet; this is the rule for whoever builds them.
+
 Hotel photos use `UploadsService`; the hotel stores only generated filenames.
 Uploads use a conditional photo-count update to prevent concurrent requests
 from exceeding the five-photo limit. A removed filename is deleted from the

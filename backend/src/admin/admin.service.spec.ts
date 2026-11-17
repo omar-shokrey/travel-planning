@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Logger,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -17,8 +18,11 @@ import {
   ACCOUNT_SUSPENDED_NOTIFICATION,
   ADMIN_PASSWORD_RESET_FORBIDDEN_MESSAGE,
   ADMIN_STATUS_FORBIDDEN_MESSAGE,
-  ONLY_USER_STATUS_MESSAGE,
+  PROVIDER_ALREADY_DEACTIVATED_MESSAGE,
+  PROVIDER_NOT_DEACTIVATED_MESSAGE,
   PROVIDER_NOT_FOUND_MESSAGE,
+  PROVIDER_STATUS_CHANGED_MESSAGE,
+  providerDeactivatedNotification,
 } from './admin.constants';
 import { AdminService } from './admin.service';
 import { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
@@ -66,6 +70,11 @@ function setup(role: Role = Role.User, status: UserStatus = UserStatus.Active) {
     }),
   };
   const sessions = { revokeAllOfUser: jest.fn().mockResolvedValue(undefined) };
+  // ACC-15: who is told about a suspension or a deactivated provider.
+  const notifications = {
+    notify: jest.fn().mockResolvedValue(undefined),
+    notifyMany: jest.fn().mockResolvedValue(undefined),
+  };
   // The providers of ACC-13: by default both exist.
   const airlines = {
     findEntityOrThrow: jest.fn().mockResolvedValue({ _id: providerObjectId }),
@@ -73,7 +82,6 @@ function setup(role: Role = Role.User, status: UserStatus = UserStatus.Active) {
   const hotels = {
     findEntityOrThrow: jest.fn().mockResolvedValue({ _id: providerObjectId }),
   };
-  const notifications = { notify: jest.fn().mockResolvedValue(undefined) };
   const service = new AdminService(
     usersService as unknown as UsersService,
     sessions as unknown as SessionsService,
@@ -359,6 +367,21 @@ describe('AdminService', () => {
       expect(account.status).toBe('suspended');
     });
 
+    it('still suspends and notifies when ending the sessions fails, and logs it', async () => {
+      const { sessions, notifications, service } = setup();
+      sessions.revokeAllOfUser.mockRejectedValue(new Error('database down'));
+      const logError = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation();
+
+      const account = await service.suspend(accountId);
+
+      expect(account.status).toBe('suspended');
+      expect(notifications.notify).toHaveBeenCalledTimes(1);
+      expect(logError).toHaveBeenCalledTimes(1);
+      logError.mockRestore();
+    });
+
     it('sends the user an account_suspended notification, after the status change', async () => {
       const { usersService, notifications, service } = setup();
 
@@ -446,19 +469,6 @@ describe('AdminService', () => {
       },
     );
 
-    it.each([Role.AirlineModerator, Role.HotelModerator])(
-      'refuses a %s with 400: moderators are handled by ACC-15',
-      async (role) => {
-        const { usersService, service } = setup(role);
-
-        const attempt = service.suspend(accountId);
-
-        await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
-        await expect(attempt).rejects.toThrow(ONLY_USER_STATUS_MESSAGE);
-        expect(usersService.changeStatus).not.toHaveBeenCalled();
-      },
-    );
-
     it('answers 404 for an account that does not exist', async () => {
       const { usersService, service } = setup();
       usersService.findEntityById.mockResolvedValue(null);
@@ -476,6 +486,269 @@ describe('AdminService', () => {
         ConflictException,
       );
       expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('suspend and reactivate moderators (ACC-15)', () => {
+    it.each([Role.AirlineModerator, Role.HotelModerator])(
+      'suspends a %s, ends its sessions and tells it why',
+      async (role) => {
+        const { usersService, sessions, notifications, service } = setup(role);
+
+        const account = await service.suspend(accountId);
+
+        expect(usersService.changeStatus).toHaveBeenCalledWith(
+          accountObjectId,
+          UserStatus.Active,
+          UserStatus.Suspended,
+        );
+        expect(sessions.revokeAllOfUser).toHaveBeenCalledWith(
+          accountId,
+          expect.any(Date),
+        );
+        expect(notifications.notify).toHaveBeenCalledWith(
+          accountObjectId,
+          NotificationType.AccountSuspended,
+          ACCOUNT_SUSPENDED_NOTIFICATION,
+        );
+        const ended = sessions.revokeAllOfUser.mock.invocationCallOrder[0];
+        const told = notifications.notify.mock.invocationCallOrder[0];
+        expect(ended).toBeLessThan(told);
+        expect(account).toMatchObject({ role, status: 'suspended' });
+      },
+    );
+
+    it.each([Role.AirlineModerator, Role.HotelModerator])(
+      'reactivates a suspended %s',
+      async (role) => {
+        const { usersService, sessions, notifications, service } = setup(
+          role,
+          UserStatus.Suspended,
+        );
+
+        const account = await service.reactivate(accountId);
+
+        expect(usersService.changeStatus).toHaveBeenCalledWith(
+          accountObjectId,
+          UserStatus.Suspended,
+          UserStatus.Active,
+        );
+        const ended = sessions.revokeAllOfUser.mock.invocationCallOrder[0];
+        const changed = usersService.changeStatus.mock.invocationCallOrder[0];
+        expect(ended).toBeLessThan(changed);
+        expect(notifications.notify).not.toHaveBeenCalled();
+        expect(account.status).toBe('active');
+      },
+    );
+
+    it.each([
+      ['suspend', UserStatus.Suspended, ACCOUNT_ALREADY_SUSPENDED_MESSAGE],
+      ['reactivate', UserStatus.Active, ACCOUNT_NOT_SUSPENDED_MESSAGE],
+      ['suspend', UserStatus.Deactivated, ACCOUNT_DEACTIVATED_MESSAGE],
+    ] as const)(
+      'answers 409 to %s on a %s moderator, and tells nobody',
+      async (action, status, message) => {
+        const { usersService, notifications, service } = setup(
+          Role.HotelModerator,
+          status,
+        );
+
+        await expect(service[action](accountId)).rejects.toThrow(message);
+        expect(usersService.changeStatus).not.toHaveBeenCalled();
+        expect(notifications.notify).not.toHaveBeenCalled();
+      },
+    );
+
+    it('tells nobody when another request suspended the moderator first', async () => {
+      const { usersService, notifications, service } = setup(
+        Role.AirlineModerator,
+      );
+      usersService.changeStatus.mockResolvedValue(null);
+
+      await expect(service.suspend(accountId)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(notifications.notify).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deactivate and reactivate providers (ACC-15)', () => {
+    const moderatorIds = [new Types.ObjectId(), new Types.ObjectId()];
+
+    function setupProvider(type: ProviderType, active: boolean) {
+      const context = setup();
+      const stored = { _id: providerObjectId, name: 'Nile View', active };
+      const owner =
+        type === ProviderType.Airline ? context.airlines : context.hotels;
+      owner.findEntityOrThrow.mockResolvedValue(stored);
+      const setActive = jest.fn((_id: string, value: boolean) =>
+        Promise.resolve<typeof stored | null>({ ...stored, active: value }),
+      );
+      Object.assign(owner, { setActive });
+      const findModeratorIdsOfProvider = jest
+        .fn()
+        .mockResolvedValue(moderatorIds);
+      Object.assign(context.usersService, { findModeratorIdsOfProvider });
+      return { ...context, owner, setActive, findModeratorIdsOfProvider };
+    }
+
+    it.each([ProviderType.Airline, ProviderType.Hotel])(
+      'deactivates an active %s through its own service',
+      async (type) => {
+        const { owner, setActive, service } = setupProvider(type, true);
+
+        const provider = await service.deactivateProvider(type, providerId);
+
+        expect(owner.findEntityOrThrow).toHaveBeenCalledWith(providerId);
+        expect(setActive).toHaveBeenCalledWith(providerId, false);
+        expect(provider).toEqual({
+          type,
+          id: providerId,
+          name: 'Nile View',
+          active: false,
+        });
+      },
+    );
+
+    it('tells every moderator of the hotel, without a link, like an airline', async () => {
+      const { findModeratorIdsOfProvider, notifications, service } =
+        setupProvider(ProviderType.Hotel, true);
+
+      await service.deactivateProvider(ProviderType.Hotel, providerId);
+
+      expect(findModeratorIdsOfProvider).toHaveBeenCalledWith(
+        ProviderType.Hotel,
+        providerObjectId,
+      );
+      expect(notifications.notifyMany).toHaveBeenCalledWith(
+        moderatorIds,
+        NotificationType.ProviderDeactivated,
+        providerDeactivatedNotification(ProviderType.Hotel, 'Nile View'),
+      );
+    });
+
+    it('tells every moderator of the airline, without a link', async () => {
+      const { notifications, service } = setupProvider(
+        ProviderType.Airline,
+        true,
+      );
+
+      await service.deactivateProvider(ProviderType.Airline, providerId);
+
+      expect(notifications.notifyMany).toHaveBeenCalledWith(
+        moderatorIds,
+        NotificationType.ProviderDeactivated,
+        providerDeactivatedNotification(ProviderType.Airline, 'Nile View'),
+      );
+    });
+
+    it('still answers when telling the moderators fails after the change, and logs it', async () => {
+      const { findModeratorIdsOfProvider, notifications, service } =
+        setupProvider(ProviderType.Hotel, true);
+      findModeratorIdsOfProvider.mockRejectedValue(new Error('database down'));
+      const logError = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation();
+
+      const result = await service.deactivateProvider(
+        ProviderType.Hotel,
+        providerId,
+      );
+
+      expect(result).toMatchObject({ type: 'hotel', active: false });
+      expect(notifications.notifyMany).not.toHaveBeenCalled();
+      expect(logError).toHaveBeenCalledTimes(1);
+      logError.mockRestore();
+    });
+
+    it('words the notice so it stays true after a later reactivation and promises no other notice', () => {
+      const text = providerDeactivatedNotification(
+        ProviderType.Hotel,
+        'Nile View',
+      );
+
+      expect(text).toContain('was deactivated');
+      expect(text).toContain('While it is deactivated');
+      expect(text).not.toMatch(/until it is reactivated/i);
+    });
+
+    it('never changes the status of the moderator accounts', async () => {
+      const { usersService, sessions, service } = setupProvider(
+        ProviderType.Hotel,
+        true,
+      );
+
+      await service.deactivateProvider(ProviderType.Hotel, providerId);
+
+      expect(usersService.changeStatus).not.toHaveBeenCalled();
+      expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+    });
+
+    it.each([ProviderType.Airline, ProviderType.Hotel])(
+      'reactivates a deactivated %s without a notification',
+      async (type) => {
+        const { setActive, notifications, service } = setupProvider(
+          type,
+          false,
+        );
+
+        const provider = await service.reactivateProvider(type, providerId);
+
+        expect(setActive).toHaveBeenCalledWith(providerId, true);
+        expect(provider.active).toBe(true);
+        expect(notifications.notifyMany).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['deactivateProvider', false, PROVIDER_ALREADY_DEACTIVATED_MESSAGE],
+      ['reactivateProvider', true, PROVIDER_NOT_DEACTIVATED_MESSAGE],
+    ] as const)(
+      'answers 409 to %s when active is already %s',
+      async (action, active, message) => {
+        const { setActive, notifications, service } = setupProvider(
+          ProviderType.Hotel,
+          active,
+        );
+
+        const attempt = service[action](ProviderType.Hotel, providerId);
+
+        await expect(attempt).rejects.toBeInstanceOf(ConflictException);
+        await expect(attempt).rejects.toThrow(message);
+        expect(setActive).not.toHaveBeenCalled();
+        expect(notifications.notifyMany).not.toHaveBeenCalled();
+      },
+    );
+
+    it('answers 409 and tells nobody when another request changed it first', async () => {
+      const { setActive, notifications, service } = setupProvider(
+        ProviderType.Airline,
+        true,
+      );
+      setActive.mockResolvedValue(null);
+
+      const attempt = service.deactivateProvider(
+        ProviderType.Airline,
+        providerId,
+      );
+
+      await expect(attempt).rejects.toThrow(PROVIDER_STATUS_CHANGED_MESSAGE);
+      expect(notifications.notifyMany).not.toHaveBeenCalled();
+    });
+
+    it('passes on the 404 of a provider that does not exist', async () => {
+      const { owner, setActive, service } = setupProvider(
+        ProviderType.Hotel,
+        true,
+      );
+      owner.findEntityOrThrow.mockRejectedValue(
+        new NotFoundException('Hotel not found'),
+      );
+
+      await expect(
+        service.deactivateProvider(ProviderType.Hotel, providerId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(setActive).not.toHaveBeenCalled();
     });
   });
 });

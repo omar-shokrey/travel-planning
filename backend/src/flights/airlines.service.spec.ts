@@ -244,4 +244,38 @@ describe('AirlinesService', () => {
       expect(uploadsService.deleteImage).toHaveBeenCalledWith(LOGO_FILENAME);
     });
   });
+
+  describe('setActive (ACC-15)', () => {
+    function setupActive(updated: AirlineDocument | null) {
+      const exec = jest.fn().mockResolvedValue(updated);
+      const model = { findOneAndUpdate: jest.fn(() => ({ exec })) };
+      const service = new AirlinesService(
+        model as unknown as Model<Airline>,
+        {} as UploadsService,
+        {} as UsersService,
+      );
+      return { model, service };
+    }
+
+    it.each([false, true])(
+      'sets active to %s only when it is not already, in one update',
+      async (active) => {
+        const updated = airlineDocument({ active });
+        const { model, service } = setupActive(updated);
+
+        expect(await service.setActive(AIRLINE_ID, active)).toBe(updated);
+        expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+          { _id: AIRLINE_ID, active: { $ne: active } },
+          { $set: { active } },
+          { returnDocument: 'after' },
+        );
+      },
+    );
+
+    it('returns null when the airline is missing or already in that state', async () => {
+      const { service } = setupActive(null);
+
+      expect(await service.setActive(AIRLINE_ID, false)).toBeNull();
+    });
+  });
 });

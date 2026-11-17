@@ -697,4 +697,47 @@ describe('UsersService', () => {
       expect(pattern.test('axbbc')).toBe(false);
     });
   });
+
+  describe('findModeratorIdsOfProvider (ACC-15)', () => {
+    const providerId = new Types.ObjectId('6740f1c2a4b5c6d7e8f90abc');
+
+    function setupModerators(found: { _id: Types.ObjectId }[]) {
+      const exec = jest.fn().mockResolvedValue(found);
+      const lean = jest.fn(() => ({ exec }));
+      const select = jest.fn(() => ({ lean }));
+      const model = { find: jest.fn(() => ({ select })) };
+      const service = new UsersService(model as unknown as Model<User>);
+      return { model, select, service };
+    }
+
+    it('finds the moderators of one provider that have not closed their account', async () => {
+      const { model, select, service } = setupModerators([
+        { _id: userObjectId },
+      ]);
+
+      const ids = await service.findModeratorIdsOfProvider(
+        ProviderType.Hotel,
+        providerId,
+      );
+
+      expect(ids).toEqual([userObjectId]);
+      expect(model.find).toHaveBeenCalledWith({
+        'assignment.providerId': providerId,
+        'assignment.providerType': ProviderType.Hotel,
+        status: { $ne: UserStatus.Deactivated },
+      });
+      expect(select).toHaveBeenCalledWith('_id');
+    });
+
+    it('returns an empty list when the provider has no moderator', async () => {
+      const { service } = setupModerators([]);
+
+      expect(
+        await service.findModeratorIdsOfProvider(
+          ProviderType.Airline,
+          providerId,
+        ),
+      ).toEqual([]);
+    });
+  });
 });
