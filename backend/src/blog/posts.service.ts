@@ -21,6 +21,7 @@ import { Like } from './models/like.schema';
 import { PostStatus } from './models/post-status.enum';
 import { toMyPostResponse, toPostResponse } from './mappers/post.mapper';
 import { PostModeration } from './models/post-moderation.enum';
+import { visiblePublishedPost } from './visible-post.filter';
 
 @Injectable()
 export class PostsService {
@@ -61,6 +62,39 @@ export class PostsService {
       authorId: post.authorId.toString(),
       // A lean post stored before `moderation` existed has no value: visible.
       moderation: post.moderation ?? PostModeration.Visible,
+    };
+  }
+
+  /**
+   * For other services (reports of a comment, GEN-09): whether this viewer
+   * may see the post, by the same rule as comments and likes
+   * (`visiblePublishedPost`): published, and not hidden unless the viewer is
+   * its author. Not exposed by a controller.
+   */
+  async isVisibleTo(postId: string, viewerId: string): Promise<boolean> {
+    // A count, not exists(), like existsById below.
+    const count = await this.posts
+      .countDocuments(visiblePublishedPost(postId, viewerId))
+      .exec();
+    return count > 0;
+  }
+
+  /**
+   * For the admin module (GEN-10): any post, draft or published, hidden or
+   * not ("hidden content is visible only to its author and admins"), and
+   * whether an admin hid it; null when there is no such post. Not exposed by
+   * a blog controller.
+   */
+  async findForAdmin(
+    postId: string,
+  ): Promise<{ post: PostResponseDto; hidden: boolean } | null> {
+    const post = await this.posts.findById(postId).exec();
+    if (!post) {
+      return null;
+    }
+    return {
+      post: toPostResponse(post),
+      hidden: post.moderation === PostModeration.Hidden,
     };
   }
 

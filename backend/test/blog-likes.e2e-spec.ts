@@ -17,6 +17,7 @@ import { ACCESS_TOKEN_COOKIE } from './../src/common/constants/cookies';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
 import { User } from './../src/users/models/user.schema';
+import { deleteSessionsOf } from './support/delete-sessions';
 
 const PASSWORD = 'Passw0rdOK';
 
@@ -124,15 +125,22 @@ describe('Likes on a post (e2e, BLG-06)', () => {
   });
 
   afterAll(async () => {
-    // Only the likes on the posts this file created, one post at a time. One
-    // call per post keeps the cleanup inside the hook timeout on a slow link.
+    // Only the likes on the posts this file created, one by one by id.
     for (const postId of createdPostIds) {
-      await likes.deleteMany({ postId: new Types.ObjectId(postId) });
+      const own = await likes
+        .find({ postId: new Types.ObjectId(postId) })
+        .select('_id')
+        .lean()
+        .exec();
+      for (const { _id } of own) {
+        await likes.findByIdAndDelete(_id).exec();
+      }
     }
     for (const id of createdPostIds) {
       await posts.findByIdAndDelete(id);
     }
     for (const id of createdUserIds) {
+      await deleteSessionsOf(app, id);
       await users.findByIdAndDelete(id);
     }
     await app.close();
@@ -284,6 +292,33 @@ describe('Likes on a post (e2e, BLG-06)', () => {
       );
 
       expect(response.status).toBe(404);
+    });
+
+    it('answers 404 for a draft', async () => {
+      const draftId = await createPost(author.id, PostStatus.Draft);
+
+      const response = await unlike(draftId, readerCookie);
+
+      expect(response.status).toBe(404);
+    });
+
+    it('answers 403 for an account that is not a registered user and keeps the like count', async () => {
+      const postId = await createPost(author.id);
+      await like(postId, readerCookie);
+      const admin = await createUser(Role.Admin);
+      const adminCookie = await loginAs(admin);
+
+      const response = await unlike(postId, adminCookie);
+
+      expect(response.status).toBe(403);
+      const post = await posts.findById(postId).lean().exec();
+      expect(post?.likeCount).toBe(1);
+    });
+
+    it('answers 400 for a post id that is not an id', async () => {
+      const response = await unlike('not-an-id', readerCookie);
+
+      expect(response.status).toBe(400);
     });
   });
 });

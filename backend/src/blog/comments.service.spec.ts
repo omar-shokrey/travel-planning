@@ -2,6 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { CommentsService } from './comments.service';
+import { CommentModeration } from './models/comment-moderation.enum';
 import { visiblePublishedPost } from './visible-post.filter';
 
 const POST_ID = '6740a1b2c3d4e5f601234560';
@@ -29,13 +30,34 @@ const query = <T>(value: T) => {
     sort: jest.fn(),
     skip: jest.fn(),
     limit: jest.fn(),
+    select: jest.fn(),
+    lean: jest.fn(),
     exec: jest.fn().mockResolvedValue(value),
   };
   chain.sort.mockReturnValue(chain);
   chain.skip.mockReturnValue(chain);
   chain.limit.mockReturnValue(chain);
+  chain.select.mockReturnValue(chain);
+  chain.lean.mockReturnValue(chain);
   return chain;
 };
+
+/** A deleted comment as `findByIdAndDelete(...).lean()` returns it. */
+const deletedComment = (moderation?: CommentModeration) => ({
+  _id: new Types.ObjectId(COMMENT_ID),
+  postId: new Types.ObjectId(POST_ID),
+  ...(moderation && { moderation }),
+});
+
+/** The guarded -1 and the +1 of the post's `commentCount`. */
+const LOWER_COUNT = [
+  { _id: new Types.ObjectId(POST_ID), commentCount: { $gt: 0 } },
+  { $inc: { commentCount: -1 } },
+] as const;
+const RAISE_COUNT = [
+  { _id: new Types.ObjectId(POST_ID) },
+  { $inc: { commentCount: 1 } },
+] as const;
 
 const setup = (options: { postIsPublished?: boolean } = {}) => {
   const postFound = options.postIsPublished ?? true;
@@ -53,7 +75,10 @@ const setup = (options: { postIsPublished?: boolean } = {}) => {
     find: jest.fn(),
     countDocuments: jest.fn(),
     findById: jest.fn(),
-    deleteOne: jest.fn().mockReturnValue(query({ deletedCount: 1 })),
+    findOneAndUpdate: jest.fn(),
+    findByIdAndDelete: jest
+      .fn()
+      .mockReturnValue(query(deletedComment(CommentModeration.Visible))),
   };
   const service = new CommentsService(comments as never, posts as never);
 
@@ -83,6 +108,7 @@ describe('CommentsService', () => {
         postId: POST_ID,
         authorId: USER_ID,
         body: 'Great tips!',
+        moderation: 'visible',
         createdAt: '2026-11-15T10:00:00.000Z',
         updatedAt: '2026-11-15T10:00:00.000Z',
       });
@@ -153,7 +179,11 @@ describe('CommentsService', () => {
 
       const result = await service.listForPost(POST_ID, pageQuery(2, 5));
 
-      const filter = { postId: new Types.ObjectId(POST_ID) };
+      // GEN-10: a hidden comment is left out of the page and of the total.
+      const filter = {
+        postId: new Types.ObjectId(POST_ID),
+        moderation: { $ne: CommentModeration.Hidden },
+      };
       expect(comments.find).toHaveBeenCalledWith(filter);
       expect(comments.countDocuments).toHaveBeenCalledWith(filter);
       expect(findQuery.sort).toHaveBeenCalledWith({ createdAt: 1, _id: 1 });
@@ -256,11 +286,23 @@ describe('CommentsService', () => {
 
       await service.remove(COMMENT_ID, USER_ID);
 
-      expect(comments.deleteOne).toHaveBeenCalledWith({ _id: comment._id });
-      expect(posts.updateOne).toHaveBeenCalledWith(
-        { _id: comment.postId, commentCount: { $gt: 0 } },
-        { $inc: { commentCount: -1 } },
+      expect(comments.findByIdAndDelete).toHaveBeenCalledWith(
+        comment._id.toString(),
       );
+      expect(posts.updateOne).toHaveBeenCalledWith(...LOWER_COUNT);
+    });
+
+    it('deletes my own hidden comment without lowering the count again (GEN-10)', async () => {
+      const { service, posts, comments } = setup();
+      comments.findById.mockReturnValue(query(ownComment()));
+      comments.findByIdAndDelete.mockReturnValue(
+        query(deletedComment(CommentModeration.Hidden)),
+      );
+
+      await service.remove(COMMENT_ID, USER_ID);
+
+      expect(comments.findByIdAndDelete).toHaveBeenCalledTimes(1);
+      expect(posts.updateOne).not.toHaveBeenCalled();
     });
 
     it('answers 403 and deletes nothing for a comment of another user', async () => {
@@ -271,7 +313,7 @@ describe('CommentsService', () => {
         new ForbiddenException('You can only delete your own comments'),
       );
 
-      expect(comments.deleteOne).not.toHaveBeenCalled();
+      expect(comments.findByIdAndDelete).not.toHaveBeenCalled();
       expect(posts.updateOne).not.toHaveBeenCalled();
     });
 
@@ -283,16 +325,171 @@ describe('CommentsService', () => {
         new NotFoundException('Comment not found'),
       );
 
-      expect(comments.deleteOne).not.toHaveBeenCalled();
+      expect(comments.findByIdAndDelete).not.toHaveBeenCalled();
     });
 
     it('does not lower the count when another request deleted the comment first', async () => {
       const { service, posts, comments } = setup();
       comments.findById.mockReturnValue(query(ownComment()));
-      comments.deleteOne.mockReturnValue(query({ deletedCount: 0 }));
+      comments.findByIdAndDelete.mockReturnValue(query(null));
 
       await service.remove(COMMENT_ID, USER_ID);
 
+      expect(posts.updateOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findSummary (GEN-09)', () => {
+    it('returns the author, the post and the moderation of a comment', async () => {
+      const { service, comments } = setup();
+      const lookup = query({
+        authorId: new Types.ObjectId(USER_ID),
+        postId: new Types.ObjectId(POST_ID),
+        moderation: CommentModeration.Hidden,
+      });
+      comments.findById.mockReturnValue(lookup);
+
+      expect(await service.findSummary(COMMENT_ID)).toEqual({
+        authorId: USER_ID,
+        postId: POST_ID,
+        moderation: CommentModeration.Hidden,
+      });
+      expect(comments.findById).toHaveBeenCalledWith(COMMENT_ID);
+      expect(lookup.select).toHaveBeenCalledWith('authorId postId moderation');
+    });
+
+    it('reads a comment stored before `moderation` existed as visible', async () => {
+      const { service, comments } = setup();
+      comments.findById.mockReturnValue(
+        query({
+          authorId: new Types.ObjectId(USER_ID),
+          postId: new Types.ObjectId(POST_ID),
+        }),
+      );
+
+      expect((await service.findSummary(COMMENT_ID))?.moderation).toBe(
+        CommentModeration.Visible,
+      );
+    });
+
+    it('returns null for a comment that does not exist', async () => {
+      const { service, comments } = setup();
+      comments.findById.mockReturnValue(query(null));
+
+      expect(await service.findSummary(COMMENT_ID)).toBeNull();
+    });
+  });
+
+  describe('admin moderation (GEN-10)', () => {
+    it('findForAdmin: any comment, hidden or not, mapped', async () => {
+      const { service, comments } = setup();
+      const hidden = {
+        ...storedComment('Rude', '2026-11-15T10:00:00.000Z'),
+        moderation: CommentModeration.Hidden,
+      };
+      comments.findById.mockReturnValue(query(hidden));
+
+      expect(await service.findForAdmin(COMMENT_ID)).toMatchObject({
+        id: hidden.id,
+        body: 'Rude',
+        moderation: 'hidden',
+      });
+      expect(comments.findById).toHaveBeenCalledWith(COMMENT_ID);
+    });
+
+    it('findForAdmin: null when there is no such comment', async () => {
+      const { service, comments } = setup();
+      comments.findById.mockReturnValue(query(null));
+
+      expect(await service.findForAdmin(COMMENT_ID)).toBeNull();
+    });
+
+    it.each([
+      [1, true],
+      [0, false],
+    ])('existsById: a count of %p is %p', async (count, expected) => {
+      const { service, comments } = setup();
+      comments.countDocuments.mockReturnValue(query(count));
+
+      expect(await service.existsById(COMMENT_ID)).toBe(expected);
+      expect(comments.countDocuments).toHaveBeenCalledWith({ _id: COMMENT_ID });
+    });
+
+    it('hides a visible comment in one conditional update and lowers the count once', async () => {
+      const { service, posts, comments } = setup();
+      comments.findOneAndUpdate.mockReturnValue(
+        query({ postId: new Types.ObjectId(POST_ID) }),
+      );
+
+      expect(await service.setHidden(COMMENT_ID, true)).toBe(true);
+      expect(comments.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: COMMENT_ID, moderation: { $ne: CommentModeration.Hidden } },
+        { $set: { moderation: CommentModeration.Hidden } },
+        { timestamps: false },
+      );
+      expect(posts.updateOne).toHaveBeenCalledTimes(1);
+      expect(posts.updateOne).toHaveBeenCalledWith(...LOWER_COUNT);
+    });
+
+    it('shows a hidden comment again and raises the count once', async () => {
+      const { service, posts, comments } = setup();
+      comments.findOneAndUpdate.mockReturnValue(
+        query({ postId: new Types.ObjectId(POST_ID) }),
+      );
+
+      expect(await service.setHidden(COMMENT_ID, false)).toBe(true);
+      expect(comments.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: COMMENT_ID, moderation: CommentModeration.Hidden },
+        { $set: { moderation: CommentModeration.Visible } },
+        { timestamps: false },
+      );
+      expect(posts.updateOne).toHaveBeenCalledTimes(1);
+      expect(posts.updateOne).toHaveBeenCalledWith(...RAISE_COUNT);
+    });
+
+    it.each([true, false])(
+      'setHidden(%p) returns false and leaves the count when nothing changed (missing, or already in that state)',
+      async (hidden) => {
+        const { service, posts, comments } = setup();
+        comments.findOneAndUpdate.mockReturnValue(query(null));
+
+        expect(await service.setHidden(COMMENT_ID, hidden)).toBe(false);
+        expect(posts.updateOne).not.toHaveBeenCalled();
+      },
+    );
+
+    it('removeByAdmin deletes exactly one comment by id and lowers the count when it was visible', async () => {
+      const { service, posts, comments } = setup();
+
+      expect(await service.removeByAdmin(COMMENT_ID)).toBe(true);
+      expect(comments.findByIdAndDelete).toHaveBeenCalledTimes(1);
+      expect(comments.findByIdAndDelete).toHaveBeenCalledWith(COMMENT_ID);
+      expect(posts.updateOne).toHaveBeenCalledWith(...LOWER_COUNT);
+    });
+
+    it('removeByAdmin of a hidden comment leaves the count (it was taken off when hidden)', async () => {
+      const { service, posts, comments } = setup();
+      comments.findByIdAndDelete.mockReturnValue(
+        query(deletedComment(CommentModeration.Hidden)),
+      );
+
+      expect(await service.removeByAdmin(COMMENT_ID)).toBe(true);
+      expect(posts.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('removeByAdmin of a comment stored before `moderation` existed lowers the count', async () => {
+      const { service, posts, comments } = setup();
+      comments.findByIdAndDelete.mockReturnValue(query(deletedComment()));
+
+      expect(await service.removeByAdmin(COMMENT_ID)).toBe(true);
+      expect(posts.updateOne).toHaveBeenCalledWith(...LOWER_COUNT);
+    });
+
+    it('removeByAdmin returns false and leaves the count when there is no such comment', async () => {
+      const { service, posts, comments } = setup();
+      comments.findByIdAndDelete.mockReturnValue(query(null));
+
+      expect(await service.removeByAdmin(COMMENT_ID)).toBe(false);
       expect(posts.updateOne).not.toHaveBeenCalled();
     });
   });
