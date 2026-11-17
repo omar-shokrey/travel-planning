@@ -1,4 +1,4 @@
-import { Body, Controller, Patch } from '@nestjs/common';
+import { Body, Controller, Get, Patch } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiCookieAuth,
@@ -23,6 +23,17 @@ import { ProfileService } from './profile.service';
 @Controller('users')
 export class UsersController {
   constructor(private readonly profileService: ProfileService) {}
+
+  @Get('me')
+  @ApiOperation({
+    summary: 'My account (ACC-11)',
+    description:
+      'Any logged-in user. Returns your own account: the one the login cookie belongs to. The route has no id, so nobody can ask for another account this way. The same account is returned by `GET /api/auth/me`. The password hash and the login counters are never returned.',
+  })
+  @ApiOkResponse({ description: 'Your account', type: UserResponseDto })
+  getMyProfile(@CurrentUser('id') userId: string): Promise<UserResponseDto> {
+    return this.profileService.getMyProfile(userId);
+  }
 
   @Patch('me')
   @ApiOperation({

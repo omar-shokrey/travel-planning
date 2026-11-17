@@ -7,11 +7,15 @@ import { HotelDetailsController } from './hotel-details.controller';
 import { HotelDetailsService } from './hotel-details.service';
 import { HotelsController } from './hotels.controller';
 import { Hotel, HotelSchema } from './models/hotel.schema';
+import { Room, RoomSchema } from './models/room.schema';
 import { HotelsService } from './hotels.service';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: Hotel.name, schema: HotelSchema }]),
+    MongooseModule.forFeature([
+      { name: Hotel.name, schema: HotelSchema },
+      { name: Room.name, schema: RoomSchema },
+    ]),
     ReferenceModule,
     UploadsModule,
     UsersModule,

@@ -731,3 +731,207 @@ suites, 170 tests passed, 53 of them in itineraries.e2e-spec.ts. In Swagger, PAT
 /api/itineraries/{id} with visibility public answered 200 and the itinerary showed as public. I
 changed nothing and rejected nothing.
 ================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository and my laptop)
+Branch / Issue: feature/ITN-07-delete-day / #69
+Related Requirement: ITN-07
+Prompt:
+I asked Claude to do my wave 3 issues (ITN-07, ITN-08, ITN-09, ITN-10, ITN-16, ITN-21), to open
+the pull requests one at a time, and gave it permission to test each one in Swagger on my laptop.
+How the output was used:
+Claude wrote the service method that deletes a day, the DELETE /api/itineraries/:id/days/:dayId
+route with its Swagger documentation, the unit tests, the end-to-end tests with a shared test
+fixture (test/support/itinerary-fixture.ts) and the README section. Claude ran format, lint,
+typecheck, build and the unit tests in its own workspace, and the end-to-end tests against a local
+MongoDB-compatible stand-in (FerretDB). I applied its commits with a script so they carry my name.
+Accepted, changed, or rejected:
+Design choices by Claude: the remaining days are written in one update that only applies at the
+version that was read, so two changes at the same moment cannot half apply; the second answers 409
+and dayCount always equals the number of days. Changed by Claude after its own checks: the stand-in
+database ignored $pull with a condition, so Claude replaced it with a versioned $set of the
+remaining days, and made adding a day bump the version too.
+Checked: on my laptop the checks script ran format (no changes), lint (0 warnings and 0 errors),
+typecheck, build, npm test (58 suites, 781 tests passed) and npm run test:e2e on the test database
+(24 suites, 405 tests passed). Then, with my permission, Claude tested the route in Swagger in the
+Claude app's browser while I was logged in. It made one test itinerary with three days in cairo;
+deleting day 2 answered 200 and day 3 became day 2 with the date 2026-12-21 and dayCount 2; the
+same request again answered 404 "Day not found"; an invalid day id answered 400; deleting day 1
+answered 200 with the last day as day 1 on 2026-12-20. Claude then deleted the test itinerary by
+its id (204, then 404 on GET). I changed nothing and rejected nothing.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository and my laptop)
+Branch / Issue: feature/ITN-08-reorder-days / #70
+Related Requirement: ITN-08
+Prompt:
+Continuing my wave 3 issues in the same chat, I asked Claude to implement ITN-08, open its pull
+request, and test it in Swagger on my laptop.
+How the output was used:
+Claude wrote the service method, the DTO with its limits, the route and its Swagger docs, the unit
+and e2e tests and the README section. It ran format, lint, typecheck, build and the unit tests in
+its own workspace, and the end-to-end tests against a local MongoDB-compatible stand-in (FerretDB).
+I applied its commits with a script so they carry my name.
+Accepted, changed, or rejected:
+Design choices by Claude: The route is declared before `PATCH :id/days/:dayId`, or Nest would read
+`reorder` as a day id. A position after the last day answers 400 with the allowed range. Moving a
+day to where it already is writes nothing. Same versioned write as ITN-07: the whole day list is
+written only at the version that was read, so a move and a delete at the same moment never half
+apply (409). The city groupings ITN-08 mentions are computed when the itinerary is read (ITN-09, the
+next pull request), so a move regroups automatically.
+Checked: on my laptop the checks script ran format (no changes), lint (0 warnings and 0 errors),
+typecheck, build, npm test (59 suites, 796 tests passed) and npm run test:e2e on the test database
+(24 suites, 412 tests passed). Claude tested it in Swagger in the Claude app's browser while I was
+logged in, with the API on the ITN-21 branch, which contains this branch; it sent the requests from
+the Swagger page. On a test itinerary cairo, cairo, paris, london (from 2026-12-20): moving the
+london day to position 2 answered 200 with the order cairo, london, cairo, paris and the dates
+2026-12-20 to 2026-12-23 in order; position 5 answered 400 "position must be between 1 and 4, the
+number of days"; moving it back to position 4 restored the order. Claude then deleted its test
+itineraries one by one by id. I changed nothing and rejected nothing.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository and my laptop)
+Branch / Issue: feature/ITN-09-city-groups / #71
+Related Requirement: ITN-09
+Prompt:
+Continuing my wave 3 issues in the same chat, I asked Claude to implement ITN-09, open its pull
+request, and test it in Swagger on my laptop.
+How the output was used:
+Claude wrote the grouping in the mapper, the response DTOs, the unit and e2e tests and the README
+section. It ran format, lint, typecheck, build and the unit tests in its own workspace, and the end-
+to-end tests against a local MongoDB-compatible stand-in (FerretDB). I applied its commits with a
+script so they carry my name.
+Accepted, changed, or rejected:
+Design choices by Claude: Every day already has a required city (ITN-05), so no change was needed
+for that part of ITN-09. Groups are computed when the itinerary is read and never stored, so adding,
+moving or deleting a day regroups at once. A city visited twice with other days in between gives two
+groups. The subtotal is one amount per currency, in minor units, sorted by currency code: activity
+costs (ITN-10), budget entries (ITN-14) and transport costs (ITN-16) of the group's days. One total
+in the user's currency comes with ITN-18. `startDate` and the day after `endDate` are what hotel
+search for a group (ITN-25) needs.
+Checked: on my laptop the checks script ran format (no changes), lint (0 warnings and 0 errors),
+typecheck, build, npm test (59 suites, 803 tests passed) and npm run test:e2e on the test database
+(25 suites, 417 tests passed). Claude tested it in Swagger in the Claude app's browser while I was
+logged in, with the API on the ITN-21 branch, which contains this branch; it sent the requests from
+the Swagger page. A test itinerary cairo, cairo, paris, london gave three groups: cairo days 1-2
+(2026-12-20 to 2026-12-21, dayCount 2), paris day 3, london day 4. After moving london to position 2
+it gave four groups (cairo, london, cairo, paris). With an activity of 2500 EGP on day 1 and a 45000
+EUR transport cost on day 2, the cairo group subtotal was [2500 EGP, 45000 EUR]; after moving the
+transport cost to day 3 it showed under the paris group. Claude then deleted its test itineraries
+one by one by id. I changed nothing and rejected nothing.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository and my laptop)
+Branch / Issue: feature/ITN-10-day-activities / #72
+Related Requirement: ITN-10
+Prompt:
+Continuing my wave 3 issues in the same chat, I asked Claude to implement ITN-10, open its pull
+request, and test it in Swagger on my laptop.
+How the output was used:
+Claude wrote the DTOs, the service and controller, the unit and e2e tests and the README section. It
+ran format, lint, typecheck, build and the unit tests in its own workspace, and the end-to-end tests
+against a local MongoDB-compatible stand-in (FerretDB). I applied its commits with a script so they
+carry my name.
+Accepted, changed, or rejected:
+Design choices by Claude: A separate `ActivitiesService` and `ActivitiesController`, so the
+itinerary service does not grow with each list. They reuse the ownership, day and currency checks of
+`ItinerariesService`. A cost and its currency go together (400 otherwise). The cost is whole minor
+units, 0 or more; the currency must be one of the seeded countries' currencies. Limits not in the
+workbook: name up to 100 characters, description up to 1000. `null` in an edit answers 400, as in
+the hotel edit (HTL-01); an empty description or time removes it. An activity is found by its id
+inside the days: 404 if no itinerary has it, then 403 if the itinerary is not yours. Every change
+has a version check, so a change that races with a day delete or move answers 409. Images (ITN-12)
+are not part of this pull request.
+Checked: on my laptop the checks script ran format (no changes), lint (0 warnings and 0 errors),
+typecheck, build, npm test (60 suites, 825 tests passed) and npm run test:e2e on the test database
+(26 suites, 439 tests passed). Claude tested it in Swagger in the Claude app's browser while I was
+logged in, with the API on the ITN-21 branch, which contains this branch; it sent the requests from
+the Swagger page. Adding "Egyptian Museum" at 10:00 costing 2000 EGP to day 1 answered 201; editing
+the cost to 2500 answered 200; a cost without a currency answered 400; currency ABC answered 400
+"Unsupported currency: ABC"; a null name answered 400 "name must not be null"; deleting an activity
+answered 200 and the day's list was empty. Claude then deleted its test itineraries one by one by
+id. I changed nothing and rejected nothing.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository and my laptop)
+Branch / Issue: feature/ITN-16-transport-costs / #75
+Related Requirement: ITN-16
+Prompt:
+Continuing my wave 3 issues in the same chat, I asked Claude to implement ITN-16, open its pull
+request, and test it in Swagger on my laptop.
+How the output was used:
+Claude wrote the DTOs, the service and controller, the unit and e2e tests and the README section. It
+ran format, lint, typecheck, build and the unit tests in its own workspace, and the end-to-end tests
+against a local MongoDB-compatible stand-in (FerretDB). I applied its commits with a script so they
+carry my name.
+Accepted, changed, or rejected:
+Design choices by Claude: `mode` is free text up to 50 characters (train, bus, flight...), because
+the workbook gives no fixed list. Both cities must exist and must differ, since this is intercity
+transport. An edit that changes one city is checked against the city it keeps. A transport cost
+belongs to one day, so it counts in that day's city group subtotal (ITN-09) and leaves with the day
+if the day is deleted. `PATCH` with a new `dayId` moves it and keeps its id. Same design and money
+rules as activities (ITN-10): a separate service and controller, 404 then 403, `null` answers 400,
+version check (409).
+Checked: on my laptop the checks script ran format (no changes), lint (0 warnings and 0 errors),
+typecheck, build, npm test (61 suites, 843 tests passed) and npm run test:e2e on the test database
+(27 suites, 458 tests passed). Claude tested it in Swagger in the Claude app's browser while I was
+logged in, with the API on the ITN-21 branch, which contains this branch; it sent the requests from
+the Swagger page. Adding a cairo to paris flight of 45000 EUR on day 2 answered 201; cairo to cairo
+answered 400 "fromCityId and toCityId must be different cities"; moving it to day 3 with the amount
+42000 answered 200, kept its id and moved it to the paris group's subtotal; deleting it answered
+200. Claude then deleted its test itineraries one by one by id. I changed nothing and rejected
+nothing.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository and my laptop)
+Branch / Issue: feature/ITN-21-search-public-itineraries / #78
+Related Requirement: ITN-21
+Prompt:
+Continuing my wave 3 issues in the same chat, I asked Claude to implement ITN-21, open its pull
+request, and test it in Swagger on my laptop.
+How the output was used:
+Claude wrote the search DTO, the service and controller, the response DTOs, the unit and e2e tests
+and the README section. It ran format, lint, typecheck, build and the unit tests in its own
+workspace, and the end-to-end tests against a local MongoDB-compatible stand-in (FerretDB). I
+applied its commits with a script so they carry my name.
+Accepted, changed, or rejected:
+Design choices by Claude: Publicly visible means public (ITN-20), not hidden by an admin (GEN-10)
+and the author not deactivated (ACC-12). Anything else answers 404, so a private itinerary is never
+revealed. The keyword is matched as plain text (escaped), never as a pattern. `minDays` above
+`maxDays` answers 400. Search results leave out the days to stay light; most recently updated first,
+paginated. The clone gets new ids for everything and shares nothing with the original, so editing or
+deleting either leaves the other alone. The author's name is kept in `clonedFrom` at clone time. The
+read routes are under `/api/itineraries/public/`, the only public part of `/api/itineraries` the
+guest-access test (ACC-10) allows. A clone keeps the same image filenames, so ITN-12 must not delete
+an image file another activity still uses (written in the README).
+Checked: on my laptop the checks script ran format (no changes), lint (0 warnings and 0 errors),
+typecheck, build, npm test (62 suites, 856 tests passed) and npm run test:e2e on the test database
+(28 suites, 482 tests passed). Claude tested it in Swagger in the Claude app's browser while I was
+logged in, with the API on the ITN-21 branch, which contains this branch; it sent the requests from
+the Swagger page. With the test itinerary set to public: a guest search by a title word found it
+with its author and dayCount 4 and without the days; minDays=4, city=london, country=FR, q=Paris and
+q=Egypt found it; maxDays=3, city=tokyo and country=JP did not; minDays=5&maxDays=2 answered 400.
+The guest view answered 200 with the author, 4 days, the activity and 3 city groups. Clone as a
+guest answered 401 "You must log in to do this"; logged in it answered 201 with a private copy, new
+ids and clonedFrom crediting the author. After setting the original private, the search no longer
+found it and the public view answered 404. After deleting the original, the clone still opened with
+its 4 days and its credit, and deleting its activity and transport cost worked. Claude then deleted
+its test itineraries one by one by id. I changed nothing and rejected nothing.
+================================================
