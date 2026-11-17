@@ -27,7 +27,7 @@ export class ItineraryResponseDto {
 
   @ApiProperty({
     description:
-      'hidden: an admin hid it (GEN-10). Only its owner and admins still see it, and it is left out of public search even when public.',
+      'visible, or hidden when an admin hid it (GEN-10): a hidden itinerary is seen only by its owner and admins. Public search and public view only return visible itineraries, so there it is always visible.',
     enum: ItineraryModeration,
     example: ItineraryModeration.Visible,
   })
