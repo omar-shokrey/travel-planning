@@ -581,6 +581,44 @@ describe('HotelsService (HTL-01)', () => {
     });
   });
 
+  describe('findNamesByIds (HTL-20, HTL-22)', () => {
+    it('reads the names of all the hotels in one query, active or not', async () => {
+      const a = new Types.ObjectId();
+      const b = new Types.ObjectId();
+      const { hotelsModel, service } = setup();
+      const chain = {
+        select: jest.fn(),
+        lean: jest.fn(),
+        exec: jest.fn().mockResolvedValue([
+          { _id: a, name: 'Nile Hotel' },
+          { _id: b, name: 'Sea Hotel' },
+        ]),
+      };
+      chain.select.mockReturnValue(chain);
+      chain.lean.mockReturnValue(chain);
+      const find = jest.fn().mockReturnValue(chain);
+      Object.assign(hotelsModel, { find });
+
+      const names = await service.findNamesByIds([a, b]);
+
+      expect(find).toHaveBeenCalledWith({ _id: { $in: [a, b] } });
+      expect(chain.select).toHaveBeenCalledWith('name');
+      expect([...names]).toEqual([
+        [a.toString(), 'Nile Hotel'],
+        [b.toString(), 'Sea Hotel'],
+      ]);
+    });
+
+    it('does not query for an empty list', async () => {
+      const { hotelsModel, service } = setup();
+      const find = jest.fn();
+      Object.assign(hotelsModel, { find });
+
+      expect((await service.findNamesByIds([])).size).toBe(0);
+      expect(find).not.toHaveBeenCalled();
+    });
+  });
+
   describe('addPhotos', () => {
     it('checks the limit before saving and atomically appends filenames', async () => {
       const hotel = makeHotel({ photos: ['existing.jpg'] });

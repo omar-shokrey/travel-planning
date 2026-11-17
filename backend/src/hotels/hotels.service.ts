@@ -7,7 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { isValidObjectId, type Model } from 'mongoose';
+import { isValidObjectId, type Model, type Types } from 'mongoose';
 import { ProviderType } from '../common/enums/provider-type.enum';
 import { City } from '../reference/models/city.schema';
 import { UploadsService } from '../uploads/uploads.service';
@@ -301,6 +301,25 @@ export class HotelsService {
    */
   findEntityOrThrow(id: string): Promise<HotelDocument> {
     return this.findHotelOrThrow(id);
+  }
+
+  /**
+   * The names of these hotels by id (as a string), active or not, for the
+   * lists of reservations (HTL-20, HTL-22). One query for the whole page.
+   * Never exposed by a controller.
+   */
+  async findNamesByIds(
+    ids: readonly Types.ObjectId[],
+  ): Promise<Map<string, string>> {
+    if (ids.length === 0) {
+      return new Map();
+    }
+    const hotels = await this.hotels
+      .find({ _id: { $in: ids } })
+      .select('name')
+      .lean()
+      .exec();
+    return new Map(hotels.map((hotel) => [hotel._id.toString(), hotel.name]));
   }
 
   /**
