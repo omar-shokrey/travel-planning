@@ -127,3 +127,14 @@ hotel before its file is removed.
 - Each room shows the fields of the workbook (type, beds, maximum occupancy, price per night) plus its number, the number of nights and `totalPrice` = nights x price per night, in minor units of the platform currency.
 - The rooms are read with one query and the taken ones with one `distinct` on `room_nights`; the coverage check runs in memory on the embedded availability ranges. The free list is paginated in memory, because whether a room is free depends on both collections.
 - `findFreeRoomEntities` is the rule for hotel search (HTL-11) and booking (HTL-16), so they should call it instead of writing their own. It is only a read: a room can be taken right after it, so the hold of HTL-18 must still rely on the unique (`roomId`, `date`) index.
+
+## Hotel search (HTL-11)
+
+- `GET /api/hotels/search` is public, as in the endpoint table. It lives in its own `HotelSearchController`, registered before `HotelDetailsController`, so "search" is never read as a hotel id; an e2e test checks that.
+- The destination is `cityId` or `countryCode`, exactly one of them: the workbook says "by city or country", and with both a wrong pair would only give an empty list. The country code is two letters in any case and is upper-cased. An unknown city or country is not an error: it simply has no hotels.
+- `checkIn`, `checkOut` and `guests` are required, `rooms` defaults to 1. The date rules are those of HTL-15 (the same `assertStay`). At most 40 guests and 10 rooms per search; the workbook gives no limit.
+- A hotel is listed when it is active (ACC-15) and has at least `rooms` free rooms, by the HTL-15 rule, whose combined maximum occupancy covers `guests`. The best choice is always the `rooms` largest free rooms, so the pure function `canHost` checks only them.
+- Each result is a summary of the hotel (no description, no policies: those are on the hotel page) with `freeRooms`, the number of free rooms, and `cheapestPricePerNight`, the price of the cheapest free room. HTL-12 filters and sorts on that price.
+- Results are sorted by hotel name. The free rooms of every hotel of the destination are found with two queries in all (`findFreeRoomsOfHotels`), then the list is paginated in memory, because whether a hotel qualifies depends on its rooms and their nights.
+- A `(countryCode, active)` index was added next to the existing `(cityId, active)` one, for the country search.
+
