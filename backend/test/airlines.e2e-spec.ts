@@ -439,6 +439,29 @@ describe('Airline profiles (e2e, FLT-01)', () => {
       });
     });
 
+    it('returns 400 for a field sent as null and changes nothing', async () => {
+      const admin = await createUser(Role.Admin);
+      const adminCookie = await loginAs(admin);
+      const airline = await createAirline(adminCookie);
+      const moderator = await createUser(Role.AirlineModerator, airline.id);
+      const moderatorCookie = await loginAs(moderator);
+
+      const response = await request(getHttpServer())
+        .patch(`/api/airlines/${airline.id}`)
+        .set('Cookie', moderatorCookie)
+        .send({ name: 'Null Code Airline', code: null })
+        .expect(400);
+
+      expect(response.body.errors).toEqual([
+        { field: 'code', messages: ['code must not be null'] },
+      ]);
+      const stored = await airlines?.findById(airline.id).lean();
+      expect(stored).toMatchObject({
+        name: 'Test Airline',
+        code: airline.code,
+      });
+    });
+
     it('returns 403 when a moderator updates another airline', async () => {
       const admin = await createUser(Role.Admin);
       const adminCookie = await loginAs(admin);
