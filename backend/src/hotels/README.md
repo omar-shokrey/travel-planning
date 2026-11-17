@@ -147,3 +147,11 @@ hotel before its file is removed.
 - The price filter and the sort run in memory before pagination, because the price depends on the free rooms of the stay. `inPriceRange` and `sortCandidates` in `hotel-search.ts` are pure functions with unit tests.
 - `HotelSearchSort` and `SortOrder` are in the hotels module, not in `common/`, so this PR does not touch the shared layer. If another module needs a sort order, the team can move `SortOrder` to `common/enums/` in a shared-layer PR.
 
+
+## Room holds for reservations (HTL-16, HTL-18)
+
+- The hotel-bookings module owns the reservations, and this module owns the rooms and `room_nights`. A reservation finds and holds rooms only through `HotelRoomHoldsService`, the one service besides `HotelsService` that this module exports.
+- `findBookableRooms` checks, in this order: the stay (400, the HTL-15 `assertStay`), the hotel is active (404), every room belongs to it (404), no room has more guests than its maximum occupancy (400), every room is free for the whole stay by the HTL-15 rule (409, naming the rooms). It is only a read.
+- `hold` writes one `held` night per room per night, with the reservation id and `holdExpiresAt`. The unique (`roomId`, `date`) index decides who gets a night when two people try at once. If one insert fails, the nights this call inserted are deleted again by the ids it chose itself, and the answer is 409: nothing stays held. Expired holds on those nights are removed first, as the spec says.
+- No MongoDB transaction: the CI database (`mongo:8.0` service) is a single server, which has none, so the fallback of the spec is the only path that works everywhere. It is still all-or-nothing, and a night left behind by a crash carries `holdExpiresAt`, so it stops counting by itself.
+- `release` deletes only the `held` nights of one reservation, never booked or blocked ones.
