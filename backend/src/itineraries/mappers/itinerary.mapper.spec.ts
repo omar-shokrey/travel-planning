@@ -10,6 +10,7 @@ import {
   dayCosts,
   dayDate,
   toActivityResponse,
+  toTransportCostResponse,
   toCityGroups,
   toItineraryDetailResponse,
   toItineraryResponse,
@@ -123,6 +124,7 @@ describe('toItineraryDetailResponse', () => {
         cityId: 'cairo',
         notes: 'Arrive in the evening',
         activities: [],
+        transportCosts: [],
       },
       {
         id: itinerary.days[1]._id.toString(),
@@ -130,6 +132,7 @@ describe('toItineraryDetailResponse', () => {
         date: '2026-12-31',
         cityId: 'cairo',
         activities: [],
+        transportCosts: [],
       },
       {
         id: itinerary.days[2]._id.toString(),
@@ -137,6 +140,7 @@ describe('toItineraryDetailResponse', () => {
         date: '2027-01-01',
         cityId: 'dubai',
         activities: [],
+        transportCosts: [],
       },
     ]);
   });
@@ -152,6 +156,7 @@ describe('toItineraryDetailResponse', () => {
       'date',
       'dayNumber',
       'id',
+      'transportCosts',
     ]);
   });
 });
@@ -333,6 +338,37 @@ describe('toActivityResponse (ITN-10)', () => {
 
     expect(toActivityResponse(day.activities[0])).toMatchObject({
       cost: 0,
+      currency: 'EGP',
+    });
+  });
+});
+
+describe('toTransportCostResponse (ITN-16)', () => {
+  it('returns every field with the id', () => {
+    const [day] = stored({
+      days: [
+        {
+          cityId: 'cairo',
+          transportCosts: [
+            {
+              mode: 'train',
+              fromCityId: 'cairo',
+              toCityId: 'luxor',
+              amount: 90000,
+              currency: 'EGP',
+            },
+          ],
+        },
+      ],
+    }).days;
+    const [cost] = day.transportCosts;
+
+    expect(toTransportCostResponse(cost)).toEqual({
+      id: cost._id.toString(),
+      mode: 'train',
+      fromCityId: 'cairo',
+      toCityId: 'luxor',
+      amount: 90000,
       currency: 'EGP',
     });
   });

@@ -32,6 +32,7 @@ import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { AddDayDto } from './dto/add-day.dto';
 import { CreateActivityDto } from './dto/create-activity.dto';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
+import { CreateTransportCostDto } from './dto/create-transport-cost.dto';
 import { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
 import { ItineraryResponseDto } from './dto/itinerary-response.dto';
 import { MoveDayDto } from './dto/move-day.dto';
@@ -39,6 +40,7 @@ import { UpdateDayDto } from './dto/update-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { ActivitiesService } from './activities.service';
 import { ItinerariesService } from './itineraries.service';
+import { TransportCostsService } from './transport-costs.service';
 
 @ApiTags('Itineraries')
 @ApiCookieAuth()
@@ -48,6 +50,7 @@ export class ItinerariesController {
   constructor(
     private readonly itineraries: ItinerariesService,
     private readonly activities: ActivitiesService,
+    private readonly transportCosts: TransportCostsService,
   ) {}
 
   @Post()
@@ -286,5 +289,35 @@ export class ItinerariesController {
     @CurrentUser('id') userId: string,
   ): Promise<ItineraryDetailResponseDto> {
     return this.activities.add(id, dayId, dto, userId);
+  }
+
+  @Post(':id/transport-costs')
+  @ApiOperation({
+    summary: 'Add a transport cost',
+    description:
+      'ITN-16. Add the cost of travelling between two cities to a day of your own itinerary: mode, from-city, to-city, amount, currency and day. It counts in the budget of that day. Returns the itinerary with its days.',
+  })
+  @ApiParam({ name: 'id', description: 'Itinerary id' })
+  @ApiCreatedResponse({ type: ItineraryDetailResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'The id or a field is invalid, an unknown field was sent, a city is not in the city list, both cities are the same, or the currency is not supported',
+  })
+  @ApiForbiddenResponse({
+    description: 'The itinerary belongs to another user',
+  })
+  @ApiNotFoundResponse({
+    description: 'No itinerary has this id, or it has no day with this dayId',
+  })
+  @ApiConflictResponse({
+    description:
+      'The itinerary was changed by another request at the same time',
+  })
+  addTransportCost(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: CreateTransportCostDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    return this.transportCosts.add(id, dto, userId);
   }
 }

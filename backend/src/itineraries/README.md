@@ -79,3 +79,12 @@ Owner: Ali Ghayesh (M8). Requirements: ITN-01 to ITN-26. Routes: `/api/itinerari
 - **`null` in an edit answers 400** (`assertNoNullFields`), as the hotel edit does (HTL-01). An empty description or time removes it. A cost cannot be removed once set; setting it to 0 makes it add nothing.
 - **Deleting writes a new list for the day** instead of a `$pull`, and every change goes through `saveOrConflict()`, so a change that raced with a delete or a move of a day (ITN-07, ITN-08) answers 409 instead of editing the wrong day.
 - **Images (ITN-12) are not in the response yet.** `images` is in the schema; ITN-12 adds the routes and the URLs, and must delete an activity's files when the activity or its day is deleted.
+
+## ITN-16: transport costs
+
+- **Routes as in section 8**: `POST /api/itineraries/:id/transport-costs` with the day in the body (`dayId`), then `PATCH` and `DELETE /api/transport-costs/:id`. Owner only; each returns the itinerary with its days.
+- **The fields the workbook lists**: mode, from-city, to-city, amount, currency and day. `mode` is free text up to 50 characters (train, bus, flight...), because the workbook gives no fixed list.
+- **Both cities come from the city list and must differ**, since this is intercity transport (ITN-14 calls these "intercity transport entries"). An edit that changes one city is checked against the other one it keeps.
+- **A transport cost belongs to one day**, so it counts in that day's city group subtotal (ITN-09) and leaves with the day if the day is deleted (ITN-07). `PATCH` with a new `dayId` moves it to that day of the same itinerary and keeps its id.
+- **Amount and currency follow the money rules**: whole minor units, 0 or more, in a supported currency. `null` in an edit answers 400, as for activities.
+- **Same design as activities (ITN-10)**: a separate `TransportCostsService` and `TransportCostsController`, found by id inside the days (404, then 403), saved through `saveOrConflict()`.
