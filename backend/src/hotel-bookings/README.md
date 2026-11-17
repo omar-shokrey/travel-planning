@@ -28,3 +28,10 @@ Hotel reservations (`hotel_bookings`). The rooms and their nights belong to the 
 - An Expired reservation was never paid, so it is in no group; the list without `group` shows every reservation, expired ones included.
 - Upcoming is sorted soonest check-in first; past and cancelled latest first; the list without a group newest first. The filter and the order are pure functions in `hotel-booking-groups.ts` with unit tests, and the (`userId`, `status`) index serves them.
 - The list and the details return the same `HotelBookingResponseDto` (reference, hotel, rooms with guests and prices, dates, total, status, policies), so the details page needs no other call. `hotelName` is read from the hotels module with one query per page (`HotelsService.findNamesByIds`), because the reservation stores only the hotel id, as in the data model.
+
+## The hotel's reservations, for its moderator (HTL-22)
+
+- `GET /api/hotels/:id/reservations` is under `/hotels`, as in the endpoint table, but its controller (`HotelReservationsController`) lives in this module, because the reservations are this module's data. Only the moderator assigned to the hotel may call it: the hotels module's `findManagedEntityOrThrow` answers 404 for a missing hotel and 403 for anyone else, the same rule as every other moderator route of the hotel.
+- Each item shows what the workbook asks for (guest, dates, status) plus the reference, the rooms with their guests and the total, so the moderator can prepare the stay. The guest's account id, the hold and the policy acceptance are left out.
+- The guest is shown by name only. The names of one page are read in one query on the `User` model, which `UsersModule` exports, as the public itineraries do for their authors.
+- Latest check-in first, paginated. Without `status`, every reservation except `expired` ones, which were holds that were never paid; `status=expired` still shows them. The (`hotelId`, `status`) index serves the query.
