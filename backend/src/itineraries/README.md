@@ -21,6 +21,7 @@ Owner: Ali Ghayesh (M8). Requirements: ITN-01 to ITN-26. Routes: `/api/itinerari
 - **Delete removes the document.** It leaves public search at once, and a clone is a separate document with the author's name copied into `cloneSource`, so clones are not affected. The "after confirmation" step is the frontend's dialog (Milestone 2).
 - **`PATCH` changes only the fields that are sent.** A field that is absent or `null` is left as it is.
 - **`findEntityOrThrow()`** is for other services (for example the admin module, GEN-10). It returns the entity and is never used by a controller.
+- **`findOwnerAndVisibilityOrThrow()`** is for the reports module (GEN-09): the owner id and whether the itinerary is publicly visible, by the same `PUBLICLY_VISIBLE` rule as public search (ITN-21), so a user can report exactly the itineraries search shows them. It reads only `ownerId`, `visibility`, `moderation` and `authorDeactivated`, not the days, and answers 404 for a missing itinerary.
 - **The end-to-end tests add their own country.** The test database may hold no reference data (CI starts with an empty one), so the tests insert one country with a code that no real country has (`X` plus a letter) and delete it at the end, with the users and itineraries they created.
 
 ## ITN-03: list my itineraries, open one

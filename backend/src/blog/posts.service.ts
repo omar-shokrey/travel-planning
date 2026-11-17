@@ -20,6 +20,26 @@ export class PostsService {
     private readonly posts: Model<BlogPost>,
   ) {}
 
+  /**
+   * For other services (reports, GEN-09): the author id of a published post,
+   * or null when the post is missing or a draft, so a draft is never revealed
+   * to anyone but its author. Not exposed by a controller.
+   *
+   * Posts have no moderation or author-deactivated field yet. When GEN-10
+   * (an admin hides a post) or ACC-12 (the author closes the account) adds
+   * one, this must leave those posts out too for everyone but the author, as
+   * reports already do for itineraries; otherwise reporting a hidden post
+   * answers 201 instead of 404 and shows that it exists.
+   */
+  async findPublishedAuthorId(postId: string): Promise<string | null> {
+    const post = await this.posts
+      .findOne({ _id: postId, status: PostStatus.Published })
+      .select('authorId')
+      .lean()
+      .exec();
+    return post ? post.authorId.toString() : null;
+  }
+
   async create(dto: CreatePostDto, userId: string): Promise<PostResponseDto> {
     const post = await this.posts.create({
       ...dto,
