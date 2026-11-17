@@ -7,9 +7,9 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { LikeResponseDto } from './dto/like-response.dto';
 import { toLikeResponse } from './mappers/like.mapper';
+import { visiblePublishedPost } from './visible-post.filter';
 import { BlogPost } from './models/blog-post.schema';
 import { Like } from './models/like.schema';
-import { PostStatus } from './models/post-status.enum';
 
 /** MongoDB's error code for a value that breaks a unique index. */
 const DUPLICATE_KEY = 11000;
@@ -31,7 +31,7 @@ export class LikesService {
 
   /** BLG-06: the logged-in user likes a published post, once. */
   async like(postId: string, userId: string): Promise<LikeResponseDto> {
-    await this.assertPublishedPost(postId);
+    await this.assertPublishedPost(postId, userId);
 
     try {
       await this.likes.create({
@@ -60,7 +60,7 @@ export class LikesService {
 
   /** BLG-06: the logged-in user removes their like from a post. */
   async unlike(postId: string, userId: string): Promise<LikeResponseDto> {
-    await this.assertPublishedPost(postId);
+    await this.assertPublishedPost(postId, userId);
 
     // Deletes exactly one record: this user's like on this post.
     const { deletedCount } = await this.likes
@@ -92,9 +92,17 @@ export class LikesService {
    * A draft is private to its author, so for everyone else it does not exist:
    * a missing post and a draft both answer 404.
    */
-  private async assertPublishedPost(postId: string): Promise<void> {
+  /**
+   * 404 unless the post is published and not hidden by an admin (GEN-10);
+   * its author still reaches their own hidden post. A guest (no `viewerId`)
+   * never does, so a hidden post answers exactly like a missing one.
+   */
+  private async assertPublishedPost(
+    postId: string,
+    viewerId?: string,
+  ): Promise<void> {
     const post = await this.posts
-      .exists({ _id: postId, status: PostStatus.Published })
+      .exists(visiblePublishedPost(postId, viewerId))
       .exec();
 
     if (!post) {

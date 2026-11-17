@@ -1,9 +1,9 @@
 /**
  * What an administrator did (GEN-07). Recorded today: `ResetPassword`
  * (ACC-07a), `CreateModerator` (ACC-13), `SuspendUser` and `ReactivateUser`
- * (ACC-15, ACC-16), `DeactivateProvider` and `ReactivateProvider` (ACC-15).
- * The report actions are reserved for GEN-10, which adds its own
- * `AuditService.record` calls.
+ * (ACC-15, ACC-16), `DeactivateProvider` and `ReactivateProvider` (ACC-15),
+ * and the report handling of GEN-10: `DismissReport`, `HideContent`,
+ * `ShowContent` and `DeleteContent`.
  */
 export enum AuditAction {
   ResetPassword = 'reset_password',
@@ -14,5 +14,7 @@ export enum AuditAction {
   ReactivateProvider = 'reactivate_provider',
   DismissReport = 'dismiss_report',
   HideContent = 'hide_content',
+  /** GEN-10: an admin makes hidden content visible again. */
+  ShowContent = 'show_content',
   DeleteContent = 'delete_content',
 }

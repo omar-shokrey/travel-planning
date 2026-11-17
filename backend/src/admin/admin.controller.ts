@@ -81,7 +81,7 @@ export class AdminController {
   @ApiOperation({
     summary: 'List the audit log of admin actions (GEN-07)',
     description:
-      'Admin only. Every recorded admin action, newest first, 10 per page by default (GEN-05): who acted (`adminId`), what they did (`action`), on which record (`targetType`, `targetId`), a short note (`details`) and when (`createdAt`, UTC). `action`, `adminId`, `targetType` and `targetId` filter, and all given filters must match. The log is append-only: no route changes or deletes a record. Recorded today: password resets (ACC-07a), moderator creation (ACC-13), account suspension and reactivation (ACC-15, ACC-16), and provider deactivation and reactivation (ACC-15).',
+      'Admin only. Every recorded admin action, newest first, 10 per page by default (GEN-05): who acted (`adminId`), what they did (`action`), on which record (`targetType`, `targetId`), a short note (`details`) and when (`createdAt`, UTC). `action`, `adminId`, `targetType` and `targetId` filter, and all given filters must match. The log is append-only: no route changes or deletes a record. Recorded today: password resets (ACC-07a), moderator creation (ACC-13), account suspension and reactivation (ACC-15, ACC-16), provider deactivation and reactivation (ACC-15), and report handling and content moderation (GEN-10).',
   })
   @ApiPaginatedResponse(AuditLogResponseDto)
   @ApiBadRequestResponse({

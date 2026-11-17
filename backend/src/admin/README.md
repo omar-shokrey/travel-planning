@@ -14,6 +14,10 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 | `PATCH /api/admin/accounts/:id/reactivate`        | ACC-15, ACC-16 | Admin  |
 | `PATCH /api/admin/providers/:type/:id/deactivate` | ACC-15         | Admin  |
 | `PATCH /api/admin/providers/:type/:id/reactivate` | ACC-15         | Admin  |
+| `GET /api/admin/reports`                          | GEN-10         | Admin  |
+| `PATCH /api/admin/reports/:id`                    | GEN-10         | Admin  |
+| `PATCH /api/admin/content/:type/:id`              | GEN-10         | Admin  |
+| `DELETE /api/admin/content/:type/:id`             | GEN-10         | Admin  |
 
 ## Design decisions
 
@@ -56,6 +60,32 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **Pagination follows GEN-05:** 10 per page by default, at most 50, `{ items, meta }`, and an empty page is `items: []`.
 - **The query is in `UsersService.listAccounts`**, which owns the collection and returns entities; `AdminService` maps them with `toUserResponse` and builds the page with `paginate`. Documents are not read with `lean()`, so schema defaults (such as `mustChangePassword: false`) apply to older accounts.
 - **The search uses the `$regex` string form** (`{ $regex, $options: 'i' }`), not a RegExp object. In our e2e runs against Atlas, a count with RegExp objects and the `i` flag inside `$or` never got an answer, while the string form always did. Both mean the same to MongoDB.
+
+## Report handling and moderation (GEN-10)
+
+| Route                                 | Requirement    | Access |
+| ------------------------------------- | -------------- | ------ |
+| `GET /api/admin/reports`              | GEN-09, GEN-10 | Admin  |
+| `PATCH /api/admin/reports/:id`        | GEN-10         | Admin  |
+| `PATCH /api/admin/content/:type/:id`  | GEN-10         | Admin  |
+| `DELETE /api/admin/content/:type/:id` | GEN-10         | Admin  |
+
+- **Own files.** `AdminModerationController` (`@Controller('admin')`, `@Roles(Role.Admin)` on the class) and `AdminModerationService` sit next to `AdminController` and `AdminService`, so this feature and the account features (ACC-15, GEN-07 audit) change different files. `AdminModule` imports `ReportsModule`, `BlogModule`, `ItinerariesModule` and `UploadsModule`; none of them imports `AdminModule`.
+- **The owning modules do the writes.** `ReportsService` reads and resolves reports, `PostsService` and `ItinerariesService` hide and delete their content (`existsById`, `setHidden`, `removeByAdmin`), and `UploadsService` deletes image files. `AdminModerationService` only decides the order and maps the answers.
+- **Posts and itineraries only (team decision).** `:type` is `post` or `itinerary` (the values of `ReportTargetType`), checked with `ParseEnumPipe`; anything else answers 400 "type must be one of: post, itinerary". Comments (BLG-05, PR #142) and hotel reviews are added with GEN-09's `comment` and `review` report types by a later PR, which adds them here too.
+- **The report list** (`?page&limit&status&targetType`): open reports by default, because the list is the admin's work queue; `status` shows `dismissed`, `hidden` or `deleted` reports instead. **Oldest first** (`createdAt`, then `_id`), so the report that has waited longest is handled first. Each item: `id`, `targetType`, `targetId`, `reason`, `status`, `reporterId`, `createdAt`, and `resolvedBy` and `resolvedAt` once resolved. Pagination follows GEN-05.
+- **Resolving a report** (`{ "action": "dismiss" | "hide" | "delete" }`) sets its status to `dismissed`, `hidden` or `deleted`, `resolvedBy` (the admin, from the login) and `resolvedAt`.
+  - **Only an open report can be resolved: 409 otherwise.** The report is claimed first with a conditional update on `status: open`, and the content changes only after that, so of two admins at the same moment one wins and the other gets 409 "This report has already been resolved" without touching the content.
+  - **`hide` and `delete` also resolve the other open reports of the same content** with the same status, admin and time, because the content they point at has changed and nobody needs to handle them again. **`dismiss` affects this report only**: another user's report of the same content may have a better reason.
+  - **Content that is already gone** (its author deleted it since): `hide` answers 409 ("The reported post no longer exists, so it cannot be hidden. Dismiss the report or delete it instead.") and the report stays open; `delete` is idempotent and just closes the report as `deleted`, because what the admin wanted (the content is gone) is already true; nothing is written to the audit log then, because the admin deleted nothing (the report itself keeps who closed it and when). Content that is already hidden is fine for `hide`. If the author deletes the content between the check and the hide (a race), `setHidden` changes nothing and the content is missing: the report is then closed as `deleted` (`ReportsService.changeResolvedStatus`), its other open reports too, and nothing is audited.
+  - An unknown report answers 404 "Report not found"; an id that is not an ObjectId 400; a missing, `null` or unknown `action` 400.
+- **`PATCH /api/admin/content/:type/:id` with `{ "moderation": "hidden" | "visible" }` is not in section 8 of the project description**, which only has the `DELETE` route. The workbook asks that an admin can "hide or delete any post, comment, review or itinerary directly", so the hide needs a route; it follows the `DELETE` route's path, and `visible` lets an admin undo a mistaken hide. 404 for unknown content, 409 when it already has that state. Hiding resolves its open reports as `hidden`; showing it again does not reopen reports that were resolved. The answer is `{ type, id, moderation }`. A moderation change does not touch the content's `updatedAt`, which means "last changed by its author" (BLG-03 shows it, ITN-03 sorts by it).
+- **`DELETE /api/admin/content/:type/:id`** deletes any post or itinerary (204), whoever wrote it, and resolves its open reports as `deleted`; 404 for unknown content. **Reports are kept** as history. A clone of a deleted itinerary is a separate document and stays.
+- **Images of deleted content are deleted** with `UploadsService.deleteImage`, after the database work. A file that cannot be removed is logged (the count only) and does not fail the request, since the content is already gone. An itinerary's activity images that a clone still uses (ITN-21 copies the file names) are kept.
+- **What "hidden" changes today:** a hidden post or itinerary answers 404 to anyone but its author in GEN-09 reporting; its author still sees it ("my posts" shows `moderation: hidden`; `GET /api/itineraries/:id` is owner-only). Public search and view of itineraries (ITN-21, merged) filter on `moderation: visible`, so a hidden itinerary leaves them at once. The public blog routes (BLG-02, BLG-09, BLG-12) do not exist yet; the blog README says they must leave hidden posts out.
+- **One enum per module.** `ContentModeration` (here), `PostModeration` (blog) and `ItineraryModeration` (itineraries) have the same two values. The services take `hidden: boolean`, so no module imports another's enum. A shared-layer PR can move one `Moderation` enum to `backend/src/common/enums/` later.
+- **No notification to the author.** The notification types of the data model (GEN-01) have no moderation type, and adding one changes the shared spec; GEN-10 does not ask for one. It can be added later if the team wants it.
+- **Audit (GEN-07):** every action is recorded after it succeeded, with the admin id: `dismiss_report` (target: the report; note: the reported item, `post <id>`), `hide_content` and `delete_content` (target: the post or itinerary; note `report <id>` when it came from a report), and `show_content` for showing content again (a new action value, so that un-hiding is logged too). A refused action (404, 409) records nothing.
 
 ## Moderator accounts (ACC-13)
 

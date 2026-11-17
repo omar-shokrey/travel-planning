@@ -14,9 +14,9 @@ import type { CommentResponseDto } from './dto/comment-response.dto';
 import type { CreateCommentDto } from './dto/create-comment.dto';
 import type { UpdateCommentDto } from './dto/update-comment.dto';
 import { toCommentResponse } from './mappers/comment.mapper';
+import { visiblePublishedPost } from './visible-post.filter';
 import { BlogPost } from './models/blog-post.schema';
 import { Comment, type CommentDocument } from './models/comment.schema';
-import { PostStatus } from './models/post-status.enum';
 
 /** Comments on blog posts (BLG-05, BLG-07). */
 @Injectable()
@@ -34,7 +34,7 @@ export class CommentsService {
     dto: CreateCommentDto,
     userId: string,
   ): Promise<CommentResponseDto> {
-    await this.assertPublishedPost(postId);
+    await this.assertPublishedPost(postId, userId);
 
     const comment = await this.comments.create({
       postId: new Types.ObjectId(postId),
@@ -137,9 +137,17 @@ export class CommentsService {
    * A draft is private to its author, so for everyone else it does not exist:
    * a missing post and a draft both answer 404.
    */
-  private async assertPublishedPost(postId: string): Promise<void> {
+  /**
+   * 404 unless the post is published and not hidden by an admin (GEN-10);
+   * its author still reaches their own hidden post. A guest (no `viewerId`)
+   * never does, so a hidden post answers exactly like a missing one.
+   */
+  private async assertPublishedPost(
+    postId: string,
+    viewerId?: string,
+  ): Promise<void> {
     const post = await this.posts
-      .exists({ _id: postId, status: PostStatus.Published })
+      .exists(visiblePublishedPost(postId, viewerId))
       .exec();
 
     if (!post) {
