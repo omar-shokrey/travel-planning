@@ -127,6 +127,29 @@ const createDto: CreateHotelDto = {
 };
 
 describe('HotelsService (HTL-01)', () => {
+  describe('setActive (ACC-15)', () => {
+    it.each([false, true])(
+      'sets active to %s only when it is not already, in one update',
+      async (active) => {
+        const updated = makeHotel({ active });
+        const { hotelsModel, service } = setup({ updatedHotel: updated });
+
+        expect(await service.setActive(HOTEL_ID, active)).toBe(updated);
+        expect(hotelsModel.findOneAndUpdate).toHaveBeenCalledWith(
+          { _id: HOTEL_ID, active: { $ne: active } },
+          { $set: { active } },
+          { returnDocument: 'after' },
+        );
+      },
+    );
+
+    it('returns null when the hotel is missing or already in that state', async () => {
+      const { service } = setup({ updatedHotel: null });
+
+      expect(await service.setActive(HOTEL_ID, false)).toBeNull();
+    });
+  });
+
   describe('create', () => {
     it('copies the reference city country and sets server-owned defaults', async () => {
       const { hotelsModel, service } = setup({

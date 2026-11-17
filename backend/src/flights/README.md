@@ -12,6 +12,11 @@ Owns airline profile persistence for FLT-01: the `airlines` collection, `Airline
 
 Creation accepts `name`, `code`, and a required multipart `logo`. Updates accept `name` and `code`, and can replace the logo. Duplicate airline codes return 409.
 
+## Deactivated airlines (ACC-15)
+
+- An admin deactivates or reactivates an airline through `PATCH /api/admin/providers/airline/:id/deactivate` and `/reactivate`. `AirlinesService.setActive(id, active)` writes the flag for the admin module, with one conditional update (an airline without the field counts as active). No airlines route exposes it.
+- **Every feature that shows or books flights must respect the airline's `active`:** flight search (FLT-11) leaves out flights of an airline with `active: false`, and flight booking (FLT-21) refuses them. Confirmed bookings stay valid. These routes do not exist yet; this is the rule for whoever builds them.
+
 ## Design decisions
 
 - **The airline schema owns profile persistence.** Mongoose stores profiles in the `airlines` collection, applies timestamps, defaults `active` to `true`, and enforces a unique index on `code`.

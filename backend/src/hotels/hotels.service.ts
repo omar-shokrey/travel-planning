@@ -210,4 +210,20 @@ export class HotelsService {
   findEntityOrThrow(id: string): Promise<HotelDocument> {
     return this.findHotelOrThrow(id);
   }
+
+  /**
+   * Deactivates or reactivates the hotel, for the admin (ACC-15). It changes
+   * `active` only when it is not already that value, in one update, so two
+   * admins at once cannot both succeed. `null` when the hotel is missing or
+   * already in that state. Never exposed by a controller.
+   */
+  setActive(id: string, active: boolean): Promise<HotelDocument | null> {
+    return this.hotels
+      .findOneAndUpdate(
+        { _id: id, active: { $ne: active } },
+        { $set: { active } },
+        { returnDocument: 'after' },
+      )
+      .exec();
+  }
 }

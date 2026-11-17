@@ -158,4 +158,20 @@ export class AirlinesService {
 
     return toAirlineResponse(updatedAirline);
   }
+
+  /**
+   * Deactivates or reactivates the airline, for the admin (ACC-15). It
+   * changes `active` only when it is not already that value, in one update,
+   * so two admins at once cannot both succeed. `null` when the airline is
+   * missing or already in that state. Never exposed by a controller.
+   */
+  setActive(id: string, active: boolean): Promise<AirlineDocument | null> {
+    return this.airlineModel
+      .findOneAndUpdate(
+        { _id: id, active: { $ne: active } },
+        { $set: { active } },
+        { returnDocument: 'after' },
+      )
+      .exec();
+  }
 }
