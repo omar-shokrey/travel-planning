@@ -13,7 +13,7 @@ import { CreateAirlineDto } from './dto/create-airline.dto';
 import { UpdateAirlineDto } from './dto/update-airline.dto';
 import { AirlineResponseDto } from './dto/airline-response.dto';
 import { UpdateCancellationPolicyDto } from './dto/update-cancellation-policy.dto';
-import { sortTiersByDaysBefore } from './cancellation-policy';
+import { sortTiersByDaysBefore } from '../common/cancellation-tiers';
 import { toAirlineResponse } from './mappers/airline.mapper';
 import { UploadsService } from '../uploads/uploads.service';
 import type { ImageFile } from '../uploads/uploads.types';
