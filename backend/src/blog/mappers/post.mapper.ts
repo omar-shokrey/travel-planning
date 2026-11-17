@@ -40,6 +40,7 @@ export type MyPostSource = Pick<
   BlogPost,
   | 'title'
   | 'status'
+  | 'moderation'
   | 'publishedAt'
   | 'likeCount'
   | 'commentCount'
@@ -53,6 +54,8 @@ export function toMyPostResponse(post: MyPostSource): MyPostResponseDto {
     id: post._id.toString(),
     title: post.title,
     status: post.status,
+    // GEN-10: the author still sees a hidden post, and is told it is hidden.
+    moderation: post.moderation,
     ...(post.publishedAt && { publishedAt: post.publishedAt.toISOString() }),
     createdAt: post.createdAt.toISOString(),
     updatedAt: post.updatedAt.toISOString(),

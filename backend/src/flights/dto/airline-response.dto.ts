@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { CancellationTierResponseDto } from './cancellation-tier-response.dto';
 
 /** Public fields returned for an airline profile. */
 export class AirlineResponseDto {
@@ -21,6 +22,17 @@ export class AirlineResponseDto {
 
   @ApiProperty({ example: true })
   active: boolean;
+
+  @ApiProperty({
+    type: [CancellationTierResponseDto],
+    description:
+      'The cancellation policy (FLT-09), highest threshold first. A cancellation is refunded by the tier with the highest `daysBefore` that does not exceed the days remaining before departure; if none applies, or the list is empty, the refund is 0%.',
+    example: [
+      { daysBefore: 30, refundPercent: 100 },
+      { daysBefore: 7, refundPercent: 50 },
+    ],
+  })
+  cancellationTiers: CancellationTierResponseDto[];
 
   @ApiProperty({
     description: 'When the airline profile was created, in UTC',
