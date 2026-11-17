@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -110,21 +111,20 @@ export class AirlinesService {
 
   /**
    * 403 unless the user is the airline moderator assigned to this airline.
-   * `update` makes the same check inline; sharing one helper is a later
-   * refactor.
+   * Used by `update` (FLT-01) and `setCancellationPolicy` (FLT-09), so both
+   * answer the same way, also for an account that no longer exists.
    */
   private async assertAssignedModerator(
     airline: AirlineDocument,
     userId: string,
+    message = 'You can only change the policy of your assigned airline',
   ): Promise<void> {
     const user = await this.usersService.findEntityById(userId);
     if (
       user?.assignment?.providerType !== ProviderType.Airline ||
       user.assignment.providerId.toString() !== airline._id.toString()
     ) {
-      throw new ForbiddenException(
-        'You can only change the policy of your assigned airline',
-      );
+      throw new ForbiddenException(message);
     }
   }
 
@@ -134,20 +134,27 @@ export class AirlinesService {
     dto: UpdateAirlineDto,
     logo?: ImageFile,
   ): Promise<AirlineResponseDto> {
+    // `null` answers 400, as in the hotel edit (HTL-01): the DTO lets it
+    // through because every field is optional.
+    const nullFields = (['name', 'code'] as const).filter(
+      (field) => dto[field] === null,
+    );
+    if (nullFields.length > 0) {
+      throw new BadRequestException({
+        message: 'Validation failed',
+        errors: nullFields.map((field) => ({
+          field,
+          messages: [`${field} must not be null`],
+        })),
+      });
+    }
+
     const airline = await this.findEntityOrThrow(id);
-
-    const user = await this.usersService.findEntityById(userId);
-
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    if (
-      user.assignment?.providerType !== ProviderType.Airline ||
-      user.assignment?.providerId.toString() !== airline._id.toString()
-    ) {
-      throw new ForbiddenException('You can only edit your assigned airline');
-    }
+    await this.assertAssignedModerator(
+      airline,
+      userId,
+      'You can only edit your assigned airline',
+    );
 
     const code = dto.code?.trim().toUpperCase();
 
