@@ -10,7 +10,6 @@ import {
   ACCOUNT_ALREADY_SUSPENDED_MESSAGE,
   ACCOUNT_DEACTIVATED_MESSAGE,
   ACCOUNT_NOT_SUSPENDED_MESSAGE,
-  ONLY_USER_STATUS_MESSAGE,
 } from './../src/admin/admin.constants';
 import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
@@ -22,11 +21,11 @@ import {
   ACCESS_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
 } from './../src/common/constants/cookies';
-import { ProviderType } from './../src/common/enums/provider-type.enum';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
-import { User } from './../src/users/models/user.schema';
 import { Notification } from './../src/notifications/models/notification.schema';
+import { User } from './../src/users/models/user.schema';
+import { deleteAuditLogsOf } from './support/delete-audit-logs';
 import { deleteSessionsOf } from './support/delete-sessions';
 import { sessionCookieFor } from './support/session-cookie';
 
@@ -53,6 +52,7 @@ interface Session {
 describe('Suspend and reactivate users (e2e, ACC-16)', () => {
   let app: NestExpressApplication;
   let users: Model<User>;
+  let notifications: Model<Notification>;
   const createdUserIds: string[] = [];
   /** The accounts below, by label: their id and email. */
   const accounts = new Map<string, { id: string; email: string }>();
@@ -96,6 +96,9 @@ describe('Suspend and reactivate users (e2e, ACC-16)', () => {
     await app.init();
 
     users = app.get<Model<User>>(getModelToken(User.name));
+    notifications = app.get<Model<Notification>>(
+      getModelToken(Notification.name),
+    );
 
     // One insertMany: single creates in a row have stalled against the Atlas
     // test database (ACC-14, BLG-01).
@@ -105,7 +108,6 @@ describe('Suspend and reactivate users (e2e, ACC-16)', () => {
       ['otherAdmin', Role.Admin, UserStatus.Active],
       ['target', Role.User, UserStatus.Active],
       ['caller', Role.User, UserStatus.Active],
-      ['moderator', Role.HotelModerator, UserStatus.Active],
       ['deactivated', Role.User, UserStatus.Deactivated],
     ];
     const inserted = await users.insertMany(
@@ -116,12 +118,6 @@ describe('Suspend and reactivate users (e2e, ACC-16)', () => {
         role,
         status,
         consentAcceptedAt: new Date(),
-        ...(role === Role.HotelModerator && {
-          assignment: {
-            providerType: ProviderType.Hotel,
-            providerId: new Types.ObjectId(),
-          },
-        }),
       })),
     );
     for (const [index, user] of inserted.entries()) {
@@ -136,9 +132,6 @@ describe('Suspend and reactivate users (e2e, ACC-16)', () => {
 
   afterAll(async () => {
     // The notifications the suspensions sent, one by one by id.
-    const notifications = app.get<Model<Notification>>(
-      getModelToken(Notification.name),
-    );
     for (const id of createdUserIds) {
       const sent = await notifications
         .find({ userId: new Types.ObjectId(id) })
@@ -151,6 +144,8 @@ describe('Suspend and reactivate users (e2e, ACC-16)', () => {
     for (const id of createdUserIds) {
       await deleteSessionsOf(app, id);
     }
+    // The audit records (GEN-07) of the suspensions, by target or admin.
+    await deleteAuditLogsOf(app, createdUserIds);
     for (const id of createdUserIds) {
       await users.findByIdAndDelete(id);
     }
@@ -236,20 +231,9 @@ describe('Suspend and reactivate users (e2e, ACC-16)', () => {
     });
   });
 
+  // Moderators (ACC-15) are suspended and reactivated in
+  // admin-suspend-moderators-providers.e2e-spec.ts.
   describe('accounts that are not changed here', () => {
-    it.each(['suspend', 'reactivate'] as const)(
-      'answers 400 to %s a moderator (ACC-15), and keeps it active',
-      async (action) => {
-        const response = await act(action, idOf('moderator'));
-
-        expect(response.status).toBe(400);
-        expect(response.body.message).toBe(ONLY_USER_STATUS_MESSAGE);
-        expect((await users.findById(idOf('moderator')).lean())?.status).toBe(
-          'active',
-        );
-      },
-    );
-
     it('answers 403 to suspending another administrator', async () => {
       const response = await act('suspend', idOf('otherAdmin'));
 
