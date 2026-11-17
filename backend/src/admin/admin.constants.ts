@@ -1,3 +1,5 @@
+import type { ProviderType } from '../common/enums/provider-type.enum';
+
 /** The answer when an admin route names an account that does not exist. */
 export const ACCOUNT_NOT_FOUND_MESSAGE = 'Account not found';
 
@@ -45,15 +47,9 @@ export const ADMIN_STATUS_FORBIDDEN_MESSAGE =
   'An administrator account cannot be suspended or reactivated';
 
 /**
- * ACC-16 covers registered users. Moderators are suspended under ACC-15,
- * which extends these routes.
- */
-export const ONLY_USER_STATUS_MESSAGE =
-  'Only registered user accounts can be suspended or reactivated here';
-
-/**
- * ACC-16 / GEN-01: the in-app notification of a suspended account. The user
- * cannot log in while suspended, so it is read after the reactivation.
+ * ACC-16 / GEN-01: the in-app notification of a suspended account, user or
+ * moderator (ACC-15). The account cannot log in while suspended, so it is
+ * read after the reactivation.
  */
 export const ACCOUNT_SUSPENDED_NOTIFICATION =
   'Your account was suspended by an administrator.';
@@ -61,3 +57,30 @@ export const ACCOUNT_SUSPENDED_NOTIFICATION =
 /** ACC-16: another request changed the status between the check and the update. */
 export const ACCOUNT_STATUS_CHANGED_MESSAGE =
   'The account status was changed by another request. Reload it and try again';
+
+/** ACC-15: `:type` of the provider routes is not `hotel` or `airline`. */
+export const PROVIDER_TYPE_MESSAGE = 'type must be one of: hotel, airline';
+
+/** ACC-15: deactivating a hotel or airline that is already deactivated. */
+export const PROVIDER_ALREADY_DEACTIVATED_MESSAGE =
+  'The provider is already deactivated';
+
+/** ACC-15: reactivating a hotel or airline that is active. */
+export const PROVIDER_NOT_DEACTIVATED_MESSAGE =
+  'The provider is not deactivated';
+
+/** ACC-15: another request changed the provider between the check and the update. */
+export const PROVIDER_STATUS_CHANGED_MESSAGE =
+  'The provider status was changed by another request. Reload it and try again';
+
+/**
+ * ACC-15: the in-app notification the moderators of a deactivated hotel or
+ * airline get. It describes the deactivation only, so it stays true when the
+ * provider is reactivated before it is read, and it promises no later notice.
+ */
+export function providerDeactivatedNotification(
+  type: ProviderType,
+  name: string,
+): string {
+  return `Your ${type} "${name}" was deactivated by an administrator. While it is deactivated, it is hidden from search and cannot be booked. Existing confirmed bookings remain valid.`;
+}

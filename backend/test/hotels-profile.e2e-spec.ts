@@ -54,7 +54,7 @@ const validHotel = () => ({
   amenities: ['wifi', 'pool'],
 });
 
-describe('Hotel profile: create and edit (e2e, HTL-01)', () => {
+describe('Hotel profiles (e2e, HTL-01)', () => {
   let app: NestExpressApplication;
   let users: Model<User>;
   let hotels: Model<Hotel>;
@@ -65,6 +65,7 @@ describe('Hotel profile: create and edit (e2e, HTL-01)', () => {
   const cookies = new Map<string, string>();
   /** The hotel the moderator "assigned" manages, stored before the tests. */
   let managedHotelId: string;
+  let otherHotelId: string;
 
   const call = (
     method: 'post' | 'patch',
@@ -103,23 +104,30 @@ describe('Hotel profile: create and edit (e2e, HTL-01)', () => {
       { _id: CITY_A, name: 'HTL-01 test city A', countryCode: COUNTRY_A },
       { _id: CITY_B, name: 'HTL-01 test city B', countryCode: COUNTRY_B },
     ]);
-    const [managed] = await hotels.insertMany([
+    const [managed, otherHotel] = await hotels.insertMany([
       {
         ...validHotel(),
         name: 'Managed hotel',
         countryCode: COUNTRY_A,
         photos: [],
       },
+      {
+        ...validHotel(),
+        name: 'Other managed hotel',
+        countryCode: COUNTRY_A,
+        photos: [],
+      },
     ]);
     managedHotelId = managed._id.toString();
-    createdHotelIds.push(managedHotelId);
+    otherHotelId = otherHotel._id.toString();
+    createdHotelIds.push(managedHotelId, otherHotelId);
 
     const passwordHash = await hash(PASSWORD, 4);
     const accounts: [string, Role, Types.ObjectId | undefined][] = [
       ['admin', Role.Admin, undefined],
       ['user', Role.User, undefined],
       ['assigned', Role.HotelModerator, managed._id],
-      ['otherModerator', Role.HotelModerator, new Types.ObjectId()],
+      ['otherModerator', Role.HotelModerator, otherHotel._id],
     ];
     const inserted = await users.insertMany(
       accounts.map(([label, role, hotelId]) => ({

@@ -3,9 +3,15 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Types } from 'mongoose';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/enums/audit-action.enum';
+import { AuditTargetType } from '../audit/enums/audit-target-type.enum';
+import type { AuditLogResponseDto } from '../audit/dto/audit-log-response.dto';
+import { toAuditLogResponse } from '../audit/mappers/audit-log.mapper';
 import { SessionsService } from '../auth/sessions.service';
 import { ProviderType } from '../common/enums/provider-type.enum';
 import { Role } from '../common/enums/role.enum';
@@ -30,12 +36,18 @@ import {
   ACCOUNT_SUSPENDED_NOTIFICATION,
   ADMIN_PASSWORD_RESET_FORBIDDEN_MESSAGE,
   ADMIN_STATUS_FORBIDDEN_MESSAGE,
-  ONLY_USER_STATUS_MESSAGE,
+  PROVIDER_ALREADY_DEACTIVATED_MESSAGE,
+  PROVIDER_NOT_DEACTIVATED_MESSAGE,
   PROVIDER_NOT_FOUND_MESSAGE,
+  PROVIDER_STATUS_CHANGED_MESSAGE,
+  providerDeactivatedNotification,
 } from './admin.constants';
 import type { CreateModeratorDto } from './dto/create-moderator.dto';
 import type { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
+import type { ListAuditLogsQueryDto } from './dto/list-audit-logs-query.dto';
 import type { ResetPasswordDto } from './dto/reset-password.dto';
+import type { ProviderStatusResponseDto } from './dto/provider-status-response.dto';
+import { toProviderStatusResponse } from './mappers/provider-status.mapper';
 
 /**
  * Account management by an administrator. It never writes to the `users`
@@ -43,12 +55,15 @@ import type { ResetPasswordDto } from './dto/reset-password.dto';
  */
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     private readonly usersService: UsersService,
     private readonly sessions: SessionsService,
     private readonly airlines: AirlinesService,
     private readonly hotels: HotelsService,
     private readonly notifications: NotificationsService,
+    private readonly audit: AuditService,
   ) {}
 
   /**
@@ -57,8 +72,12 @@ export class AdminService {
    * provider type follows the role, and the provider must exist; otherwise
    * 400 on `providerId`. An email that is already registered answers 409.
    * The moderator must change the password at the first login (ACC-08).
+   * The creation is recorded in the audit log (GEN-07).
    */
-  async createModerator(dto: CreateModeratorDto): Promise<UserResponseDto> {
+  async createModerator(
+    dto: CreateModeratorDto,
+    adminId: string,
+  ): Promise<UserResponseDto> {
     const providerType =
       dto.role === Role.AirlineModerator
         ? ProviderType.Airline
@@ -72,6 +91,13 @@ export class AdminService {
       role: dto.role,
       providerType,
       providerId: new Types.ObjectId(dto.providerId),
+    });
+    await this.audit.record({
+      adminId,
+      action: AuditAction.CreateModerator,
+      targetType: AuditTargetType.User,
+      targetId: moderator._id,
+      details: `${dto.role} of ${providerType} ${dto.providerId}`,
     });
     return toUserResponse(moderator);
   }
@@ -117,17 +143,38 @@ export class AdminService {
   }
 
   /**
+   * The audit log of admin actions (GEN-07), newest first, one page at a
+   * time, filtered by action, admin or target.
+   */
+  async listAuditLogs(
+    query: ListAuditLogsQueryDto,
+  ): Promise<PaginatedResponse<AuditLogResponseDto>> {
+    const { items, total } = await this.audit.list(
+      {
+        action: query.action,
+        adminId: query.adminId,
+        targetType: query.targetType,
+        targetId: query.targetId,
+      },
+      { skip: query.skip, limit: query.limit },
+    );
+    return paginate(items.map(toAuditLogResponse), total, query);
+  }
+
+  /**
    * Gives a user or a moderator a temporary password chosen by the admin
    * (ACC-07a). The account must set a new password at its next login, and a
    * login lockout (ACC-05) is cleared so the temporary password works at once.
    * Every session of the account ends, so whoever holds one (the owner, or
    * someone who stole it) must log in with the temporary password. An
    * administrator's password cannot be reset this way, so the admin's own
-   * session is never touched.
+   * session is never touched. The reset is recorded in the audit log
+   * (GEN-07), without the password.
    */
   async resetPassword(
     accountId: string,
     dto: ResetPasswordDto,
+    adminId: string,
   ): Promise<UserResponseDto> {
     const account = await this.usersService.findEntityById(accountId);
     if (!account) {
@@ -144,6 +191,14 @@ export class AdminService {
     if (!updated) {
       throw new NotFoundException(ACCOUNT_NOT_FOUND_MESSAGE);
     }
+    // As soon as the password has changed, so the reset is logged even if
+    // ending the sessions fails below. `record` never throws.
+    await this.audit.record({
+      adminId,
+      action: AuditAction.ResetPassword,
+      targetType: AuditTargetType.User,
+      targetId: updated._id,
+    });
     // After the password, so a failure here never leaves the old password in
     // place.
     await this.sessions.revokeAllOfUser(accountId, new Date());
@@ -151,51 +206,88 @@ export class AdminService {
   }
 
   /**
-   * Suspends a registered user (ACC-16). A suspended user cannot log in or
-   * refresh (403 "Your account is suspended"), and every session of the
-   * account ends at once. The user gets an `account_suspended` notification
-   * (GEN-01), read after a reactivation. Bookings stay valid and content
-   * stays visible: nothing else changes.
+   * Suspends a registered user (ACC-16) or a moderator (ACC-15). A suspended
+   * account cannot log in or refresh (403 "Your account is suspended"), and
+   * every session of the account ends at once. The account gets an
+   * `account_suspended` notification (GEN-01), read after a reactivation.
+   * Bookings stay valid and content stays visible: nothing else changes.
+   * The suspension is recorded in the audit log (GEN-07).
    */
-  async suspend(accountId: string): Promise<UserResponseDto> {
+  async suspend(accountId: string, adminId: string): Promise<UserResponseDto> {
     const updated = await this.changeUserStatus(accountId, {
       from: UserStatus.Active,
       to: UserStatus.Suspended,
       wrongStatusMessage: ACCOUNT_ALREADY_SUSPENDED_MESSAGE,
     });
     // After the status, so a failure here never leaves the account active.
-    // A session this misses (a failure, or a login racing the suspension) is
-    // refused by the guard while suspended and ended by `reactivate`.
-    await this.sessions.revokeAllOfUser(accountId, new Date());
+    // The suspension has happened, so a failure here is logged, not answered
+    // as a 500: a session this misses (a failure, or a login racing the
+    // suspension) is refused by the guard while suspended and ended by
+    // `reactivate`.
+    try {
+      await this.sessions.revokeAllOfUser(accountId, new Date());
+    } catch (error) {
+      this.logger.error(
+        `Ending the sessions of suspended account ${accountId} failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
     // `notify` never throws.
     await this.notifications.notify(
       updated._id,
       NotificationType.AccountSuspended,
       ACCOUNT_SUSPENDED_NOTIFICATION,
     );
+    // `record` never throws.
+    await this.recordStatusChange(adminId, AuditAction.SuspendUser, updated);
     return toUserResponse(updated);
   }
 
   /**
-   * Reactivates a suspended user (ACC-16): the user can log in again, with a
-   * new login. Every session of the account ends first, while it is still
-   * suspended, so no old session comes back, including one a failed or racing
-   * suspension missed. If ending them fails, the account stays suspended and
-   * the admin can retry.
+   * Reactivates a suspended user (ACC-16) or moderator (ACC-15): the account
+   * can log in again, with a new login. Every session of the account ends
+   * first, while it is still suspended, so no old session comes back,
+   * including one a failed or racing suspension missed. If ending them fails,
+   * the account stays suspended and the admin can retry. The reactivation
+   * is recorded in the audit log (GEN-07).
    */
-  async reactivate(accountId: string): Promise<UserResponseDto> {
+  async reactivate(
+    accountId: string,
+    adminId: string,
+  ): Promise<UserResponseDto> {
     const updated = await this.changeUserStatus(accountId, {
       from: UserStatus.Suspended,
       to: UserStatus.Active,
       wrongStatusMessage: ACCOUNT_NOT_SUSPENDED_MESSAGE,
       beforeChange: () => this.sessions.revokeAllOfUser(accountId, new Date()),
     });
+    await this.recordStatusChange(adminId, AuditAction.ReactivateUser, updated);
     return toUserResponse(updated);
   }
 
   /**
-   * The rules both status changes share (ACC-16): the account must exist, be
-   * a registered user, not be deactivated (ACC-12) and have the `from`
+   * GEN-07: one audit record of a suspension or reactivation, with the role
+   * of the account as the note (no name or email). Only after the change
+   * succeeded, so a 404, 403 or 409 records nothing.
+   */
+  private recordStatusChange(
+    adminId: string,
+    action: AuditAction.SuspendUser | AuditAction.ReactivateUser,
+    account: { _id: Types.ObjectId; role: Role },
+  ): Promise<void> {
+    return this.audit.record({
+      adminId,
+      action,
+      targetType: AuditTargetType.User,
+      targetId: account._id,
+      details: account.role,
+    });
+  }
+
+  /**
+   * The rules both status changes share (ACC-16, ACC-15): the account must
+   * exist, be a registered user or a moderator, not be deactivated (ACC-12)
+   * and have the `from`
    * status; the change is one conditional update, so two admins at once
    * cannot both win. `beforeChange` runs after the checks and before the
    * update.
@@ -230,8 +322,9 @@ export class AdminService {
   }
 
   /**
-   * The account whose status an admin changes (ACC-16): 404 when it does not
-   * exist, 403 for an administrator, 400 for a moderator (ACC-15).
+   * The account whose status an admin changes: a registered user (ACC-16) or
+   * a moderator (ACC-15). 404 when it does not exist, 403 for an
+   * administrator.
    */
   private async findUserForStatusChange(accountId: string) {
     const account = await this.usersService.findEntityById(accountId);
@@ -241,9 +334,119 @@ export class AdminService {
     if (account.role === Role.Admin) {
       throw new ForbiddenException(ADMIN_STATUS_FORBIDDEN_MESSAGE);
     }
-    if (account.role !== Role.User) {
-      throw new BadRequestException(ONLY_USER_STATUS_MESSAGE);
-    }
     return account;
+  }
+
+  // ---- Moderator suspension and provider status (ACC-15) ----
+
+  /**
+   * Deactivates a hotel or airline (ACC-15): it is hidden from search and
+   * cannot be booked, while its existing confirmed bookings remain valid. Its
+   * moderator accounts keep their status (suspending them is separate), and
+   * each of them gets an in-app notification. The deactivation is recorded
+   * in the audit log (GEN-07).
+   */
+  async deactivateProvider(
+    type: ProviderType,
+    id: string,
+    adminId: string,
+  ): Promise<ProviderStatusResponseDto> {
+    const updated = await this.changeProviderActive(type, id, false);
+    // After the update, so a notification never announces a change that
+    // failed. The change has happened, so a failure to tell the moderators is
+    // logged, not answered as a 500. No link, for hotels and airlines alike:
+    // the provider is now hidden, and notification links have no airline
+    // kind (GEN-01), so both kinds get the same notice.
+    try {
+      const moderatorIds = await this.usersService.findModeratorIdsOfProvider(
+        type,
+        updated._id,
+      );
+      await this.notifications.notifyMany(
+        moderatorIds,
+        NotificationType.ProviderDeactivated,
+        providerDeactivatedNotification(type, updated.name),
+      );
+    } catch (error) {
+      this.logger.error(
+        `Telling the moderators of ${type} ${id} about its deactivation failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+    await this.recordProviderChange(
+      adminId,
+      AuditAction.DeactivateProvider,
+      type,
+      updated,
+    );
+    return toProviderStatusResponse(type, updated);
+  }
+
+  /**
+   * Makes a deactivated hotel or airline active again (ACC-15), recorded in
+   * the audit log (GEN-07).
+   */
+  async reactivateProvider(
+    type: ProviderType,
+    id: string,
+    adminId: string,
+  ): Promise<ProviderStatusResponseDto> {
+    const updated = await this.changeProviderActive(type, id, true);
+    await this.recordProviderChange(
+      adminId,
+      AuditAction.ReactivateProvider,
+      type,
+      updated,
+    );
+    return toProviderStatusResponse(type, updated);
+  }
+
+  /**
+   * GEN-07: one audit record of a provider status change. The target type
+   * is the provider's own kind (`hotel` or `airline`) and the note is its
+   * name, which is public. Only after the change succeeded.
+   */
+  private recordProviderChange(
+    adminId: string,
+    action: AuditAction.DeactivateProvider | AuditAction.ReactivateProvider,
+    type: ProviderType,
+    provider: { _id: Types.ObjectId; name: string },
+  ): Promise<void> {
+    return this.audit.record({
+      adminId,
+      action,
+      targetType:
+        type === ProviderType.Airline
+          ? AuditTargetType.Airline
+          : AuditTargetType.Hotel,
+      targetId: provider._id,
+      details: provider.name,
+    });
+  }
+
+  /**
+   * Sets `active` through the module that owns the provider. 404 when it
+   * does not exist, 409 when it already has that value or another request
+   * changed it between the check and the update.
+   */
+  private async changeProviderActive(
+    type: ProviderType,
+    id: string,
+    active: boolean,
+  ) {
+    const owner = type === ProviderType.Airline ? this.airlines : this.hotels;
+    const provider = await owner.findEntityOrThrow(id);
+    if (provider.active === active) {
+      throw new ConflictException(
+        active
+          ? PROVIDER_NOT_DEACTIVATED_MESSAGE
+          : PROVIDER_ALREADY_DEACTIVATED_MESSAGE,
+      );
+    }
+    const updated = await owner.setActive(id, active);
+    if (!updated) {
+      throw new ConflictException(PROVIDER_STATUS_CHANGED_MESSAGE);
+    }
+    return updated;
   }
 }
