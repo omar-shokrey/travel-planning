@@ -16,17 +16,18 @@ The audit log of administrator actions (GEN-07): "The system shall keep an audit
 
 ## Actions
 
-| `action`              | `targetType`                             | Requirement | Recorded                                            |
-| --------------------- | ---------------------------------------- | ----------- | --------------------------------------------------- |
-| `reset_password`      | `user`                                   | ACC-07a     | Yes, in `AdminService.resetPassword`                |
-| `create_moderator`    | `user`                                   | ACC-13      | Yes, in `AdminService.createModerator`              |
-| `suspend_user`        | `user`                                   | ACC-15/16   | Yes, in `AdminService.suspend`                      |
-| `reactivate_user`     | `user`                                   | ACC-15/16   | Yes, in `AdminService.reactivate`                   |
-| `deactivate_provider` | `airline`, `hotel`                       | ACC-15      | Yes, in `AdminService.deactivateProvider`           |
-| `reactivate_provider` | `airline`, `hotel`                       | ACC-15      | Yes, in `AdminService.reactivateProvider`           |
-| `dismiss_report`      | `report`                                 | GEN-10      | Planned, with `PATCH /api/admin/reports/:id`        |
-| `hide_content`        | `post`, `comment`, `review`, `itinerary` | GEN-10      | Planned, with report handling and direct hiding     |
-| `delete_content`      | `post`, `comment`, `review`, `itinerary` | GEN-10      | Planned, with `DELETE /api/admin/content/:type/:id` |
+| `action`              | `targetType`                             | Requirement | Recorded                                         |
+| --------------------- | ---------------------------------------- | ----------- | ------------------------------------------------ |
+| `reset_password`      | `user`                                   | ACC-07a     | Yes, in `AdminService.resetPassword`             |
+| `create_moderator`    | `user`                                   | ACC-13      | Yes, in `AdminService.createModerator`           |
+| `suspend_user`        | `user`                                   | ACC-15/16   | Yes, in `AdminService.suspend`                   |
+| `reactivate_user`     | `user`                                   | ACC-15/16   | Yes, in `AdminService.reactivate`                |
+| `deactivate_provider` | `airline`, `hotel`                       | ACC-15      | Yes, in `AdminService.deactivateProvider`        |
+| `reactivate_provider` | `airline`, `hotel`                       | ACC-15      | Yes, in `AdminService.reactivateProvider`        |
+| `dismiss_report`      | `report`                                 | GEN-10      | Yes, in `AdminModerationService.resolveReport`   |
+| `hide_content`        | `post`, `comment`, `review`, `itinerary` | GEN-10      | Yes, through a report and directly               |
+| `show_content`        | `post`, `comment`, `review`, `itinerary` | GEN-10      | Yes, in `AdminModerationService.moderateContent` |
+| `delete_content`      | `post`, `comment`, `review`, `itinerary` | GEN-10      | Yes, through a report and directly               |
 
 `suspend_user` and `reactivate_user` cover every account (users and moderators): a moderator account is a user record with a moderator role.
 

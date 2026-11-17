@@ -25,6 +25,7 @@ import { ReportStatus } from './../src/reports/enums/report-status.enum';
 import { ReportTargetType } from './../src/reports/enums/report-target-type.enum';
 import { Report } from './../src/reports/models/report.schema';
 import { User } from './../src/users/models/user.schema';
+import { deleteAuditLogsOf } from './support/delete-audit-logs';
 import { deleteSessionsOf } from './support/delete-sessions';
 
 const PASSWORD = 'Passw0rdOK';
@@ -263,6 +264,8 @@ describe('Admin report handling and moderation (e2e, GEN-10)', () => {
     for (const userId of createdUserIds) {
       await deleteSessionsOf(app, userId);
     }
+    // The audit records (GEN-07) the admin's actions wrote, by admin id.
+    await deleteAuditLogsOf(app, createdUserIds);
     for (const userId of createdUserIds) {
       await users.findByIdAndDelete(userId);
     }
@@ -703,6 +706,47 @@ describe('Admin report handling and moderation (e2e, GEN-10)', () => {
           )
         ).status,
       ).toBe(401);
+    });
+  });
+
+  describe('audit records (GEN-07)', () => {
+    it('records every moderation action of the admin, after the actions above', async () => {
+      const response = await call(
+        'admin',
+        'get',
+        `/api/admin/audit-logs?adminId=${id('admin')}&limit=50`,
+      );
+
+      expect(response.status).toBe(200);
+      const items = response.body.items as {
+        action: string;
+        targetType: string;
+        targetId: string;
+        details: string | null;
+      }[];
+      const actions = new Set(items.map((item) => item.action));
+      for (const action of [
+        'dismiss_report',
+        'hide_content',
+        'delete_content',
+      ]) {
+        expect(actions).toContain(action);
+      }
+      // A dismissal targets the report; hiding through a report names it.
+      expect(items).toContainEqual(
+        expect.objectContaining({
+          action: 'dismiss_report',
+          targetType: 'report',
+          targetId: id('rDismiss'),
+        }),
+      );
+      expect(items).toContainEqual(
+        expect.objectContaining({
+          action: 'hide_content',
+          targetType: 'post',
+          details: `report ${id('rHide')}`,
+        }),
+      );
     });
   });
 

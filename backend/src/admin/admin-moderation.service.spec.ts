@@ -1,3 +1,4 @@
+import type { AuditService } from '../audit/audit.service';
 import { ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import type { PostsService } from '../blog/posts.service';
@@ -62,13 +63,16 @@ function setup(targetType = ReportTargetType.Post) {
   const posts = content();
   const itineraries = content();
   const uploads = { deleteImage: jest.fn().mockResolvedValue(undefined) };
+  // GEN-07: `record` never throws.
+  const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const service = new AdminModerationService(
     reports as unknown as ReportsService,
     posts as unknown as PostsService,
     itineraries as unknown as ItinerariesService,
     uploads as unknown as UploadsService,
+    audit as unknown as AuditService,
   );
-  return { service, reports, posts, itineraries, uploads };
+  return { service, reports, posts, itineraries, uploads, audit };
 }
 
 describe('AdminModerationService (GEN-10)', () => {
@@ -413,6 +417,121 @@ describe('AdminModerationService (GEN-10)', () => {
         service.deleteContent(ReportTargetType.Post, 'post-1', ADMIN),
       ).rejects.toThrow(new NotFoundException('Post not found'));
       expect(reports.resolveOpenOfTarget).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('audit records (GEN-07)', () => {
+    it('dismissing records dismiss_report on the report, with what it was about', async () => {
+      const { service, audit } = setup();
+
+      await service.resolveReport(
+        REPORT_ID.toString(),
+        ReportAction.Dismiss,
+        ADMIN,
+      );
+
+      expect(audit.record).toHaveBeenCalledWith({
+        adminId: ADMIN,
+        action: 'dismiss_report',
+        targetType: 'report',
+        targetId: REPORT_ID.toString(),
+        details: `post ${TARGET.toString()}`,
+      });
+    });
+
+    it.each([
+      [ReportAction.Hide, 'hide_content'],
+      [ReportAction.Delete, 'delete_content'],
+    ])(
+      'resolving with %s records %s on the content, naming the report',
+      async (action, recorded) => {
+        const { service, reports, audit } = setup(ReportTargetType.Itinerary);
+
+        await service.resolveReport(REPORT_ID.toString(), action, ADMIN);
+
+        expect(audit.record).toHaveBeenCalledWith({
+          adminId: ADMIN,
+          action: recorded,
+          targetType: 'itinerary',
+          targetId: TARGET.toString(),
+          details: `report ${REPORT_ID.toString()}`,
+        });
+        expect(
+          reports.resolveOpenOfTarget.mock.invocationCallOrder[0],
+        ).toBeLessThan(audit.record.mock.invocationCallOrder[0]);
+      },
+    );
+
+    it('records nothing when the report was already resolved', async () => {
+      const { service, reports, audit } = setup();
+      reports.resolve.mockResolvedValue(null);
+
+      await expect(
+        service.resolveReport(REPORT_ID.toString(), ReportAction.Hide, ADMIN),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [ContentModeration.Hidden, 'hide_content'],
+      [ContentModeration.Visible, 'show_content'],
+    ])(
+      'direct moderation to %s records %s on the content',
+      async (moderation, recorded) => {
+        const { service, audit } = setup();
+
+        await service.moderateContent(
+          ReportTargetType.Post,
+          TARGET.toString(),
+          moderation,
+          ADMIN,
+        );
+
+        expect(audit.record).toHaveBeenCalledWith({
+          adminId: ADMIN,
+          action: recorded,
+          targetType: 'post',
+          targetId: TARGET.toString(),
+        });
+      },
+    );
+
+    it('direct moderation that changes nothing records nothing', async () => {
+      const { service, posts, audit } = setup();
+      posts.setHidden.mockResolvedValue(false);
+
+      await expect(
+        service.moderateContent(
+          ReportTargetType.Post,
+          TARGET.toString(),
+          ContentModeration.Hidden,
+          ADMIN,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('a direct delete records delete_content, and a missing item records nothing', async () => {
+      const { service, posts, audit } = setup();
+
+      await service.deleteContent(
+        ReportTargetType.Post,
+        TARGET.toString(),
+        ADMIN,
+      );
+      expect(audit.record).toHaveBeenCalledWith({
+        adminId: ADMIN,
+        action: 'delete_content',
+        targetType: 'post',
+        targetId: TARGET.toString(),
+      });
+
+      audit.record.mockClear();
+      posts.removeByAdmin.mockResolvedValue(null);
+      await expect(
+        service.deleteContent(ReportTargetType.Post, TARGET.toString(), ADMIN),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 });

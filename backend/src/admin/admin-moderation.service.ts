@@ -4,6 +4,9 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/enums/audit-action.enum';
+import { AuditTargetType } from '../audit/enums/audit-target-type.enum';
 import { PostsService } from '../blog/posts.service';
 import {
   paginate,
@@ -30,6 +33,12 @@ import type { ContentModerationResponseDto } from './dto/content-moderation-resp
 import type { ListReportsQueryDto } from './dto/list-reports-query.dto';
 import { ContentModeration } from './enums/content-moderation.enum';
 
+/** The audit target type (GEN-07) of each kind of reported content. */
+const CONTENT_AUDIT_TARGET: Record<ReportTargetType, AuditTargetType> = {
+  [ReportTargetType.Post]: AuditTargetType.Post,
+  [ReportTargetType.Itinerary]: AuditTargetType.Itinerary,
+};
+
 /**
  * GEN-10: the admin's report queue and content moderation. The reports belong
  * to `ReportsService`, the posts to `PostsService` and the itineraries to
@@ -45,6 +54,7 @@ export class AdminModerationService {
     private readonly posts: PostsService,
     private readonly itineraries: ItinerariesService,
     private readonly uploads: UploadsService,
+    private readonly audit: AuditService,
   ) {}
 
   /** GEN-10: one page of reports, open ones by default, oldest first. */
@@ -103,6 +113,14 @@ export class AdminModerationService {
     }
 
     if (action === ReportAction.Dismiss) {
+      // GEN-07: the report is the target; the note names what it was about.
+      await this.audit.record({
+        adminId,
+        action: AuditAction.DismissReport,
+        targetType: AuditTargetType.Report,
+        targetId: id,
+        details: `${targetType} ${targetId}`,
+      });
       return toAdminReportResponse(resolved);
     }
     let images: string[] = [];
@@ -120,6 +138,17 @@ export class AdminModerationService {
       adminId,
       resolvedAt,
     );
+    // GEN-07: the content is the target; the note names the report.
+    await this.audit.record({
+      adminId,
+      action:
+        action === ReportAction.Hide
+          ? AuditAction.HideContent
+          : AuditAction.DeleteContent,
+      targetType: CONTENT_AUDIT_TARGET[targetType],
+      targetId,
+      details: `report ${id}`,
+    });
     await this.deleteImages(images);
     return toAdminReportResponse(resolved);
   }
@@ -153,6 +182,12 @@ export class AdminModerationService {
         new Date(),
       );
     }
+    await this.audit.record({
+      adminId,
+      action: hidden ? AuditAction.HideContent : AuditAction.ShowContent,
+      targetType: CONTENT_AUDIT_TARGET[type],
+      targetId: id,
+    });
     return { type, id, moderation };
   }
 
@@ -177,6 +212,12 @@ export class AdminModerationService {
       adminId,
       new Date(),
     );
+    await this.audit.record({
+      adminId,
+      action: AuditAction.DeleteContent,
+      targetType: CONTENT_AUDIT_TARGET[type],
+      targetId: id,
+    });
     await this.deleteImages(images);
   }
 
