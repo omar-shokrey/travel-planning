@@ -95,3 +95,5 @@ export type HotelDocument = HydratedDocument<Hotel>;
 export const HotelSchema = SchemaFactory.createForClass(Hotel);
 
 HotelSchema.index({ cityId: 1, active: 1 });
+// Hotel search by country (HTL-11).
+HotelSchema.index({ countryCode: 1, active: 1 });

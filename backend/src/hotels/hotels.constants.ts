@@ -19,3 +19,7 @@ export const ROOM_BLOCK_MAX_NIGHTS = 366;
 
 /** HTL-08 and HTL-15: a date range in a query spans at most this many nights. */
 export const ROOM_QUERY_MAX_NIGHTS = 366;
+
+/** HTL-11: the most guests and rooms one hotel search can ask for. */
+export const HOTEL_SEARCH_MAX_GUESTS = 40;
+export const HOTEL_SEARCH_MAX_ROOMS = 10;

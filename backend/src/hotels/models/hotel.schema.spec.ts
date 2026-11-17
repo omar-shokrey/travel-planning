@@ -64,4 +64,11 @@ describe('Hotel model (HTL-01)', () => {
       expect.any(Object),
     ]);
   });
+
+  it('indexes country and active status together for search (HTL-11)', () => {
+    expect(HotelSchema.indexes()).toContainEqual([
+      { countryCode: 1, active: 1 },
+      expect.any(Object),
+    ]);
+  });
 });
