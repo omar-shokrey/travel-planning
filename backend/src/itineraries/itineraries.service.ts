@@ -394,6 +394,26 @@ export class ItinerariesService {
     }
   }
 
+  /**
+   * For the admin module (GEN-10): any itinerary with its days, whoever owns
+   * it and hidden or not ("hidden content is visible only to its author and
+   * admins"), and whether an admin hid it; null when there is no such
+   * itinerary. Not exposed by an itineraries controller.
+   */
+  async findForAdmin(id: string): Promise<{
+    itinerary: ItineraryDetailResponseDto;
+    hidden: boolean;
+  } | null> {
+    const itinerary = await this.itineraries.findById(id).exec();
+    if (!itinerary) {
+      return null;
+    }
+    return {
+      itinerary: toItineraryDetailResponse(itinerary),
+      hidden: itinerary.moderation === ItineraryModeration.Hidden,
+    };
+  }
+
   /** For the admin module (GEN-10): whether an itinerary with this id exists. */
   async existsById(id: string): Promise<boolean> {
     // A count, not exists(): a findOne that matched stalled in local e2e runs

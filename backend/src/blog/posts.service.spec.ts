@@ -1,6 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { Types } from 'mongoose';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { PostModeration } from './models/post-moderation.enum';
+import { PostStatus } from './models/post-status.enum';
 import { PostsService } from './posts.service';
+import { visiblePublishedPost } from './visible-post.filter';
 
 /** A comments or likes model whose deleteMany removes `count` records. */
 const engagement = (count = 0) => ({
@@ -8,9 +12,6 @@ const engagement = (count = 0) => ({
     exec: () => Promise.resolve({ deletedCount: count }),
   })),
 });
-import { PostModeration } from './models/post-moderation.enum';
-import { PostStatus } from './models/post-status.enum';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 describe('PostsService', () => {
   describe('findPublishedSummary (GEN-09, GEN-10)', () => {
@@ -103,6 +104,75 @@ describe('PostsService', () => {
 
       expect(await service.existsById('post-1')).toBe(expected);
       expect(posts.countDocuments).toHaveBeenCalledWith({ _id: 'post-1' });
+    });
+
+    it.each([
+      [1, true],
+      [0, false],
+    ])(
+      'isVisibleTo (GEN-09): a count of %p is %p, by the visiblePublishedPost rule',
+      async (count, expected) => {
+        const { service, posts } = model(count);
+        const postId = '507f1f77bcf86cd799439012';
+        const viewerId = '507f1f77bcf86cd799439011';
+
+        expect(await service.isVisibleTo(postId, viewerId)).toBe(expected);
+        expect(posts.countDocuments).toHaveBeenCalledWith(
+          visiblePublishedPost(postId, viewerId),
+        );
+      },
+    );
+
+    it.each([
+      [PostModeration.Hidden, true],
+      [PostModeration.Visible, false],
+    ])(
+      'findForAdmin: any post, moderation %p is hidden=%p',
+      async (moderation, hidden) => {
+        const postId = new Types.ObjectId();
+        const authorId = new Types.ObjectId();
+        const { service } = model(null);
+        const posts = {
+          findById: jest.fn().mockReturnValue({
+            exec: () =>
+              Promise.resolve({
+                _id: postId,
+                authorId,
+                title: 'Draft',
+                body: 'Body',
+                status: PostStatus.Draft,
+                moderation,
+                tags: [],
+                images: [],
+                createdAt: new Date('2026-11-17T10:00:00.000Z'),
+                updatedAt: new Date('2026-11-17T10:00:00.000Z'),
+              }),
+          }),
+        };
+        Object.assign(service, { posts });
+
+        const found = await service.findForAdmin(postId.toString());
+
+        expect(posts.findById).toHaveBeenCalledWith(postId.toString());
+        expect(found).toEqual({
+          hidden,
+          post: expect.objectContaining({
+            id: postId.toString(),
+            authorId: authorId.toString(),
+            status: PostStatus.Draft,
+            createdAt: '2026-11-17T10:00:00.000Z',
+          }),
+        });
+      },
+    );
+
+    it('findForAdmin: null when there is no such post', async () => {
+      const { service } = model(null);
+      Object.assign(service, {
+        posts: { findById: () => ({ exec: () => Promise.resolve(null) }) },
+      });
+
+      expect(await service.findForAdmin('507f1f77bcf86cd799439012')).toBeNull();
     });
 
     it('hides a post that is not hidden yet, in one conditional update', async () => {
