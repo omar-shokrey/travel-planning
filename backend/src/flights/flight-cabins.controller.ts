@@ -20,6 +20,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { PLATFORM_CURRENCY } from '../common/constants/currency';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
@@ -28,7 +29,6 @@ import { CreateCabinDto } from './dto/create-cabin.dto';
 import { FlightResponseDto } from './dto/flight-response.dto';
 import { UpdateCabinDto } from './dto/update-cabin.dto';
 import { FlightCabinsService } from './flight-cabins.service';
-import { PLATFORM_CURRENCY } from '../common/constants/currency';
 import {
   CABIN_BAG_WEIGHT_MAX_KG,
   CABIN_CHANGED_MESSAGE,
@@ -36,6 +36,7 @@ import {
   CABIN_NOT_FOUND_MESSAGE,
   CABIN_PRICE_MAX,
   CABIN_SEATS_MAX,
+  CABIN_UPDATE_ATTEMPTS,
   duplicateCabinMessage,
   EMPTY_CABIN_UPDATE_MESSAGE,
   FLIGHT_CHANGED_MESSAGE,
@@ -127,7 +128,7 @@ export class FlightCabinsController {
     description: `"${FLIGHT_NOT_FOUND_MESSAGE}", "${CABIN_NOT_FOUND_MESSAGE}", or "Airline not found": the moderator's assignment names an airline that no longer exists`,
   })
   @ApiConflictResponse({
-    description: `"${FLIGHT_NOT_SCHEDULED_MESSAGE}" (cancelled or departed), or "${CABIN_CHANGED_MESSAGE}" (a booking changed the cabin's seats three times in a row)`,
+    description: `"${FLIGHT_NOT_SCHEDULED_MESSAGE}" (cancelled or departed), or "${CABIN_CHANGED_MESSAGE}" (the cabin's seats or the flight changed between the read and the write ${CABIN_UPDATE_ATTEMPTS} times in a row, for example because of bookings)`,
   })
   updateCabin(
     @Param('id', ParseObjectIdPipe) flightId: string,
