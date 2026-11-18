@@ -118,6 +118,38 @@ describe('ItinerariesService', () => {
     const id = new Types.ObjectId().toString();
 
     it.each([
+      [ItineraryModeration.Hidden, true],
+      [ItineraryModeration.Visible, false],
+    ])(
+      'findForAdmin: any itinerary with its days, moderation %p is hidden=%p',
+      async (moderation, hidden) => {
+        const itinerary = stored();
+        itinerary.moderation = moderation;
+        const spy = jest
+          .spyOn(ItineraryModel, 'findById')
+          .mockReturnValue(query(itinerary) as never);
+
+        const found = await service.findForAdmin(id);
+
+        expect(spy).toHaveBeenCalledWith(id);
+        expect(found?.hidden).toBe(hidden);
+        expect(found?.itinerary).toMatchObject({
+          id: itinerary._id.toString(),
+          ownerId: itinerary.ownerId.toString(),
+          days: expect.any(Array),
+        });
+      },
+    );
+
+    it('findForAdmin: null when there is no such itinerary', async () => {
+      jest
+        .spyOn(ItineraryModel, 'findById')
+        .mockReturnValue(query(null) as never);
+
+      expect(await service.findForAdmin(id)).toBeNull();
+    });
+
+    it.each([
       [1, true],
       [0, false],
     ])('existsById: a count of %p is %p', async (count, expected) => {
@@ -215,6 +247,7 @@ describe('ItinerariesService', () => {
         countries: ['EG'],
         startDate: '2026-12-20',
         visibility: ItineraryVisibility.Private,
+        moderation: ItineraryModeration.Visible,
         dayCount: 0,
       });
       expect(createSpy).toHaveBeenCalledTimes(1);
@@ -319,6 +352,7 @@ describe('ItinerariesService', () => {
           countries: ['EG'],
           startDate: '2026-12-20',
           visibility: ItineraryVisibility.Private,
+          moderation: ItineraryModeration.Visible,
           dayCount: 0,
         },
       ]);
@@ -448,17 +482,48 @@ describe('ItinerariesService', () => {
       expect(itinerary.visibility).toBe(ItineraryVisibility.Private);
     });
 
-    it('leaves a field that is sent as null unchanged', async () => {
+    it('answers 400 for a field sent as null and changes nothing', async () => {
       const itinerary = stored();
-      const dto = { title: null, countries: null, startDate: null };
+      const dto = { title: null, visibility: null };
 
-      const response = await service.update(
-        itinerary.id as string,
-        dto as never,
-        ownerId,
-      );
+      await expect(
+        service.update(itinerary.id as string, dto as never, ownerId),
+      ).rejects.toThrow(BadRequestException);
+      expect(itinerary.save).not.toHaveBeenCalled();
+      expect(itinerary.title).toBe(createDto.title);
+    });
 
-      expect(response).toMatchObject(createDto);
+    it('names every null field in the 400 answer', async () => {
+      const itinerary = stored();
+
+      const error = (await service
+        .update(
+          itinerary.id as string,
+          { title: null, startDate: null } as never,
+          ownerId,
+        )
+        .catch((caught: unknown) => caught)) as BadRequestException;
+
+      expect(error.getResponse()).toEqual({
+        message: 'Validation failed',
+        errors: [
+          { field: 'startDate', messages: ['startDate must not be null'] },
+          { field: 'title', messages: ['title must not be null'] },
+        ],
+      });
+    });
+
+    it('answers 409 when the itinerary was changed at the same moment', async () => {
+      const itinerary = stored();
+      jest
+        .spyOn(itinerary, 'save')
+        .mockRejectedValue(
+          new MongooseError.VersionError(itinerary, 0, ['countries']),
+        );
+
+      await expect(
+        service.update(itinerary.id as string, { countries: ['AE'] }, ownerId),
+      ).rejects.toThrow(new ConflictException(ITINERARY_CHANGED_MESSAGE));
     });
 
     it('answers 404 when the itinerary does not exist', async () => {
@@ -692,6 +757,21 @@ describe('ItinerariesService', () => {
       );
 
       expect(response.days[1]).not.toHaveProperty('notes');
+    });
+
+    it('answers 400 for a field sent as null and changes nothing', async () => {
+      const { itinerary, dayId } = withDays();
+
+      await expect(
+        service.updateDay(
+          itinerary.id as string,
+          dayId,
+          { cityId: null, notes: 'x' } as never,
+          ownerId,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(itinerary.save).not.toHaveBeenCalled();
+      expect(itinerary.days[1].notes).toBe('Museum');
     });
 
     it('answers 404 when the day is not in the itinerary', async () => {

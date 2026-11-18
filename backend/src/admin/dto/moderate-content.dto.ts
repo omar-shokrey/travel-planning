@@ -3,8 +3,8 @@ import { IsEnum } from 'class-validator';
 import { ContentModeration } from '../enums/content-moderation.enum';
 
 /**
- * `PATCH /api/admin/content/:type/:id` (GEN-10): hide a post or an itinerary
- * directly, or show it again. Required, `null` included.
+ * `PATCH /api/admin/content/:type/:id` (GEN-10): hide a post, a comment or an
+ * itinerary directly, or show it again. Required, `null` included.
  */
 export class ModerateContentDto {
   @ApiProperty({
