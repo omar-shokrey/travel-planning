@@ -60,7 +60,14 @@ export function configureApp(app: NestExpressApplication): void {
   app.useGlobalFilters(new AllExceptionsFilter());
 }
 
-/** Swagger UI at /api/docs and the JSON document at /api/docs-json. */
+/**
+ * Swagger UI at /api/docs and the JSON document at /api/docs-json.
+ *
+ * Authorization is not persisted (ACC-19): with `persistAuthorization`,
+ * Swagger UI keeps whatever is typed into Authorize in `localStorage` and,
+ * for the cookie scheme, writes it as a cookie that JavaScript can read.
+ * Nothing needs keeping: POST /api/auth/login sets the httpOnly cookies.
+ */
 export function setupSwagger(app: INestApplication): void {
   const options = new DocumentBuilder()
     .setTitle('Travel Planning and Booking Platform API')
@@ -75,6 +82,5 @@ export function setupSwagger(app: INestApplication): void {
     'api/docs',
     app,
     SwaggerModule.createDocument(app, options),
-    { swaggerOptions: { persistAuthorization: true } },
   );
 }
