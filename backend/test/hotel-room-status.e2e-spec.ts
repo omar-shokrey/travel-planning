@@ -275,6 +275,27 @@ describe('Room status for a date range (e2e, HTL-08)', () => {
     });
   });
 
+  it('sorts room numbers with their digits compared as numbers: 2, 9, 10', async () => {
+    // Created in this order so that the order they were stored in is not
+    // the answer. As plain text the order would be 10, 101, 2, 9. They go
+    // to the other hotel, so the tests on the managed hotel keep their rooms;
+    // afterAll deletes them by id.
+    for (const number of ['10', '2', '9']) {
+      await createRoom(otherHotelId, number);
+    }
+
+    const response = await status(
+      'otherModerator',
+      { from: '2026-12-01', to: '2026-12-02' },
+      () => otherHotelId,
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      response.body.items.map((room: { number: string }) => room.number),
+    ).toEqual(['2', '9', '10', '101']);
+  });
+
   it.each([
     [{}],
     [{ from: '2026-12-01' }],

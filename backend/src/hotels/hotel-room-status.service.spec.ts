@@ -17,13 +17,21 @@ const range = (from: string, to: string) => ({ from, to });
 const query = <T>(value: T) => {
   const chain = {
     select: jest.fn(),
+    collation: jest.fn(),
     sort: jest.fn(),
     skip: jest.fn(),
     limit: jest.fn(),
     lean: jest.fn(),
     exec: jest.fn().mockResolvedValue(value),
   };
-  for (const step of ['select', 'sort', 'skip', 'limit', 'lean'] as const) {
+  for (const step of [
+    'select',
+    'collation',
+    'sort',
+    'skip',
+    'limit',
+    'lean',
+  ] as const) {
     chain[step].mockReturnValue(chain);
   }
   return chain;
@@ -144,6 +152,22 @@ describe('HotelRoomStatusService (HTL-08)', () => {
       ],
       meta: { page: 1, limit: 10, total: 2, totalPages: 1 },
     });
+  });
+
+  it('sorts the room numbers with their digits compared as numbers', async () => {
+    const { service, roomsFind } = setup();
+
+    await service.findStatus(
+      HOTEL_ID,
+      roomQuery('2026-12-01', '2026-12-02'),
+      USER_ID,
+    );
+
+    expect(roomsFind.collation).toHaveBeenCalledWith({
+      locale: 'en',
+      numericOrdering: true,
+    });
+    expect(roomsFind.sort).toHaveBeenCalledWith({ number: 1, _id: 1 });
   });
 
   it('pages through the rooms of the hotel only, sorted by number', async () => {

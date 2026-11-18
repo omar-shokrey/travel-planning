@@ -52,6 +52,9 @@ export class HotelRoomStatusService {
       this.rooms
         .find(filter)
         .select('number type active availability')
+        // A room number is free text: compare its digits as numbers, so
+        // room "2" comes before room "10".
+        .collation({ locale: 'en', numericOrdering: true })
         .sort({ number: 1, _id: 1 })
         .skip(query.skip)
         .limit(query.limit)

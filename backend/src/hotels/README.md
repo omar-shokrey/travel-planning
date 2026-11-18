@@ -119,7 +119,7 @@ hotel, so callers cannot choose a mismatched country.
 ## Room status for a date range (HTL-08)
 
 - `GET /api/hotels/:id/availability?from=YYYY-MM-DD&to=YYYY-MM-DD` is the route of the endpoint table. Only the moderator assigned to the hotel may call it. `from` is the first night and `to` the day after the last night, as for the availability ranges of HTL-04.
-- Every room of the hotel is listed, deactivated ones too (with `active: false`), because the moderator manages them all. The rooms are paginated (GEN-05) and sorted by room number.
+- Every room of the hotel is listed, deactivated ones too (with `active: false`), because the moderator manages them all. The rooms are paginated (GEN-05) and sorted by room number, with the digits compared as numbers (a MongoDB collation with `numericOrdering`), so room 2 comes before room 10. A room number is free text, and a plain text sort would put "10" before "2".
 - Each room has `segments`: the whole range in order, with no gap. Consecutive nights with the same status and the same reservation are joined, so a long range stays short.
 - The statuses are the three of the workbook plus one: `available`, `booked`, `blocked`, and `unavailable` for a night outside every availability range of the room. Calling such a night "available" would be wrong, because it cannot be booked.
 - A night held by a reservation in Pending Payment whose hold has not expired is `booked` with `pendingPayment: true`, because HTL-06 also treats it as reserved. A hold whose time has passed is ignored, as everywhere else.
