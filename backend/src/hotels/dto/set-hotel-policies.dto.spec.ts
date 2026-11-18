@@ -121,6 +121,18 @@ describe('SetHotelPoliciesDto', () => {
       );
     });
 
+    it.each([
+      ['a list', [[{ daysBefore: 7, refundPercent: 50 }]]],
+      ['an empty list', [[]]],
+      ['null', [null]],
+      ['a number', [7]],
+      ['text', ['7 days']],
+    ])('rejects a tier that is %s instead of an object', async (_, tiers) => {
+      expect(await tierMessages(tiers)).toContain(
+        'Each cancellation tier must be an object',
+      );
+    });
+
     it('rejects a missing tier list and a value that is not a list', async () => {
       const { cancellationTiers: _tiers, ...withoutTiers } = VALID;
 

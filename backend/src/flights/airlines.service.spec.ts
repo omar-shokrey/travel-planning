@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -309,6 +310,35 @@ describe('AirlinesService', () => {
       await expect(
         service.update(AIRLINE_ID, MODERATOR_ID, { name: 'Changed' }),
       ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+      expect(uploadsService.saveImage).not.toHaveBeenCalled();
+    });
+
+    it('answers 403 when the moderator account no longer exists, as the policy route does', async () => {
+      const { model, service, usersService } = setup();
+      usersService.findEntityById.mockResolvedValue(null);
+
+      await expect(
+        service.update(AIRLINE_ID, MODERATOR_ID, { name: 'Changed' }),
+      ).rejects.toThrow(
+        new ForbiddenException('You can only edit your assigned airline'),
+      );
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('answers 400 for a field sent as null, before reading anything', async () => {
+      const { model, service, uploadsService } = setup();
+
+      const error = (await service
+        .update(AIRLINE_ID, MODERATOR_ID, { name: 'Kept', code: null } as never)
+        .catch((caught: unknown) => caught)) as BadRequestException;
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(error.getResponse()).toEqual({
+        message: 'Validation failed',
+        errors: [{ field: 'code', messages: ['code must not be null'] }],
+      });
+      expect(model.findById).not.toHaveBeenCalled();
       expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
       expect(uploadsService.saveImage).not.toHaveBeenCalled();
     });

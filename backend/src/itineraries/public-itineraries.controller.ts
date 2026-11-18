@@ -3,6 +3,7 @@ import {
   ApiBadRequestResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -13,7 +14,9 @@ import {
 import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
 import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
+import { Role } from '../common/enums/role.enum';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
 import {
@@ -26,7 +29,10 @@ import { PublicItinerariesService } from './public-itineraries.service';
 /**
  * ITN-21. The two read routes are public and sit under /api/itineraries/public/,
  * the only public part of /api/itineraries (see test/guest-access.e2e-spec.ts).
- * Clone needs a login.
+ * Clone needs a login as a registered user (ITN-21): administrators and
+ * moderators cannot use itineraries, so it gets 403 for them. The role is set
+ * on the clone route only, not on the class, so the two reads stay open to
+ * guests.
  */
 @ApiTags('Itineraries')
 @Controller('itineraries')
@@ -72,6 +78,7 @@ export class PublicItinerariesController {
   }
 
   @Post(':id/clone')
+  @Roles(Role.User)
   @ApiCookieAuth()
   @ApiOperation({
     summary: 'Clone a public itinerary',
@@ -82,6 +89,10 @@ export class PublicItinerariesController {
   @ApiCreatedResponse({ type: ItineraryDetailResponseDto })
   @ApiBadRequestResponse({ description: 'The id is not a valid id' })
   @ApiUnauthorizedResponse({ description: 'Not logged in' })
+  @ApiForbiddenResponse({
+    description:
+      'Not a registered user: administrators and moderators cannot use itineraries',
+  })
   @ApiNotFoundResponse({
     description: 'No public itinerary has this id (it may be private)',
   })

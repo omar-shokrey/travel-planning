@@ -78,7 +78,7 @@ export class CommentsController {
   @ApiOperation({
     summary: 'List the comments of a post (BLG-05)',
     description:
-      'BLG-05. The comments of a published post in chronological order (oldest first), 10 per page by default (GEN-05). Open to guests.',
+      'BLG-05. The comments of a published post in chronological order (oldest first), 10 per page by default (GEN-05). Open to guests. Comments an admin hid (GEN-10) are left out.',
   })
   @ApiParam({ name: 'id', description: 'The id of the post' })
   @ApiPaginatedResponse(CommentResponseDto)
@@ -133,7 +133,7 @@ export class CommentsController {
   @ApiOperation({
     summary: 'Delete my comment (BLG-07)',
     description:
-      'BLG-07. A registered user deletes their own comment. The comment count of the post goes down by one.',
+      'BLG-07. A registered user deletes their own comment, also one an admin hid. The comment count of the post goes down by one if the comment was visible (a hidden comment was already taken off it).',
   })
   @ApiParam({ name: 'id', description: 'The id of the comment' })
   @ApiNoContentResponse({ description: 'The comment was deleted' })

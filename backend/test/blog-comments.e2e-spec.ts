@@ -17,6 +17,7 @@ import { ACCESS_TOKEN_COOKIE } from './../src/common/constants/cookies';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
 import { User } from './../src/users/models/user.schema';
+import { deleteSessionsOf } from './support/delete-sessions';
 
 const PASSWORD = 'Passw0rdOK';
 
@@ -128,6 +129,7 @@ describe('Comments on a post (e2e, BLG-05)', () => {
       await posts.findByIdAndDelete(id);
     }
     for (const id of createdUserIds) {
+      await deleteSessionsOf(app, id);
       await users.findByIdAndDelete(id);
     }
     await app.close();
@@ -149,6 +151,7 @@ describe('Comments on a post (e2e, BLG-05)', () => {
         postId,
         authorId: reader.id,
         body: 'Great tips!',
+        moderation: 'visible',
         createdAt: expect.stringMatching(/Z$/),
         updatedAt: expect.stringMatching(/Z$/),
       });
