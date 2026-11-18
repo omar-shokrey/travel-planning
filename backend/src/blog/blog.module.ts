@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { UsersModule } from '../users/users.module';
 import { CommentsController } from './comments.controller';
 import { CommentsService } from './comments.service';
 import { LikesController } from './likes.controller';
@@ -9,6 +10,8 @@ import { Like, LikeSchema } from './models/like.schema';
 import { PostsController } from './posts.controller';
 import { PostsService } from './posts.service';
 import { BlogPost, BlogPostSchema } from './models/blog-post.schema';
+import { PublishedPostsService } from './published-posts.service';
+import { TagsController } from './tags.controller';
 
 @Module({
   imports: [
@@ -17,9 +20,21 @@ import { BlogPost, BlogPostSchema } from './models/blog-post.schema';
       { name: Comment.name, schema: CommentSchema },
       { name: Like.name, schema: LikeSchema },
     ]),
+    // The User model, read only, for the author names of the public lists (BLG-08).
+    UsersModule,
   ],
-  controllers: [PostsController, CommentsController, LikesController],
-  providers: [PostsService, CommentsService, LikesService],
+  controllers: [
+    PostsController,
+    TagsController,
+    CommentsController,
+    LikesController,
+  ],
+  providers: [
+    PostsService,
+    PublishedPostsService,
+    CommentsService,
+    LikesService,
+  ],
   exports: [PostsService, CommentsService, LikesService],
 })
 export class BlogModule {}

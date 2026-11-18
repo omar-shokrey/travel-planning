@@ -487,6 +487,239 @@ describe('PostsService', () => {
     });
   });
 
+  describe('update (BLG-04)', () => {
+    const userId = '507f1f77bcf86cd799439011';
+    const postId = '6740f1c2a4b5c6d7e8f90abc';
+
+    function createPost(overrides: Record<string, unknown> = {}) {
+      return {
+        _id: { toString: () => postId },
+        authorId: { toString: () => userId },
+        title: 'Original title',
+        body: 'Original body',
+        status: PostStatus.Draft,
+        publishedAt: undefined,
+        tags: [],
+        images: [],
+        likeCount: 0,
+        commentCount: 0,
+        createdAt: new Date('2026-11-15T10:00:00.000Z'),
+        updatedAt: new Date('2026-11-15T10:00:00.000Z'),
+        save: jest.fn().mockResolvedValue(undefined),
+        deleteOne: jest.fn().mockResolvedValue(undefined),
+        ...overrides,
+      };
+    }
+
+    it('allows the owner to update the title and body', async () => {
+      const post = createPost();
+
+      const posts = {
+        findById: jest.fn().mockResolvedValue(post),
+      };
+
+      const service = createService(posts);
+
+      const result = await service.update(
+        postId,
+        {
+          title: 'Updated title',
+          body: 'Updated body',
+        },
+        userId,
+      );
+
+      expect(posts.findById).toHaveBeenCalledWith(postId);
+      expect(post.title).toBe('Updated title');
+      expect(post.body).toBe('Updated body');
+      expect(post.status).toBe(PostStatus.Draft);
+      expect(post.save).toHaveBeenCalledTimes(1);
+
+      expect(result).toEqual({
+        id: postId,
+        authorId: userId,
+        title: 'Updated title',
+        body: 'Updated body',
+        status: PostStatus.Draft,
+        publishedAt: undefined,
+        tags: [],
+        images: [],
+        createdAt: '2026-11-15T10:00:00.000Z',
+        updatedAt: '2026-11-15T10:00:00.000Z',
+      });
+    });
+
+    it('allows a partial update without changing other fields', async () => {
+      const post = createPost();
+
+      const posts = {
+        findById: jest.fn().mockResolvedValue(post),
+      };
+
+      const service = createService(posts);
+
+      await service.update(
+        postId,
+        {
+          title: 'Only the title changed',
+        },
+        userId,
+      );
+
+      expect(post.title).toBe('Only the title changed');
+      expect(post.body).toBe('Original body');
+      expect(post.status).toBe(PostStatus.Draft);
+      expect(post.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('replaces the tags when they are sent, and clears them with [] (BLG-08)', async () => {
+      const post = createPost({ tags: ['old', 'tags'] });
+      const posts = { findById: jest.fn().mockResolvedValue(post) };
+      const service = createService(posts);
+
+      const result = await service.update(
+        postId,
+        { tags: ['cairo', 'nile'] },
+        userId,
+      );
+      expect(post.tags).toEqual(['cairo', 'nile']);
+      expect(result.tags).toEqual(['cairo', 'nile']);
+
+      await service.update(postId, { tags: [] }, userId);
+      expect(post.tags).toEqual([]);
+      expect(post.save).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps the tags when they are not sent (BLG-08)', async () => {
+      const post = createPost({ tags: ['keep'] });
+      const posts = { findById: jest.fn().mockResolvedValue(post) };
+      const service = createService(posts);
+
+      await service.update(postId, { title: 'New title' }, userId);
+
+      expect(post.tags).toEqual(['keep']);
+    });
+
+    it('publishes a draft and sets publishedAt', async () => {
+      const post = createPost();
+
+      const posts = {
+        findById: jest.fn().mockResolvedValue(post),
+      };
+
+      const service = createService(posts);
+
+      await service.update(
+        postId,
+        {
+          status: PostStatus.Published,
+        },
+        userId,
+      );
+
+      expect(post.status).toBe(PostStatus.Published);
+      expect(post.publishedAt).toEqual(expect.any(Date));
+      expect(post.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the original publishedAt when an already published post is edited', async () => {
+      const originalPublishedAt = new Date('2026-11-14T10:00:00.000Z');
+
+      const post = createPost({
+        status: PostStatus.Published,
+        publishedAt: originalPublishedAt,
+      });
+
+      const posts = {
+        findById: jest.fn().mockResolvedValue(post),
+      };
+
+      const service = createService(posts);
+
+      await service.update(
+        postId,
+        {
+          title: 'Updated published post',
+          status: PostStatus.Published,
+        },
+        userId,
+      );
+
+      expect(post.status).toBe(PostStatus.Published);
+      expect(post.publishedAt).toBe(originalPublishedAt);
+      expect(post.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('moves a published post back to draft and clears publishedAt', async () => {
+      const post = createPost({
+        status: PostStatus.Published,
+        publishedAt: new Date('2026-11-14T10:00:00.000Z'),
+      });
+
+      const posts = {
+        findById: jest.fn().mockResolvedValue(post),
+      };
+
+      const service = createService(posts);
+
+      await service.update(
+        postId,
+        {
+          status: PostStatus.Draft,
+        },
+        userId,
+      );
+
+      expect(post.status).toBe(PostStatus.Draft);
+      expect(post.publishedAt).toBeUndefined();
+      expect(post.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects updating a post that does not exist', async () => {
+      const posts = {
+        findById: jest.fn().mockResolvedValue(null),
+      };
+
+      const service = createService(posts);
+
+      await expect(
+        service.update(
+          postId,
+          {
+            title: 'Updated title',
+          },
+          userId,
+        ),
+      ).rejects.toThrow('Post not found');
+    });
+
+    it('rejects updating another user’s post', async () => {
+      const post = createPost({
+        authorId: {
+          toString: () => '507f191e810c19729de860ea',
+        },
+      });
+
+      const posts = {
+        findById: jest.fn().mockResolvedValue(post),
+      };
+
+      const service = createService(posts);
+
+      await expect(
+        service.update(
+          postId,
+          {
+            title: 'Should not be allowed',
+          },
+          userId,
+        ),
+      ).rejects.toThrow('You can only change your own posts');
+
+      expect(post.save).not.toHaveBeenCalled();
+    });
+  });
+
   describe('remove (BLG-04)', () => {
     const userId = '507f1f77bcf86cd799439011';
     const postId = '6740f1c2a4b5c6d7e8f90abc';
