@@ -13,6 +13,7 @@ import { ACCESS_TOKEN_COOKIE } from './../src/common/constants/cookies';
 import { ProviderType } from './../src/common/enums/provider-type.enum';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
+import { ROOM_PRICE_MAX } from './../src/hotels/hotels.constants';
 import { Hotel } from './../src/hotels/models/hotel.schema';
 import { Room } from './../src/hotels/models/room.schema';
 import { User } from './../src/users/models/user.schema';
@@ -187,6 +188,32 @@ describe('Hotel rooms (e2e, HTL-03)', () => {
     expect(
       response.body.errors.map(({ field }: { field: string }) => field),
     ).toEqual(['active', 'hotelId']);
+  });
+
+  it('rejects a price above ROOM_PRICE_MAX with 400 and creates no room', async () => {
+    const roomNumber = `too-expensive-${RUN}`;
+    const response = await call(
+      `/api/hotels/${managedHotelId}/rooms`,
+      'assigned',
+      { ...validRoom(), number: roomNumber, pricePerNight: 1e300 },
+    );
+    if (response.status === 201) {
+      createdRoomIds.push(response.body.id as string);
+    }
+
+    expect(response.status).toBe(400);
+    expect(response.body.errors).toEqual([
+      {
+        field: 'pricePerNight',
+        messages: [`pricePerNight must be at most ${ROOM_PRICE_MAX}`],
+      },
+    ]);
+    expect(
+      await rooms.countDocuments({
+        hotelId: new Types.ObjectId(managedHotelId),
+        number: roomNumber,
+      }),
+    ).toBe(0);
   });
 
   it('rejects duplicate room numbers within one hotel with 409', async () => {

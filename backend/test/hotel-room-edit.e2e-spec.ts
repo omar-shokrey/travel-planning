@@ -14,6 +14,7 @@ import { ACCESS_TOKEN_COOKIE } from './../src/common/constants/cookies';
 import { ProviderType } from './../src/common/enums/provider-type.enum';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
+import { ROOM_PRICE_MAX } from './../src/hotels/hotels.constants';
 import { Hotel } from './../src/hotels/models/hotel.schema';
 import { RoomNightState } from './../src/hotels/models/room-night-state.enum';
 import { RoomNight } from './../src/hotels/models/room-night.schema';
@@ -302,6 +303,20 @@ describe('Edit a room (e2e, HTL-05)', () => {
       });
       const stored = await rooms.findById(roomId);
       expect(stored).toMatchObject({ beds: 2, active: true });
+    });
+
+    it('rejects a price above ROOM_PRICE_MAX with 400 and keeps the old price', async () => {
+      const response = await edit('moderator', { pricePerNight: 1e300 });
+
+      expect(response.status).toBe(400);
+      expect(response.body.errors).toEqual([
+        {
+          field: 'pricePerNight',
+          messages: [`pricePerNight must be at most ${ROOM_PRICE_MAX}`],
+        },
+      ]);
+      const stored = await rooms.findById(roomId);
+      expect(stored?.pricePerNight).toBe(12500);
     });
 
     it('answers 403 for the moderator of another hotel and changes nothing', async () => {
