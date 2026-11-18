@@ -134,4 +134,34 @@ describe('UpdatePostDto (BLG-04)', () => {
       }),
     ).toEqual(['body', 'status', 'title']);
   });
+
+  describe('tags (BLG-08)', () => {
+    it('trims, lowercases and de-duplicates the tags, as at creation', async () => {
+      const dto = await parse({ tags: ['  Cairo ', 'EGYPT', 'cairo', ''] });
+
+      expect(dto.tags).toEqual(['cairo', 'egypt']);
+    });
+
+    it('accepts an empty list, which clears the tags', async () => {
+      const dto = await parse({ tags: [] });
+
+      expect(dto.tags).toEqual([]);
+    });
+
+    it('accepts five tags of 30 characters', async () => {
+      const tags = ['a', 'b', 'c', 'd', 'e'].map((letter) => letter.repeat(30));
+
+      expect(await invalidFields({ tags })).toEqual([]);
+    });
+
+    it.each([
+      ['six tags', ['a', 'b', 'c', 'd', 'e', 'f']],
+      ['a tag of 31 characters', ['x'.repeat(31)]],
+      ['a tag that is not text', [5]],
+      ['tags that are not a list', 'cairo'],
+      ['tags sent as null', null],
+    ])('rejects %s', async (_label, tags) => {
+      expect(await invalidFields({ tags })).toEqual(['tags']);
+    });
+  });
 });
