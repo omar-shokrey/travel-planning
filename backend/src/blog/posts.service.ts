@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -9,12 +14,14 @@ import type { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import type { MyPostResponseDto } from './dto/my-post-response.dto';
 import { PostResponseDto } from './dto/post-response.dto';
-import { BlogPost } from './models/blog-post.schema';
+import { UpdatePostDto } from './dto/update-post.dto';
+import { BlogPost, type BlogPostDocument } from './models/blog-post.schema';
 import { Comment } from './models/comment.schema';
 import { Like } from './models/like.schema';
 import { PostStatus } from './models/post-status.enum';
 import { toMyPostResponse, toPostResponse } from './mappers/post.mapper';
 import { PostModeration } from './models/post-moderation.enum';
+import { visiblePublishedPost } from './visible-post.filter';
 
 @Injectable()
 export class PostsService {
@@ -55,6 +62,39 @@ export class PostsService {
       authorId: post.authorId.toString(),
       // A lean post stored before `moderation` existed has no value: visible.
       moderation: post.moderation ?? PostModeration.Visible,
+    };
+  }
+
+  /**
+   * For other services (reports of a comment, GEN-09): whether this viewer
+   * may see the post, by the same rule as comments and likes
+   * (`visiblePublishedPost`): published, and not hidden unless the viewer is
+   * its author. Not exposed by a controller.
+   */
+  async isVisibleTo(postId: string, viewerId: string): Promise<boolean> {
+    // A count, not exists(), like existsById below.
+    const count = await this.posts
+      .countDocuments(visiblePublishedPost(postId, viewerId))
+      .exec();
+    return count > 0;
+  }
+
+  /**
+   * For the admin module (GEN-10): any post, draft or published, hidden or
+   * not ("hidden content is visible only to its author and admins"), and
+   * whether an admin hid it; null when there is no such post. Not exposed by
+   * a blog controller.
+   */
+  async findForAdmin(
+    postId: string,
+  ): Promise<{ post: PostResponseDto; hidden: boolean } | null> {
+    const post = await this.posts.findById(postId).exec();
+    if (!post) {
+      return null;
+    }
+    return {
+      post: toPostResponse(post),
+      hidden: post.moderation === PostModeration.Hidden,
     };
   }
 
@@ -162,5 +202,71 @@ export class PostsService {
       this.posts.countDocuments(filter).exec(),
     ]);
     return paginate(items.map(toMyPostResponse), total, query);
+  }
+
+  /** BLG-04: edit your own blog post. */
+  async update(
+    id: string,
+    dto: UpdatePostDto,
+    userId: string,
+  ): Promise<PostResponseDto> {
+    const post = await this.findOwnedOrThrow(id, userId);
+
+    if (dto.title !== undefined) {
+      post.title = dto.title;
+    }
+
+    if (dto.body !== undefined) {
+      post.body = dto.body;
+    }
+
+    if (dto.status !== undefined) {
+      post.status = dto.status;
+
+      if (dto.status === PostStatus.Published) {
+        post.publishedAt ??= new Date();
+      } else {
+        post.publishedAt = undefined;
+      }
+    }
+
+    await post.save();
+    return toPostResponse(post);
+  }
+
+  /** BLG-04: delete your own blog post. */
+  async remove(id: string, userId: string): Promise<void> {
+    const post = await this.findOwnedOrThrow(id, userId);
+    await post.deleteOne();
+
+    try {
+      await this.removeEngagementOfPost(id);
+    } catch (error) {
+      this.logger.error(
+        `Deleting the comments and likes of deleted post ${id} failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  /**
+   * BLG-04: loads a post and checks that the caller owns it.
+   * Missing post -> 404; another user's post -> 403.
+   */
+  private async findOwnedOrThrow(
+    id: string,
+    userId: string,
+  ): Promise<BlogPostDocument> {
+    const post = await this.posts.findById(id);
+
+    if (!post) {
+      throw new NotFoundException('Post not found');
+    }
+
+    if (post.authorId.toString() !== userId) {
+      throw new ForbiddenException('You can only change your own posts');
+    }
+
+    return post;
   }
 }
