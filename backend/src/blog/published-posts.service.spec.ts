@@ -79,6 +79,56 @@ describe('PublishedPostsService', () => {
     });
   });
 
+  describe('listByAuthor (BLG-12)', () => {
+    it("lists only the author's published, not hidden posts, newest first, one page", async () => {
+      const { posts, postsQuery, service } = setup();
+      const query = Object.assign(new PaginationQueryDto(), {
+        page: 3,
+        limit: 4,
+      });
+
+      const page = await service.listByAuthor(sara.toString(), query);
+
+      const filter = { ...PUBLIC, authorId: sara };
+      expect(posts.find).toHaveBeenCalledWith(filter);
+      expect(posts.countDocuments).toHaveBeenCalledWith(filter);
+      const used = posts.find.mock.calls[0] as unknown as [
+        { authorId: unknown },
+      ];
+      expect(used[0].authorId).toBeInstanceOf(Types.ObjectId);
+      expect(postsQuery.sort).toHaveBeenCalledWith({
+        publishedAt: -1,
+        _id: -1,
+      });
+      expect(postsQuery.skip).toHaveBeenCalledWith(8);
+      expect(postsQuery.limit).toHaveBeenCalledWith(4);
+      expect(page.items.map((item) => item.author)).toEqual([
+        { id: sara.toString(), name: 'Sara Ahmed' },
+      ]);
+      expect(page.meta).toEqual({
+        page: 3,
+        limit: 4,
+        total: 1,
+        totalPages: 1,
+      });
+    });
+
+    it('answers an empty page, without asking for authors, when the author has no post', async () => {
+      const { service, users } = setup([]);
+
+      const page = await service.listByAuthor(
+        sara.toString(),
+        new PaginationQueryDto(),
+      );
+
+      expect(page).toEqual({
+        items: [],
+        meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
+      });
+      expect(users.find).not.toHaveBeenCalled();
+    });
+  });
+
   describe('listByTag (BLG-08)', () => {
     it('lists only the published, not hidden posts that have the tag, newest first, one page', async () => {
       const { posts, postsQuery, service } = setup();

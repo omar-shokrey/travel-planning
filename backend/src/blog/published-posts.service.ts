@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import type { Model, QueryFilter, Types } from 'mongoose';
+import { Types, type Model, type QueryFilter } from 'mongoose';
 import {
   paginate,
   type PaginatedResponse,
@@ -37,7 +37,8 @@ const SUMMARY_PROJECTION = Object.fromEntries(
 
 /**
  * The public lists of published posts: the tag page (BLG-08), the search and
- * the newest posts (BLG-09; the browse page, BLG-02, extends the latter).
+ * the newest posts (BLG-09; the browse page, BLG-02, extends the latter), and
+ * the posts of the author page (BLG-12).
  * Every list starts from `publishedFilter()`, the one place that says which
  * posts the public may see.
  */
@@ -54,6 +55,21 @@ export class PublishedPostsService {
     query: PaginationQueryDto,
   ): Promise<PaginatedResponse<PostSummaryResponseDto>> {
     return this.listNewestMatching({ tags: tag }, query);
+  }
+
+  /**
+   * BLG-12: the author page's posts, the published, not hidden posts of one
+   * author, newest first. The (authorId, status, moderation, publishedAt,
+   * _id) index serves it.
+   */
+  listByAuthor(
+    authorId: string,
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResponse<PostSummaryResponseDto>> {
+    return this.listNewestMatching(
+      { authorId: new Types.ObjectId(authorId) },
+      query,
+    );
   }
 
   /** BLG-09 without a keyword: the newest published, not hidden posts. */

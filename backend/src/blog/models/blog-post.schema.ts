@@ -84,3 +84,16 @@ BlogPostSchema.index({
   publishedAt: -1,
   _id: -1,
 });
+
+/**
+ * The author page (BLG-12): the published, not hidden (GEN-10) posts of one
+ * author, newest first. Same order of fields as the tag page index, with the
+ * author in place of the tag.
+ */
+BlogPostSchema.index({
+  authorId: 1,
+  status: 1,
+  moderation: 1,
+  publishedAt: -1,
+  _id: -1,
+});
