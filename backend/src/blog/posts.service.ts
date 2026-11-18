@@ -11,6 +11,7 @@ import {
   type PaginatedResponse,
 } from '../common/dto/paginated-response.dto';
 import type { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { UploadsService } from '../uploads/uploads.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import type { MyPostResponseDto } from './dto/my-post-response.dto';
 import { PostResponseDto } from './dto/post-response.dto';
@@ -34,6 +35,8 @@ export class PostsService {
     private readonly comments: Model<Comment>,
     @InjectModel(Like.name)
     private readonly likes: Model<Like>,
+    // The image files of a post the author deletes (BLG-10, GEN-08).
+    private readonly uploads: UploadsService,
   ) {}
 
   /**
@@ -239,10 +242,25 @@ export class PostsService {
     return toPostResponse(post);
   }
 
-  /** BLG-04: delete your own blog post. */
+  /**
+   * BLG-04: delete your own blog post, then its comments and likes, then its
+   * image files (BLG-10), as the admin delete does (GEN-10). The image names
+   * come from the deleted document itself, so an image added after the
+   * ownership check is deleted too. The post is already gone when the
+   * cleanup runs, so a cleanup failure is logged and the answer stays 204: a
+   * retry would answer 404 and never reach the cleanup.
+   */
   async remove(id: string, userId: string): Promise<void> {
-    const post = await this.findOwnedOrThrow(id, userId);
-    await post.deleteOne();
+    await this.findOwnedOrThrow(id, userId);
+    const deleted = await this.posts
+      .findByIdAndDelete(id)
+      .select('images')
+      .lean()
+      .exec();
+    if (!deleted) {
+      // Deleted by another request in the meantime, which did the cleanup.
+      return;
+    }
 
     try {
       await this.removeEngagementOfPost(id);
@@ -252,6 +270,33 @@ export class PostsService {
         error instanceof Error ? error.stack : String(error),
       );
     }
+    await this.deleteImageFiles(id, deleted.images ?? []);
+  }
+
+  /**
+   * Deletes the image files of a deleted post. Every file is tried, and a
+   * file that cannot be deleted is logged instead of failing the request.
+   */
+  private async deleteImageFiles(
+    postId: string,
+    names: readonly string[],
+  ): Promise<void> {
+    if (names.length === 0) {
+      return;
+    }
+    const results = await Promise.allSettled(
+      names.map((name) => this.uploads.deleteImage(name)),
+    );
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        this.logger.error(
+          `Could not delete the image file ${names[index]} of deleted post ${postId}`,
+          result.reason instanceof Error
+            ? result.reason.stack
+            : String(result.reason),
+        );
+      }
+    });
   }
 
   /**

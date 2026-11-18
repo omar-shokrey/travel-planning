@@ -29,7 +29,7 @@
 - Publishing sets `publishedAt` if the post has none. Editing a published post keeps its `publishedAt`. Changing a published post back to `draft` clears it. A field sent as `null` answers 400, and an empty body changes nothing.
 - `DELETE /api/posts/:id` answers 204 with no body.
 - Deleting a post also deletes its comments and likes (`removeEngagementOfPost`), so none are left pointing at it. The post is deleted first; if the cleanup then fails, the error is logged and the request still answers 204.
-- The author's delete does not delete image files yet. The admin delete (GEN-10) already does. BLG-10 (post images) adds this to the author's delete when posts can have images.
+- Deleting a post also deletes its image files (BLG-10), as the admin delete (GEN-10) does. The post is deleted with `findByIdAndDelete`, which returns the image names it had at that moment, so an image added after the owner check is deleted too. The files are deleted after the post, its comments and its likes, with `UploadsService.deleteImage`; every file is tried, and one that cannot be deleted is logged while the request still answers 204. A post with no images deletes no file. A post someone else wrote answers 403 and keeps its files.
 
 ## Post tags (BLG-08)
 
@@ -55,6 +55,17 @@
 - **No results** is an empty page (`items: []`, `meta.total: 0`); the frontend shows "no results".
 - **Rows** are `PostSummaryResponseDto` (BLG-08): title, author, date and excerpt as the requirement asks, plus tags and the two counters.
 - **Tests:** `search-pattern.spec.ts`, `dto/search-posts-query.dto.spec.ts`, `post-search.controller.spec.ts`, the search and newest-list cases of `published-posts.service.spec.ts` (with the moderation condition), and `test/blog-search.e2e-spec.ts` (with hide and show again: by title, tag and author name, in the newest list and in `meta.total`).
+
+## Post images (BLG-10)
+
+- **Two routes, for the author only.** `POST /api/posts/:id/images` adds images and `DELETE /api/posts/:id/images/:imageId` removes one. Both are `@Roles(Role.User)`; the service then checks that the caller wrote the post (404 for a missing post, 403 for someone else's). Drafts and published posts both take images. They live in `PostImagesController` and `PostImagesService`, so `PostsController` is unchanged. `BlogModule` imports `UploadsModule`.
+- **The shared upload rules (GEN-08).** `@UploadImages()` reads the multipart field `images`. `UploadsService` refuses a file over 5 MB (413), a file that is not a JPG or PNG by its first bytes (415) and a request with no file (400). `assertWithinLimit('post', existing, incoming)` refuses more than 5 images in all (400) before anything is saved.
+- **The limit holds under concurrent uploads.** After saving, the names are added with one conditional update whose filter matches only while the post still has room for all of them (`images.<5 - incoming>` must not exist). Two uploads at the same time can therefore never pass 5: the one that loses gets 400 with the limit message (without the "It already has" count when it lost at the update). Hotel photos (HTL-01) use a stricter filter (the count must be unchanged, 409 otherwise); here an upload that still fits succeeds even if another one landed first.
+- **No orphan files.** When the conditional update does not match, or anything fails after saving, the files just saved are deleted again. Every file is tried; one that cannot be deleted is logged, and the caller still gets the original error, not a 500 from the cleanup.
+- **`imageId` is the stored file name**, as in the hotel photos route and as `BlogPost.images` stores it. Removing pulls the name in one update (404 when the post has no such image, and then no file is touched) and then deletes the file.
+- **The answer is the post** (`PostResponseDto`, 200), as the hotel photo routes answer with the hotel. `images` lists the file names; each is served at `/api/uploads/<name>`.
+- **Deleting a post deletes its image files too**, the author's delete (`PostsService.remove`, BLG-04, see above) as well as the admin delete (GEN-10), so no deleted post leaves files on disk. `PostsService` takes `UploadsService` for this; the controllers stay HTTP only.
+- **Tests:** `post-images.service.spec.ts` (limit, conditional-update miss, cleanup, delete), `post-images.controller.spec.ts` (roles), `posts.service.spec.ts` (the files of a deleted post: the names reach `deleteImage`, a file that cannot be deleted is logged and the delete still resolves, no images means no call) and `test/blog-images.e2e-spec.ts` (uploads, limits, file types, sizes, roles, two uploads at once, removal and the file on disk, and deleting the post: 204 and both files answer 404, while another user's delete answers 403 and the files stay).
 
 ## Comments (BLG-05)
 
