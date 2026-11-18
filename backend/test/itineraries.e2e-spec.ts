@@ -674,6 +674,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           cityId: CITY_A,
           notes: 'Arrive late',
           activities: [],
+          budgetEntries: [],
           transportCosts: [],
         },
         {
@@ -682,6 +683,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           date: '2026-12-21',
           cityId: CITY_A,
           activities: [],
+          budgetEntries: [],
           transportCosts: [],
         },
         {
@@ -690,6 +692,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           date: '2026-12-22',
           cityId: CITY_B,
           activities: [],
+          budgetEntries: [],
           transportCosts: [],
         },
       ]);
@@ -830,6 +833,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           cityId: CITY_A,
           notes: 'Original notes',
           activities: [],
+          budgetEntries: [],
           transportCosts: [],
         },
         {
@@ -839,6 +843,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           cityId: CITY_B,
           notes: 'New notes',
           activities: [],
+          budgetEntries: [],
           transportCosts: [],
         },
       ]);

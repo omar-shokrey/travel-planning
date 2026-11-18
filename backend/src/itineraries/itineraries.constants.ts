@@ -17,6 +17,20 @@ export const ACTIVITY_DESCRIPTION_MAX = 1000;
 /** ITN-16: the longest transport mode, such as "train" or "night bus". */
 export const TRANSPORT_MODE_MAX = 50;
 
+/**
+ * The largest amount of one budget entry, activity cost or transport cost, in
+ * minor units: 10,000,000,000 (100,000,000.00 in a 2-decimal currency). An
+ * engineering limit, not a workbook rule: it keeps every total a safe integer
+ * (see "Money limits" in the README for the arithmetic).
+ */
+export const MONEY_AMOUNT_MAX = 10_000_000_000;
+
+/**
+ * ITN-14: the most budget entries one day can have, so one itinerary document
+ * stays small. An engineering limit, not a workbook rule.
+ */
+export const BUDGET_ENTRIES_PER_DAY_MAX = 50;
+
 /** A currency code as in countries.csv, for example EGP. */
 export const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
 

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ActivityResponseDto } from './activity-response.dto';
+import { BudgetEntryResponseDto } from './budget-entry-response.dto';
 import { TransportCostResponseDto } from './transport-cost-response.dto';
 
 /** One day of an itinerary as the API returns it. */
@@ -31,6 +32,13 @@ export class ItineraryDayResponseDto {
     type: [ActivityResponseDto],
   })
   activities: ActivityResponseDto[];
+
+  @ApiProperty({
+    description:
+      'ITN-14. The budget entries of the day (food, accommodation, local_transport, activities), in the order they were added',
+    type: [BudgetEntryResponseDto],
+  })
+  budgetEntries: BudgetEntryResponseDto[];
 
   @ApiProperty({
     description: 'ITN-16. Transport between cities booked on this day',

@@ -134,6 +134,7 @@ describe('toItineraryDetailResponse', () => {
         cityId: 'cairo',
         notes: 'Arrive in the evening',
         activities: [],
+        budgetEntries: [],
         transportCosts: [],
       },
       {
@@ -142,6 +143,7 @@ describe('toItineraryDetailResponse', () => {
         date: '2026-12-31',
         cityId: 'cairo',
         activities: [],
+        budgetEntries: [],
         transportCosts: [],
       },
       {
@@ -150,6 +152,7 @@ describe('toItineraryDetailResponse', () => {
         date: '2027-01-01',
         cityId: 'dubai',
         activities: [],
+        budgetEntries: [],
         transportCosts: [],
       },
     ]);
@@ -162,11 +165,48 @@ describe('toItineraryDetailResponse', () => {
     expect(day).not.toHaveProperty('notes');
     expect(Object.keys(day).sort()).toEqual([
       'activities',
+      'budgetEntries',
       'cityId',
       'date',
       'dayNumber',
       'id',
       'transportCosts',
+    ]);
+  });
+});
+
+describe('budget entries of a day (ITN-14)', () => {
+  it('lists every entry with its id, category, amount and currency, in order', () => {
+    const itinerary = stored({
+      days: [
+        {
+          cityId: 'cairo',
+          budgetEntries: [
+            { category: BudgetCategory.Food, amount: 3000, currency: 'EGP' },
+            {
+              category: BudgetCategory.LocalTransport,
+              amount: 0,
+              currency: 'USD',
+            },
+          ],
+        },
+      ],
+    });
+    const [stored0, stored1] = itinerary.days[0].budgetEntries;
+
+    expect(toItineraryDetailResponse(itinerary).days[0].budgetEntries).toEqual([
+      {
+        id: stored0._id.toString(),
+        category: 'food',
+        amount: 3000,
+        currency: 'EGP',
+      },
+      {
+        id: stored1._id.toString(),
+        category: 'local_transport',
+        amount: 0,
+        currency: 'USD',
+      },
     ]);
   });
 });

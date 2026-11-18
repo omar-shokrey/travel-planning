@@ -789,6 +789,7 @@ describe('ItinerariesService', () => {
           cityId: 'dubai',
           notes: 'Fly in the morning',
           activities: [],
+          budgetEntries: [],
           transportCosts: [],
         },
       ]);
