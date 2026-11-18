@@ -105,6 +105,39 @@ describe('AuthCookiesService', () => {
     });
   });
 
+  it.each(
+    [true, false].flatMap((secure) =>
+      (['lax', 'strict', 'none'] as const).map(
+        (sameSite) => [secure, sameSite] as const,
+      ),
+    ),
+  )(
+    'keeps both cookies httpOnly, and clears them with the options they were set with, for COOKIE_SECURE=%p and COOKIE_SAME_SITE=%p (ACC-19)',
+    (secure, sameSite) => {
+      const { service, response, asResponse } = setup({
+        COOKIE_SECURE: secure,
+        COOKIE_SAME_SITE: sameSite,
+      });
+
+      service.setAuthCookies(asResponse, tokens);
+      service.clearAuthCookies(asResponse);
+
+      const set = response.cookie.mock.calls as [string, string, object][];
+      const cleared = response.clearCookie.mock.calls as [string, object][];
+      expect(set).toHaveLength(2);
+      expect(cleared).toHaveLength(2);
+      for (const [name, , options] of set) {
+        expect(options).toMatchObject({ httpOnly: true, secure, sameSite });
+        // The browser keeps a cookie unless it is cleared with the same
+        // options (all of them but the lifetime).
+        const { maxAge: _lifetime, ...withoutLifetime } = options as {
+          maxAge: number;
+        };
+        expect(cleared).toContainEqual([name, withoutLifetime]);
+      }
+    },
+  );
+
   describe('reading the tokens of a request', () => {
     const requestWith = (cookies: unknown) =>
       ({ cookies }) as unknown as Request;
