@@ -80,6 +80,24 @@ export class AirlinesService {
   }
 
   /**
+   * Returns the airline assigned to an airline moderator.
+   * Used by feature modules that need to determine the moderator's
+   * airline without trusting an airline id supplied by the client.
+   */
+  async findAssignedAirlineOrThrow(userId: string): Promise<AirlineDocument> {
+    const user = await this.usersService.findEntityById(userId);
+
+    if (
+      user?.assignment?.providerType !== ProviderType.Airline ||
+      !user.assignment.providerId
+    ) {
+      throw new ForbiddenException('You are not assigned to an airline');
+    }
+
+    return this.findEntityOrThrow(user.assignment.providerId.toString());
+  }
+
+  /**
    * Replaces the cancellation tiers of an airline (FLT-09). Only the airline
    * moderator assigned to it may do it. The tiers are stored highest
    * threshold first, in one update, so a reader never sees half a policy.
@@ -96,6 +114,7 @@ export class AirlinesService {
       daysBefore: tier.daysBefore,
       refundPercent: tier.refundPercent,
     }));
+
     const updated = await this.airlineModel
       .findByIdAndUpdate(
         id,
@@ -103,9 +122,11 @@ export class AirlinesService {
         { returnDocument: 'after', runValidators: true },
       )
       .exec();
+
     if (!updated) {
       throw new NotFoundException('Airline not found');
     }
+
     return toAirlineResponse(updated);
   }
 
@@ -120,6 +141,7 @@ export class AirlinesService {
     message = 'You can only change the policy of your assigned airline',
   ): Promise<void> {
     const user = await this.usersService.findEntityById(userId);
+
     if (
       user?.assignment?.providerType !== ProviderType.Airline ||
       user.assignment.providerId.toString() !== airline._id.toString()
@@ -139,6 +161,7 @@ export class AirlinesService {
     const nullFields = (['name', 'code'] as const).filter(
       (field) => dto[field] === null,
     );
+
     if (nullFields.length > 0) {
       throw new BadRequestException({
         message: 'Validation failed',
@@ -150,6 +173,7 @@ export class AirlinesService {
     }
 
     const airline = await this.findEntityOrThrow(id);
+
     await this.assertAssignedModerator(
       airline,
       userId,

@@ -93,6 +93,90 @@ function setup(
 }
 
 describe('AirlinesService', () => {
+  describe('findAssignedAirlineOrThrow', () => {
+    it('returns the airline assigned to an airline moderator', async () => {
+      const { model, service, usersService, findByIdExec } = setup();
+
+      const airline = airlineDocument();
+
+      usersService.findEntityById.mockResolvedValue({
+        assignment: {
+          providerType: ProviderType.Airline,
+          providerId: new Types.ObjectId(AIRLINE_ID),
+        },
+      });
+
+      findByIdExec.mockResolvedValue(airline);
+
+      const result = await service.findAssignedAirlineOrThrow(MODERATOR_ID);
+
+      expect(result).toBe(airline);
+      expect(usersService.findEntityById).toHaveBeenCalledWith(MODERATOR_ID);
+      expect(model.findById).toHaveBeenCalledWith(AIRLINE_ID);
+    });
+
+    it('returns 403 when the moderator has no airline assignment', async () => {
+      const { model, service, usersService } = setup();
+
+      usersService.findEntityById.mockResolvedValue({
+        assignment: undefined,
+      });
+
+      await expect(
+        service.findAssignedAirlineOrThrow(MODERATOR_ID),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(model.findById).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when the moderator is assigned to a hotel', async () => {
+      const { model, service, usersService } = setup();
+
+      usersService.findEntityById.mockResolvedValue({
+        assignment: {
+          providerType: ProviderType.Hotel,
+          providerId: new Types.ObjectId(AIRLINE_ID),
+        },
+      });
+
+      await expect(
+        service.findAssignedAirlineOrThrow(MODERATOR_ID),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(model.findById).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when the moderator account no longer exists', async () => {
+      const { model, service, usersService } = setup();
+
+      usersService.findEntityById.mockResolvedValue(null);
+
+      await expect(
+        service.findAssignedAirlineOrThrow(MODERATOR_ID),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(model.findById).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the assigned airline no longer exists', async () => {
+      const { model, service, usersService, findByIdExec } = setup();
+
+      usersService.findEntityById.mockResolvedValue({
+        assignment: {
+          providerType: ProviderType.Airline,
+          providerId: new Types.ObjectId(AIRLINE_ID),
+        },
+      });
+
+      findByIdExec.mockResolvedValue(null);
+
+      await expect(
+        service.findAssignedAirlineOrThrow(MODERATOR_ID),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(model.findById).toHaveBeenCalledWith(AIRLINE_ID);
+    });
+  });
   describe('setCancellationPolicy (FLT-09)', () => {
     const tiers = [
       { daysBefore: 7, refundPercent: 50 },
