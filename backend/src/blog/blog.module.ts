@@ -7,6 +7,7 @@ import { LikesController } from './likes.controller';
 import { LikesService } from './likes.service';
 import { Comment, CommentSchema } from './models/comment.schema';
 import { Like, LikeSchema } from './models/like.schema';
+import { PostSearchController } from './post-search.controller';
 import { PostsController } from './posts.controller';
 import { PostsService } from './posts.service';
 import { BlogPost, BlogPostSchema } from './models/blog-post.schema';
@@ -25,6 +26,7 @@ import { TagsController } from './tags.controller';
   ],
   controllers: [
     PostsController,
+    PostSearchController,
     TagsController,
     CommentsController,
     LikesController,
