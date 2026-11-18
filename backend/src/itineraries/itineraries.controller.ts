@@ -26,8 +26,10 @@ import {
 } from '@nestjs/swagger';
 import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
 import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { Role } from '../common/enums/role.enum';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { AddDayDto } from './dto/add-day.dto';
 import { CreateActivityDto } from './dto/create-activity.dto';
@@ -45,6 +47,11 @@ import { TransportCostsService } from './transport-costs.service';
 @ApiTags('Itineraries')
 @ApiCookieAuth()
 @ApiUnauthorizedResponse({ description: 'Not logged in' })
+@ApiForbiddenResponse({
+  description:
+    'Not a registered user: administrators and moderators cannot use itineraries',
+})
+@Roles(Role.User)
 @Controller('itineraries')
 export class ItinerariesController {
   constructor(
@@ -96,7 +103,8 @@ export class ItinerariesController {
   @ApiOkResponse({ type: ItineraryDetailResponseDto })
   @ApiBadRequestResponse({ description: 'The id is not a valid id' })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({ description: 'No itinerary has this id' })
   findOne(
@@ -119,7 +127,8 @@ export class ItinerariesController {
       'The id or a field is invalid, a field is null, an unknown field was sent, or a country code is not in the country list',
   })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({ description: 'No itinerary has this id' })
   @ApiConflictResponse({
@@ -145,7 +154,8 @@ export class ItinerariesController {
   @ApiNoContentResponse({ description: 'The itinerary was deleted' })
   @ApiBadRequestResponse({ description: 'The id is not a valid id' })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({ description: 'No itinerary has this id' })
   remove(
@@ -168,7 +178,8 @@ export class ItinerariesController {
       'The id or a field is invalid, an unknown field was sent, or the city is not in the city list',
   })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({ description: 'No itinerary has this id' })
   @ApiConflictResponse({ description: 'The itinerary already has 60 days' })
@@ -194,7 +205,8 @@ export class ItinerariesController {
       'The id or a field is invalid, an unknown field was sent, or the position is after the last day',
   })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({
     description: 'No itinerary has this id, or it has no day with this id',
@@ -225,7 +237,8 @@ export class ItinerariesController {
       'An id or a field is invalid, a field is null, an unknown field was sent, or the city is not in the city list',
   })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({
     description: 'No itinerary has this id, or it has no day with this id',
@@ -254,7 +267,8 @@ export class ItinerariesController {
   @ApiOkResponse({ type: ItineraryDetailResponseDto })
   @ApiBadRequestResponse({ description: 'An id is not a valid id' })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({
     description: 'No itinerary has this id, or it has no day with this id',
@@ -281,7 +295,8 @@ export class ItinerariesController {
       'An id or a field is invalid, an unknown field was sent, a cost has no currency, or the currency is not supported',
   })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({
     description: 'No itinerary has this id, or it has no day with this id',
@@ -312,7 +327,8 @@ export class ItinerariesController {
       'The id or a field is invalid, an unknown field was sent, a city is not in the city list, both cities are the same, or the currency is not supported',
   })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({
     description: 'No itinerary has this id, or it has no day with this dayId',

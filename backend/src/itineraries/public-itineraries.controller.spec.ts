@@ -2,6 +2,7 @@ import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
 import { ROLES_KEY } from '../common/decorators/roles.decorator';
 import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
+import { Role } from '../common/enums/role.enum';
 import type { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
 import type {
   PublicItineraryDetailResponseDto,
@@ -91,11 +92,11 @@ describe('PublicItinerariesController', () => {
       );
     });
 
-    it('needs a login, and is open to every role', () => {
+    it('is for registered users only', () => {
       const handler = PublicItinerariesController.prototype.clone;
 
       expect(reflector.get(IS_PUBLIC_KEY, handler)).toBeUndefined();
-      expect(reflector.get(ROLES_KEY, handler)).toBeUndefined();
+      expect(reflector.get(ROLES_KEY, handler)).toEqual([Role.User]);
     });
   });
 
