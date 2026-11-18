@@ -9,6 +9,7 @@ import {
   paginate,
   type PaginatedResponse,
 } from '../common/dto/paginated-response.dto';
+import type { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
 import { User } from '../users/models/user.schema';
@@ -83,22 +84,22 @@ export class PublicItinerariesService {
     if (query.city) filter['days.cityId'] = query.city;
     if (query.q) filter.$or = await this.keywordConditions(query.q);
 
-    const [found, total] = await Promise.all([
-      this.itineraries
-        .find(filter)
-        .select('-days')
-        .sort({ updatedAt: -1, _id: -1 })
-        .skip(query.skip)
-        .limit(query.limit),
-      this.itineraries.countDocuments(filter),
-    ]);
-    const authors = await this.authorsOf(found);
-    return paginate(
-      found.map((itinerary) => ({
-        ...toItineraryResponse(itinerary),
-        author: this.authorOf(itinerary, authors),
-      })),
-      total,
+    return this.listPublic(filter, query);
+  }
+
+  /**
+   * The publicly visible itineraries of one author, most recently updated
+   * first, with the same rows as the search. It serves the blog's public
+   * author page (BLG-12); no itineraries route uses it. An itinerary made
+   * private leaves the list at once (ITN-20). The (ownerId, updatedAt) index
+   * serves the query.
+   */
+  listByAuthor(
+    authorId: string,
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResponse<PublicItineraryResponseDto>> {
+    return this.listPublic(
+      { ...PUBLICLY_VISIBLE, ownerId: new Types.ObjectId(authorId) },
       query,
     );
   }
@@ -160,6 +161,35 @@ export class PublicItinerariesService {
       },
     });
     return toItineraryDetailResponse(clone);
+  }
+
+  /**
+   * One page of the itineraries that match `filter`, without their days, most
+   * recently updated first (then by id, so a page never shifts), each with its
+   * author. The filter must include `PUBLICLY_VISIBLE`.
+   */
+  private async listPublic(
+    filter: QueryFilter<Itinerary>,
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResponse<PublicItineraryResponseDto>> {
+    const [found, total] = await Promise.all([
+      this.itineraries
+        .find(filter)
+        .select('-days')
+        .sort({ updatedAt: -1, _id: -1 })
+        .skip(query.skip)
+        .limit(query.limit),
+      this.itineraries.countDocuments(filter),
+    ]);
+    const authors = await this.authorsOf(found);
+    return paginate(
+      found.map((itinerary) => ({
+        ...toItineraryResponse(itinerary),
+        author: this.authorOf(itinerary, authors),
+      })),
+      total,
+      query,
+    );
   }
 
   /** A publicly visible itinerary, or 404: a private or hidden one is not revealed. */

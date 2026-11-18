@@ -41,6 +41,7 @@ import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
     TransportCostsService,
     PublicItinerariesService,
   ],
-  exports: [ItinerariesService],
+  // PublicItinerariesService: the public author page of the blog (BLG-12).
+  exports: [ItinerariesService, PublicItinerariesService],
 })
 export class ItinerariesModule {}
