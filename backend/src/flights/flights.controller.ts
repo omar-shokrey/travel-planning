@@ -5,6 +5,7 @@ import {
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNotFoundResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
@@ -50,6 +51,10 @@ export class FlightsController {
   @ApiForbiddenResponse({
     description:
       'Not an airline moderator, or an airline moderator with no assigned airline',
+  })
+  @ApiNotFoundResponse({
+    description:
+      "Airline not found: the moderator's assignment names an airline that no longer exists",
   })
   @ApiConflictResponse({ description: DUPLICATE_FLIGHT_MESSAGE })
   create(

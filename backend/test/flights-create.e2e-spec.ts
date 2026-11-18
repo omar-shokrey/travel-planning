@@ -275,6 +275,19 @@ describe('POST /api/flights (e2e, FLT-03)', () => {
         createdAt: expect.stringMatching(/Z$/),
         updatedAt: expect.stringMatching(/Z$/),
       });
+      // Checked without luxon too: Cairo is UTC+2 or UTC+3 and New York UTC-5
+      // or UTC-4, so the wall clock read as UTC is that many hours off.
+      const hoursOff = (local: string, utc: string) =>
+        (Date.parse(`${local}:00.000Z`) - Date.parse(utc)) / 3_600_000;
+      expect([2, 3]).toContain(
+        hoursOff(sent.departureLocal, response.body.departureAt),
+      );
+      expect([-5, -4]).toContain(
+        hoursOff(sent.arrivalLocal, response.body.arrivalAt),
+      );
+      expect(Date.parse(response.body.arrivalAt)).toBeGreaterThan(
+        Date.parse(response.body.departureAt),
+      );
       const stored = await flights.findById(response.body.id).lean().orFail();
       expect(stored.airlineId.toString()).toBe(airlineId);
       expect(stored.departureAt.toISOString()).toBe(response.body.departureAt);
@@ -351,6 +364,18 @@ describe('POST /api/flights (e2e, FLT-03)', () => {
 
       expect(response.status).toBe(403);
       expect(response.body.message).toBe('You are not assigned to an airline');
+    });
+
+    it('answers 404 to a moderator whose assigned airline no longer exists', async () => {
+      const orphan = await createActor(Role.AirlineModerator, {
+        providerType: ProviderType.Airline,
+        providerId: new Types.ObjectId().toString(),
+      });
+
+      const response = await post(body(), orphan);
+
+      expect(response.status).toBe(404);
+      expect(response.body.message).toBe('Airline not found');
     });
   });
 
@@ -586,6 +611,7 @@ describe('POST /api/flights (e2e, FLT-03)', () => {
       '400',
       '401',
       '403',
+      '404',
       '409',
     ]);
     expect(Object.keys(schemas.CreateFlightDto.properties).sort()).toEqual([

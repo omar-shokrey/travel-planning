@@ -172,8 +172,14 @@ export class FlightsService {
    * (never by adding hours). A time inside a clock change that skips it does
    * not exist: luxon would silently move it forward, so the converted value
    * is formatted back in the zone and must equal the input, or the field gets
-   * an error. A time that happens twice (the clocks go back) is accepted as
-   * the instant luxon picks, the second one (standard time).
+   * an error.
+   *
+   * A time that happens twice (the clocks go back) is accepted. luxon's own
+   * guess for it follows the zone's offset at the current moment, so the
+   * same request would be stored an hour apart in summer and in winter.
+   * The service therefore always takes the later of luxon's candidates
+   * (`getPossibleOffsets()`, in UTC order): the second occurrence, which is
+   * standard time in both hemispheres (New York 01:30 is 06:30 UTC).
    */
   private toInstant(
     value: string,
@@ -193,6 +199,7 @@ export class FlightsService {
       );
       return undefined;
     }
-    return instant;
+    const candidates = instant.getPossibleOffsets();
+    return candidates[candidates.length - 1] ?? instant;
   }
 }

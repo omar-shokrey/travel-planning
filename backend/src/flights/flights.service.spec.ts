@@ -19,6 +19,7 @@ const AIRPORTS: Record<string, string> = {
   JFK: 'America/New_York',
   NRT: 'Asia/Tokyo',
   LAX: 'America/Los_Angeles',
+  SYD: 'Australia/Sydney',
 };
 
 const AIRLINE_ID = new Types.ObjectId('6740f1c2a4b5c6d7e8f90123');
@@ -261,27 +262,50 @@ describe('FlightsService.create (FLT-03)', () => {
     },
   );
 
-  it('accepts a local time that happens twice (the clocks go back) as the second, standard-time instant', async () => {
-    const { service, flights } = setup();
+  // luxon's own guess follows the offset of the current moment, so each case
+  // runs once in a northern winter and once in a northern summer.
+  it.each([
+    ['January', '2027-01-10T00:00:00.000Z'],
+    ['July', '2026-07-01T00:00:00.000Z'],
+  ])(
+    'accepts a local time that happens twice (the clocks go back) as the second, standard-time instant, also when asked in %s',
+    async (_month, now) => {
+      jest.setSystemTime(new Date(now));
+      const { service, flights } = setup();
 
-    await service.create(
-      dto({
-        departureAirport: 'JFK',
-        arrivalAirport: 'CAI',
-        departureLocal: '2027-11-07T01:30',
-        arrivalLocal: '2027-11-07T19:00',
-      }),
-      'moderator-1',
-    );
+      await service.create(
+        dto({
+          departureAirport: 'JFK',
+          arrivalAirport: 'CAI',
+          departureLocal: '2027-11-07T01:30',
+          arrivalLocal: '2027-11-07T19:00',
+        }),
+        'moderator-1',
+      );
+      // Sydney goes back in April (southern autumn): 02:30 happens twice.
+      await service.create(
+        dto({
+          departureAirport: 'SYD',
+          arrivalAirport: 'NRT',
+          departureLocal: '2027-04-04T02:30',
+          arrivalLocal: '2027-04-04T11:00',
+        }),
+        'moderator-1',
+      );
 
-    expect(flights.create).toHaveBeenCalledWith(
-      expect.objectContaining({
+      const [[fromNewYork], [fromSydney]] = flights.create.mock.calls;
+      expect(fromNewYork).toMatchObject({
         // 01:30 EST (UTC-5), not 01:30 EDT (UTC-4).
         departureAt: new Date('2027-11-07T06:30:00.000Z'),
         departureDateLocal: '2027-11-07',
-      }),
-    );
-  });
+      });
+      expect(fromSydney).toMatchObject({
+        // 02:30 AEST (UTC+10), not 02:30 AEDT (UTC+11).
+        departureAt: new Date('2027-04-03T16:30:00.000Z'),
+        departureDateLocal: '2027-04-04',
+      });
+    },
+  );
 
   it('refuses an arrival whose local clock is later but whose UTC moment is earlier than the departure', async () => {
     const { service, flights } = setup();
