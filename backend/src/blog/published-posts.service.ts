@@ -16,6 +16,7 @@ import {
   type PostSummarySource,
 } from './mappers/post-summary.mapper';
 import { BlogPost } from './models/blog-post.schema';
+import { PostModeration } from './models/post-moderation.enum';
 import { PostStatus } from './models/post-status.enum';
 import { containsKeyword } from './search-pattern';
 
@@ -55,7 +56,7 @@ export class PublishedPostsService {
     return this.listNewestMatching({ tags: tag }, query);
   }
 
-  /** BLG-09 without a keyword: the newest published posts. */
+  /** BLG-09 without a keyword: the newest published, not hidden posts. */
   listNewest(
     query: PaginationQueryDto,
   ): Promise<PaginatedResponse<PostSummaryResponseDto>> {
@@ -122,15 +123,24 @@ export class PublishedPostsService {
   }
 
   /**
-   * Which posts the public may see. Today: published ones. Hiding by a
-   * moderator (GEN-10) and by a deactivated author (ACC-12) add their
-   * conditions here, and every public list follows.
+   * Which posts the public may see: published ones that an admin has not
+   * hidden (GEN-10). `$ne` lets a post stored before `moderation` existed
+   * count as visible. A public list does not know who is asking, so a hidden
+   * post is left out for its author too; the author still sees it in "my
+   * posts" (BLG-03). Hiding the posts of a deactivated author (ACC-12) adds
+   * its condition here, and every public list follows.
    */
-  private publishedFilter(): QueryFilter<BlogPost> {
-    return { status: PostStatus.Published };
+  publishedFilter(): QueryFilter<BlogPost> {
+    return {
+      status: PostStatus.Published,
+      moderation: { $ne: PostModeration.Hidden },
+    };
   }
 
-  /** The published posts that also match `filter`, newest first, one page. */
+  /**
+   * The posts the public may see (`publishedFilter()`) that also match
+   * `filter`, newest first, one page.
+   */
   private async listNewestMatching(
     filter: QueryFilter<BlogPost>,
     query: PaginationQueryDto,

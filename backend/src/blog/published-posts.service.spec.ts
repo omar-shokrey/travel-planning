@@ -5,8 +5,15 @@ import { UserStatus } from '../common/enums/user-status.enum';
 import type { User } from '../users/models/user.schema';
 import { DELETED_USER_NAME, SEARCH_AUTHORS_MAX_COUNT } from './blog.constants';
 import type { BlogPost } from './models/blog-post.schema';
+import { PostModeration } from './models/post-moderation.enum';
 import { PostStatus } from './models/post-status.enum';
 import { PublishedPostsService } from './published-posts.service';
+
+/** What every public list starts from: published and not hidden (GEN-10). */
+const PUBLIC = {
+  status: PostStatus.Published,
+  moderation: { $ne: PostModeration.Hidden },
+};
 
 const sara = new Types.ObjectId('6740f1c2a4b5c6d7e8f90001');
 const gone = new Types.ObjectId('6740f1c2a4b5c6d7e8f90002');
@@ -64,8 +71,16 @@ function setup(stored = [post('6740f1c2a4b5c6d7e8f9aaa1', sara)]) {
 }
 
 describe('PublishedPostsService', () => {
+  describe('publishedFilter (GEN-10)', () => {
+    it('lets the public see published posts that an admin has not hidden', () => {
+      const { service } = setup();
+
+      expect(service.publishedFilter()).toEqual(PUBLIC);
+    });
+  });
+
   describe('listByTag (BLG-08)', () => {
-    it('lists only published posts that have the tag, newest first, one page', async () => {
+    it('lists only the published, not hidden posts that have the tag, newest first, one page', async () => {
       const { posts, postsQuery, service } = setup();
       const query = Object.assign(new PaginationQueryDto(), {
         page: 2,
@@ -74,7 +89,7 @@ describe('PublishedPostsService', () => {
 
       await service.listByTag('cairo', query);
 
-      const filter = { status: PostStatus.Published, tags: 'cairo' };
+      const filter = { ...PUBLIC, tags: 'cairo' };
       expect(posts.find).toHaveBeenCalledWith(filter);
       expect(posts.countDocuments).toHaveBeenCalledWith(filter);
       expect(postsQuery.sort).toHaveBeenCalledWith({
@@ -126,12 +141,13 @@ describe('PublishedPostsService', () => {
   });
 
   describe('listNewest (BLG-09 without a keyword)', () => {
-    it('lists every published post, newest first', async () => {
+    it('lists every published, not hidden post, newest first (GEN-10)', async () => {
       const { posts, postsQuery, service } = setup();
 
       await service.listNewest(new PaginationQueryDto());
 
-      expect(posts.find).toHaveBeenCalledWith({ status: PostStatus.Published });
+      expect(posts.find).toHaveBeenCalledWith(PUBLIC);
+      expect(posts.countDocuments).toHaveBeenCalledWith(PUBLIC);
       expect(postsQuery.sort).toHaveBeenCalledWith({
         publishedAt: -1,
         _id: -1,
@@ -157,13 +173,13 @@ describe('PublishedPostsService', () => {
       expect(usersQuery.limit).toHaveBeenCalledWith(SEARCH_AUTHORS_MAX_COUNT);
     });
 
-    it('matches the title, the tags or the posts of those authors, published only, with the keyword escaped', async () => {
+    it('matches the title, the tags or the posts of those authors, published and not hidden only (GEN-10), with the keyword escaped', async () => {
       const { posts, service } = setup();
 
       await service.search('cai.ro', new PaginationQueryDto());
 
       const match = {
-        status: PostStatus.Published,
+        ...PUBLIC,
         $or: [
           { title: pattern },
           { tags: pattern },
@@ -184,7 +200,7 @@ describe('PublishedPostsService', () => {
       await service.search('nobody', new PaginationQueryDto());
 
       expect(posts.countDocuments).toHaveBeenCalledWith({
-        status: PostStatus.Published,
+        ...PUBLIC,
         $or: [
           { title: { $regex: 'nobody', $options: 'i' } },
           { tags: { $regex: 'nobody', $options: 'i' } },

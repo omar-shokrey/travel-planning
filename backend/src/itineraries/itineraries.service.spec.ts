@@ -6,11 +6,13 @@ import {
 } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
-import { Mongoose, Types } from 'mongoose';
+import { Error as MongooseError, Mongoose, Types } from 'mongoose';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
+import { ItineraryModeration } from './enums/itinerary-moderation.enum';
 import { ItineraryVisibility } from './enums/itinerary-visibility.enum';
+import { ITINERARY_CHANGED_MESSAGE } from './itineraries.constants';
 import { ItinerariesService } from './itineraries.service';
 import {
   Itinerary,
@@ -103,6 +105,137 @@ describe('ItinerariesService', () => {
     jest.restoreAllMocks();
   });
 
+  describe('admin moderation (GEN-10)', () => {
+    /** A query whose chain (select, lean) ends in `result`. */
+    const query = (result: unknown) => {
+      const chain = {
+        select: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue(result),
+      };
+      return chain;
+    };
+    const id = new Types.ObjectId().toString();
+
+    it.each([
+      [ItineraryModeration.Hidden, true],
+      [ItineraryModeration.Visible, false],
+    ])(
+      'findForAdmin: any itinerary with its days, moderation %p is hidden=%p',
+      async (moderation, hidden) => {
+        const itinerary = stored();
+        itinerary.moderation = moderation;
+        const spy = jest
+          .spyOn(ItineraryModel, 'findById')
+          .mockReturnValue(query(itinerary) as never);
+
+        const found = await service.findForAdmin(id);
+
+        expect(spy).toHaveBeenCalledWith(id);
+        expect(found?.hidden).toBe(hidden);
+        expect(found?.itinerary).toMatchObject({
+          id: itinerary._id.toString(),
+          ownerId: itinerary.ownerId.toString(),
+          days: expect.any(Array),
+        });
+      },
+    );
+
+    it('findForAdmin: null when there is no such itinerary', async () => {
+      jest
+        .spyOn(ItineraryModel, 'findById')
+        .mockReturnValue(query(null) as never);
+
+      expect(await service.findForAdmin(id)).toBeNull();
+    });
+
+    it.each([
+      [1, true],
+      [0, false],
+    ])('existsById: a count of %p is %p', async (count, expected) => {
+      const spy = jest
+        .spyOn(ItineraryModel, 'countDocuments')
+        .mockReturnValue(query(count) as never);
+
+      expect(await service.existsById(id)).toBe(expected);
+      expect(spy).toHaveBeenCalledWith({ _id: id });
+    });
+
+    it('hides an itinerary that is not hidden yet, in one conditional update', async () => {
+      const spy = jest
+        .spyOn(ItineraryModel, 'findOneAndUpdate')
+        .mockReturnValue(query({ _id: id }) as never);
+
+      expect(await service.setHidden(id, true)).toBe(true);
+      expect(spy).toHaveBeenCalledWith(
+        { _id: id, moderation: { $ne: ItineraryModeration.Hidden } },
+        { $set: { moderation: ItineraryModeration.Hidden } },
+        { timestamps: false },
+      );
+    });
+
+    it('shows a hidden itinerary again, only if it is hidden', async () => {
+      const spy = jest
+        .spyOn(ItineraryModel, 'findOneAndUpdate')
+        .mockReturnValue(query({ _id: id }) as never);
+
+      expect(await service.setHidden(id, false)).toBe(true);
+      expect(spy).toHaveBeenCalledWith(
+        { _id: id, moderation: ItineraryModeration.Hidden },
+        { $set: { moderation: ItineraryModeration.Visible } },
+        { timestamps: false },
+      );
+    });
+
+    it('returns false when nothing matched (missing or already in that state)', async () => {
+      jest
+        .spyOn(ItineraryModel, 'findOneAndUpdate')
+        .mockReturnValue(query(null) as never);
+
+      expect(await service.setHidden(id, true)).toBe(false);
+    });
+
+    it('returns null when deleting an itinerary that does not exist', async () => {
+      jest
+        .spyOn(ItineraryModel, 'findByIdAndDelete')
+        .mockReturnValue(query(null) as never);
+
+      expect(await service.removeByAdmin(id)).toBeNull();
+    });
+
+    it('deletes an itinerary without images and returns no file', async () => {
+      const deleteSpy = jest
+        .spyOn(ItineraryModel, 'findByIdAndDelete')
+        .mockReturnValue(query({ days: [{ activities: [] }] }) as never);
+      const findSpy = jest.spyOn(ItineraryModel, 'find');
+
+      expect(await service.removeByAdmin(id)).toEqual([]);
+      expect(deleteSpy).toHaveBeenCalledWith(id);
+      expect(findSpy).not.toHaveBeenCalled();
+    });
+
+    it('returns the activity images that no other itinerary (a clone) still uses', async () => {
+      jest.spyOn(ItineraryModel, 'findByIdAndDelete').mockReturnValue(
+        query({
+          days: [
+            { activities: [{ images: ['a.jpg', 'b.jpg'] }] },
+            { activities: [{ images: ['c.png', 'a.jpg'] }, {}] },
+          ],
+        }) as never,
+      );
+      const findSpy = jest
+        .spyOn(ItineraryModel, 'find')
+        .mockReturnValue(
+          query([{ days: [{ activities: [{ images: ['b.jpg'] }] }] }]) as never,
+        );
+
+      expect(await service.removeByAdmin(id)).toEqual(['a.jpg', 'c.png']);
+      expect(findSpy).toHaveBeenCalledWith({
+        'days.activities.images': { $in: ['a.jpg', 'b.jpg', 'c.png'] },
+      });
+    });
+  });
+
   describe('create', () => {
     it('saves the itinerary for the logged-in user and returns it', async () => {
       const response = await service.create(createDto, ownerId);
@@ -114,6 +247,7 @@ describe('ItinerariesService', () => {
         countries: ['EG'],
         startDate: '2026-12-20',
         visibility: ItineraryVisibility.Private,
+        moderation: ItineraryModeration.Visible,
         dayCount: 0,
       });
       expect(createSpy).toHaveBeenCalledTimes(1);
@@ -218,6 +352,7 @@ describe('ItinerariesService', () => {
           countries: ['EG'],
           startDate: '2026-12-20',
           visibility: ItineraryVisibility.Private,
+          moderation: ItineraryModeration.Visible,
           dayCount: 0,
         },
       ]);
@@ -347,17 +482,48 @@ describe('ItinerariesService', () => {
       expect(itinerary.visibility).toBe(ItineraryVisibility.Private);
     });
 
-    it('leaves a field that is sent as null unchanged', async () => {
+    it('answers 400 for a field sent as null and changes nothing', async () => {
       const itinerary = stored();
-      const dto = { title: null, countries: null, startDate: null };
+      const dto = { title: null, visibility: null };
 
-      const response = await service.update(
-        itinerary.id as string,
-        dto as never,
-        ownerId,
-      );
+      await expect(
+        service.update(itinerary.id as string, dto as never, ownerId),
+      ).rejects.toThrow(BadRequestException);
+      expect(itinerary.save).not.toHaveBeenCalled();
+      expect(itinerary.title).toBe(createDto.title);
+    });
 
-      expect(response).toMatchObject(createDto);
+    it('names every null field in the 400 answer', async () => {
+      const itinerary = stored();
+
+      const error = (await service
+        .update(
+          itinerary.id as string,
+          { title: null, startDate: null } as never,
+          ownerId,
+        )
+        .catch((caught: unknown) => caught)) as BadRequestException;
+
+      expect(error.getResponse()).toEqual({
+        message: 'Validation failed',
+        errors: [
+          { field: 'startDate', messages: ['startDate must not be null'] },
+          { field: 'title', messages: ['title must not be null'] },
+        ],
+      });
+    });
+
+    it('answers 409 when the itinerary was changed at the same moment', async () => {
+      const itinerary = stored();
+      jest
+        .spyOn(itinerary, 'save')
+        .mockRejectedValue(
+          new MongooseError.VersionError(itinerary, 0, ['countries']),
+        );
+
+      await expect(
+        service.update(itinerary.id as string, { countries: ['AE'] }, ownerId),
+      ).rejects.toThrow(new ConflictException(ITINERARY_CHANGED_MESSAGE));
     });
 
     it('answers 404 when the itinerary does not exist', async () => {
@@ -452,6 +618,8 @@ describe('ItinerariesService', () => {
           date: '2026-12-21',
           cityId: 'dubai',
           notes: 'Fly in the morning',
+          activities: [],
+          transportCosts: [],
         },
       ]);
     });
@@ -468,7 +636,10 @@ describe('ItinerariesService', () => {
 
       expect(updateSpy).toHaveBeenCalledWith(
         { _id: itinerary.id, dayCount: { $lt: 60 } },
-        { $push: { days: { cityId: 'cairo' } }, $inc: { dayCount: 1 } },
+        {
+          $push: { days: { cityId: 'cairo' } },
+          $inc: { dayCount: 1, __v: 1 },
+        },
         { returnDocument: 'after', runValidators: true },
       );
     });
@@ -588,6 +759,21 @@ describe('ItinerariesService', () => {
       expect(response.days[1]).not.toHaveProperty('notes');
     });
 
+    it('answers 400 for a field sent as null and changes nothing', async () => {
+      const { itinerary, dayId } = withDays();
+
+      await expect(
+        service.updateDay(
+          itinerary.id as string,
+          dayId,
+          { cityId: null, notes: 'x' } as never,
+          ownerId,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(itinerary.save).not.toHaveBeenCalled();
+      expect(itinerary.days[1].notes).toBe('Museum');
+    });
+
     it('answers 404 when the day is not in the itinerary', async () => {
       const { itinerary } = withDays();
 
@@ -630,6 +816,339 @@ describe('ItinerariesService', () => {
       ).rejects.toThrow(ForbiddenException);
       expect(itinerary.days[1].notes).toBe('Museum');
       expect(itinerary.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('removeDay', () => {
+    /** An itinerary with three days. Returns it with the ids of its days. */
+    const withThreeDays = (owner = ownerId) => {
+      const itinerary = stored(owner);
+      itinerary.days.push(
+        { cityId: 'cairo' } as never,
+        { cityId: 'cairo' } as never,
+        { cityId: 'dubai' } as never,
+      );
+      itinerary.dayCount = 3;
+      return {
+        itinerary,
+        dayIds: itinerary.days.map((day) => day._id.toString()),
+      };
+    };
+
+    /** Replaces the versioned update: it writes the days it is given. */
+    const withUpdate = (itinerary: ItineraryDocument | null) =>
+      jest.spyOn(ItineraryModel, 'findOneAndUpdate').mockImplementation(((
+        _filter: unknown,
+        update: { $set: { days: unknown[]; dayCount: number } },
+      ) => {
+        if (itinerary) {
+          itinerary.set('days', update.$set.days);
+          itinerary.dayCount = update.$set.dayCount;
+        }
+        return Promise.resolve(itinerary);
+      }) as never);
+
+    it('removes the day and renumbers and redates the days after it', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      withUpdate(itinerary);
+
+      const response = await service.removeDay(
+        itinerary.id as string,
+        dayIds[0],
+        ownerId,
+      );
+
+      expect(response.dayCount).toBe(2);
+      expect(response.days).toEqual([
+        expect.objectContaining({
+          id: dayIds[1],
+          dayNumber: 1,
+          date: '2026-12-20',
+        }),
+        expect.objectContaining({
+          id: dayIds[2],
+          dayNumber: 2,
+          date: '2026-12-21',
+        }),
+      ]);
+    });
+
+    it('writes the other days and their count only at the version it read, and bumps it', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      itinerary.__v = 4;
+      const updateSpy = withUpdate(itinerary);
+
+      await service.removeDay(itinerary.id as string, dayIds[1], ownerId);
+
+      const [filter, update] = updateSpy.mock.calls[0] as unknown as [
+        Record<string, unknown>,
+        { $set: { days: { _id: Types.ObjectId }[]; dayCount: number } } & {
+          $inc: Record<string, number>;
+        },
+      ];
+      expect(filter).toEqual({ _id: itinerary._id, __v: 4 });
+      expect(update.$set.days.map((day) => day._id.toString())).toEqual([
+        dayIds[0],
+        dayIds[2],
+      ]);
+      expect(update.$set.dayCount).toBe(2);
+      expect(update.$inc).toEqual({ __v: 1 });
+    });
+
+    it('answers 404 for a day that is not in the itinerary and changes nothing', async () => {
+      const { itinerary } = withThreeDays();
+      const updateSpy = withUpdate(itinerary);
+
+      await expect(
+        service.removeDay(
+          itinerary.id as string,
+          new Types.ObjectId().toString(),
+          ownerId,
+        ),
+      ).rejects.toThrow(new NotFoundException('Day not found'));
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('answers 409 when the itinerary changed between the read and the update', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      withUpdate(null);
+
+      await expect(
+        service.removeDay(itinerary.id as string, dayIds[0], ownerId),
+      ).rejects.toThrow(new ConflictException(ITINERARY_CHANGED_MESSAGE));
+    });
+
+    it('answers 403 for an itinerary of another user and changes nothing', async () => {
+      const { itinerary, dayIds } = withThreeDays(otherUserId);
+      const updateSpy = withUpdate(itinerary);
+
+      await expect(
+        service.removeDay(itinerary.id as string, dayIds[0], ownerId),
+      ).rejects.toThrow(ForbiddenException);
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('moveDay', () => {
+    /** An itinerary with days in cairo, dubai and london, in that order. */
+    const withThreeDays = (owner = ownerId) => {
+      const itinerary = stored(owner);
+      itinerary.days.push(
+        { cityId: 'cairo' } as never,
+        { cityId: 'dubai' } as never,
+        { cityId: 'london' } as never,
+      );
+      itinerary.dayCount = 3;
+      return {
+        itinerary,
+        dayIds: itinerary.days.map((day) => day._id.toString()),
+      };
+    };
+    const withUpdate = (itinerary: ItineraryDocument | null) =>
+      jest.spyOn(ItineraryModel, 'findOneAndUpdate').mockImplementation(((
+        _filter: unknown,
+        update: { $set: { days: unknown[] } },
+      ) => {
+        if (itinerary) itinerary.set('days', update.$set.days);
+        return Promise.resolve(itinerary);
+      }) as never);
+    const cities = (response: { days: { cityId: string }[] }) =>
+      response.days.map((day) => day.cityId);
+
+    it('moves the last day to the front and renumbers and redates every day', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      withUpdate(itinerary);
+
+      const response = await service.moveDay(
+        itinerary.id as string,
+        { dayId: dayIds[2], position: 1 },
+        ownerId,
+      );
+
+      expect(cities(response)).toEqual(['london', 'cairo', 'dubai']);
+      expect(response.days.map((day) => [day.dayNumber, day.date])).toEqual([
+        [1, '2026-12-20'],
+        [2, '2026-12-21'],
+        [3, '2026-12-22'],
+      ]);
+      expect(response.days[0].id).toBe(dayIds[2]);
+    });
+
+    it('moves the first day to the end', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      withUpdate(itinerary);
+
+      const response = await service.moveDay(
+        itinerary.id as string,
+        { dayId: dayIds[0], position: 3 },
+        ownerId,
+      );
+
+      expect(cities(response)).toEqual(['dubai', 'london', 'cairo']);
+    });
+
+    it('writes the new order at the version it read and keeps the day count', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      itinerary.__v = 7;
+      const updateSpy = withUpdate(itinerary);
+
+      await service.moveDay(
+        itinerary.id as string,
+        { dayId: dayIds[1], position: 3 },
+        ownerId,
+      );
+
+      const [filter, update] = updateSpy.mock.calls[0] as unknown as [
+        unknown,
+        { $set: { dayCount: number }; $inc: unknown },
+      ];
+      expect(filter).toEqual({ _id: itinerary._id, __v: 7 });
+      expect(update.$set.dayCount).toBe(3);
+      expect(update.$inc).toEqual({ __v: 1 });
+    });
+
+    it('writes nothing when the day is already at that position', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      const updateSpy = withUpdate(itinerary);
+
+      const response = await service.moveDay(
+        itinerary.id as string,
+        { dayId: dayIds[1], position: 2 },
+        ownerId,
+      );
+
+      expect(cities(response)).toEqual(['cairo', 'dubai', 'london']);
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('answers 400 for a position after the last day', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      const updateSpy = withUpdate(itinerary);
+
+      await expect(
+        service.moveDay(
+          itinerary.id as string,
+          { dayId: dayIds[0], position: 4 },
+          ownerId,
+        ),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'position must be between 1 and 3, the number of days',
+        ),
+      );
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for a day that is not in the itinerary', async () => {
+      const { itinerary } = withThreeDays();
+
+      await expect(
+        service.moveDay(
+          itinerary.id as string,
+          { dayId: new Types.ObjectId().toString(), position: 1 },
+          ownerId,
+        ),
+      ).rejects.toThrow(new NotFoundException('Day not found'));
+    });
+
+    it('answers 409 when the itinerary changed in the meantime', async () => {
+      const { itinerary, dayIds } = withThreeDays();
+      withUpdate(null);
+
+      await expect(
+        service.moveDay(
+          itinerary.id as string,
+          { dayId: dayIds[2], position: 1 },
+          ownerId,
+        ),
+      ).rejects.toThrow(new ConflictException(ITINERARY_CHANGED_MESSAGE));
+    });
+
+    it('answers 403 for an itinerary of another user', async () => {
+      const { itinerary, dayIds } = withThreeDays(otherUserId);
+      const updateSpy = withUpdate(itinerary);
+
+      await expect(
+        service.moveDay(
+          itinerary.id as string,
+          { dayId: dayIds[2], position: 1 },
+          ownerId,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('saveOrConflict', () => {
+    it('answers 409 when the itinerary was changed by another request', async () => {
+      const itinerary = stored();
+      jest
+        .spyOn(itinerary, 'save')
+        .mockRejectedValue(
+          new MongooseError.VersionError(itinerary, 0, ['days']),
+        );
+
+      await expect(service.saveOrConflict(itinerary)).rejects.toThrow(
+        new ConflictException(ITINERARY_CHANGED_MESSAGE),
+      );
+    });
+
+    it('passes any other error on unchanged', async () => {
+      const itinerary = stored();
+      const failure = new Error('connection lost');
+      jest.spyOn(itinerary, 'save').mockRejectedValue(failure);
+
+      await expect(service.saveOrConflict(itinerary)).rejects.toBe(failure);
+    });
+  });
+
+  describe('findOwnerAndVisibilityOrThrow (GEN-09, ITN-21 rule)', () => {
+    /** findById(id).select(fields).lean().exec() resolves to `doc`. */
+    const lookup = (doc: Record<string, unknown> | null) => {
+      const select = jest.fn(() => ({
+        lean: () => ({ exec: () => Promise.resolve(doc) }),
+      }));
+      findByIdSpy.mockReturnValue({ select } as never);
+      return select;
+    };
+    const visible = {
+      ownerId: new Types.ObjectId(ownerId),
+      visibility: 'public',
+      moderation: 'visible',
+      authorDeactivated: false,
+    };
+
+    it('reads only the four fields and says a public, visible itinerary is publicly visible', async () => {
+      const select = lookup(visible);
+
+      await expect(
+        service.findOwnerAndVisibilityOrThrow('some-id'),
+      ).resolves.toEqual({ ownerId, publiclyVisible: true });
+      expect(findByIdSpy).toHaveBeenCalledWith('some-id');
+      expect(select).toHaveBeenCalledWith(
+        'ownerId visibility moderation authorDeactivated',
+      );
+    });
+
+    it.each([
+      ['private', { visibility: 'private' }],
+      ['hidden by an admin', { moderation: 'hidden' }],
+      ['by a deactivated author', { authorDeactivated: true }],
+      ['stored without a moderation value', { moderation: undefined }],
+    ])('is not publicly visible when %s', async (_case, change) => {
+      lookup({ ...visible, ...change });
+
+      await expect(
+        service.findOwnerAndVisibilityOrThrow('some-id'),
+      ).resolves.toEqual({ ownerId, publiclyVisible: false });
+    });
+
+    it('answers 404 when the itinerary does not exist', async () => {
+      lookup(null);
+
+      await expect(
+        service.findOwnerAndVisibilityOrThrow('some-id'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 

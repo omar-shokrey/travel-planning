@@ -17,3 +17,6 @@ export const POST_SEARCH_MAX_LENGTH = 100;
  * limit keeps the `$in` list of one query bounded.
  */
 export const SEARCH_AUTHORS_MAX_COUNT = 500;
+
+/** BLG-05: a comment is non-empty and at most 500 characters. */
+export const COMMENT_BODY_MAX = 500;

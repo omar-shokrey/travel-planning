@@ -169,6 +169,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
         countries: [TEST_COUNTRY],
         startDate: '2026-12-20',
         visibility: 'private',
+        moderation: 'visible',
         dayCount: 0,
       });
 
@@ -277,6 +278,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
         countries: [TEST_COUNTRY],
         startDate: '2026-12-20',
         visibility: 'private',
+        moderation: 'visible',
         dayCount: 0,
       });
       expect(response.body.meta).toEqual({
@@ -350,8 +352,10 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
         countries: [TEST_COUNTRY],
         startDate: '2026-12-20',
         visibility: 'private',
+        moderation: 'visible',
         dayCount: 0,
         days: [],
+        cityGroups: [],
       });
     });
 
@@ -411,6 +415,38 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
       const unknown = await patch({ countries: ['QQ'] });
       expect(unknown.status).toBe(400);
       expect(unknown.body.message).toBe('Unknown country code: QQ');
+    });
+
+    it('answers 400 to a field sent as null and changes nothing', async () => {
+      const id = await existing();
+
+      const response = await http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', owner.cookie)
+        .send({ title: 'Renamed', countries: null });
+
+      expect(response.status).toBe(400);
+      expect(response.body.errors).toEqual([
+        { field: 'countries', messages: ['countries must not be null'] },
+      ]);
+      const stored = await itineraries.findById(id).lean();
+      expect(stored?.title).toBe('Ten days in Egypt');
+      expect(stored?.countries).toEqual([TEST_COUNTRY]);
+    });
+
+    it('shows the owner that an admin hid the itinerary (GEN-10)', async () => {
+      const id = await existing();
+      await itineraries.updateOne(
+        { _id: id },
+        { $set: { moderation: 'hidden' } },
+      );
+
+      const response = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', owner.cookie)
+        .expect(200);
+
+      expect(response.body.moderation).toBe('hidden');
     });
 
     it('answers 403 to another user and changes nothing', async () => {
@@ -624,18 +660,24 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           date: '2026-12-20',
           cityId: CITY_A,
           notes: 'Arrive late',
+          activities: [],
+          transportCosts: [],
         },
         {
           id: expect.stringMatching(/^[0-9a-f]{24}$/),
           dayNumber: 2,
           date: '2026-12-21',
           cityId: CITY_A,
+          activities: [],
+          transportCosts: [],
         },
         {
           id: expect.stringMatching(/^[0-9a-f]{24}$/),
           dayNumber: 3,
           date: '2026-12-22',
           cityId: CITY_B,
+          activities: [],
+          transportCosts: [],
         },
       ]);
     });
@@ -774,6 +816,8 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           date: '2026-12-20',
           cityId: CITY_A,
           notes: 'Original notes',
+          activities: [],
+          transportCosts: [],
         },
         {
           id: dayIds[1],
@@ -781,8 +825,29 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           date: '2026-12-21',
           cityId: CITY_B,
           notes: 'New notes',
+          activities: [],
+          transportCosts: [],
         },
       ]);
+    });
+
+    it('answers 400 to a field sent as null and changes nothing', async () => {
+      const { id, dayIds } = await withTwoDays();
+
+      const response = await patchDay(id, dayIds[0], {
+        cityId: null,
+        notes: 'New notes',
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.body.errors).toEqual([
+        { field: 'cityId', messages: ['cityId must not be null'] },
+      ]);
+      const stored = await itineraries.findById(id).lean();
+      expect(stored?.days[0]).toMatchObject({
+        cityId: CITY_A,
+        notes: 'Original notes',
+      });
     });
 
     it('changes only the field that is sent, and clears notes sent empty', async () => {

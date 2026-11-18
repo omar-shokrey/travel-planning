@@ -348,6 +348,7 @@ describe('Airline profiles (e2e, FLT-01)', () => {
       expect(guest.body).toEqual(loggedIn.body);
       expect(Object.keys(guest.body as object).sort()).toEqual([
         'active',
+        'cancellationTiers',
         'code',
         'createdAt',
         'id',
@@ -435,6 +436,29 @@ describe('Airline profiles (e2e, FLT-01)', () => {
         id: airline.id,
         name: 'Updated Airline',
         logo: airline.logo,
+      });
+    });
+
+    it('returns 400 for a field sent as null and changes nothing', async () => {
+      const admin = await createUser(Role.Admin);
+      const adminCookie = await loginAs(admin);
+      const airline = await createAirline(adminCookie);
+      const moderator = await createUser(Role.AirlineModerator, airline.id);
+      const moderatorCookie = await loginAs(moderator);
+
+      const response = await request(getHttpServer())
+        .patch(`/api/airlines/${airline.id}`)
+        .set('Cookie', moderatorCookie)
+        .send({ name: 'Null Code Airline', code: null })
+        .expect(400);
+
+      expect(response.body.errors).toEqual([
+        { field: 'code', messages: ['code must not be null'] },
+      ]);
+      const stored = await airlines?.findById(airline.id).lean();
+      expect(stored).toMatchObject({
+        name: 'Test Airline',
+        code: airline.code,
       });
     });
 

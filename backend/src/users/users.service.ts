@@ -8,6 +8,7 @@ import {
   type Types,
 } from 'mongoose';
 import { PASSWORD_SALT_ROUNDS } from '../common/constants/password';
+import { ProviderType } from '../common/enums/provider-type.enum';
 import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import { User, type UserDocument } from './models/user.schema';
@@ -35,6 +36,21 @@ export interface CreateUserInput {
   password: string;
   /** When the user accepted the terms and the privacy policy. */
   consentAcceptedAt: Date;
+}
+
+/**
+ * What the admin gives to create a moderator account (ACC-13). The status and
+ * the password-change flag are not here: every moderator starts active and
+ * must change the temporary password.
+ */
+export interface CreateModeratorInput {
+  name: string;
+  email: string;
+  /** The temporary password. It is hashed here and never stored or logged. */
+  password: string;
+  role: Role.AirlineModerator | Role.HotelModerator;
+  providerType: ProviderType;
+  providerId: Types.ObjectId;
 }
 
 /** When a run of failed logins locks an account (ACC-05). */
@@ -86,6 +102,54 @@ export class UsersService {
       status: UserStatus.Active,
       consentAcceptedAt: input.consentAcceptedAt,
     });
+  }
+
+  /**
+   * Creates a moderator account linked to exactly one airline or hotel
+   * (ACC-13). It starts active, with `mustChangePassword` set, so the
+   * moderator replaces the temporary password at the first login (ACC-08).
+   * The caller has checked that the provider exists.
+   */
+  async createModerator(input: CreateModeratorInput): Promise<UserDocument> {
+    const email = input.email.trim().toLowerCase();
+    if (await this.users.exists({ email })) {
+      throw new ConflictException(EMAIL_TAKEN_MESSAGE);
+    }
+
+    const passwordHash = await hash(input.password, PASSWORD_SALT_ROUNDS);
+    // As in createRegisteredUser, the unique index on `email` catches two
+    // requests that pass the check at the same moment (409 via the filter).
+    return this.users.create({
+      name: input.name,
+      email,
+      passwordHash,
+      role: input.role,
+      status: UserStatus.Active,
+      mustChangePassword: true,
+      assignment: {
+        providerType: input.providerType,
+        providerId: input.providerId,
+      },
+    });
+  }
+
+  /**
+   * Moves an account from one status to another (ACC-16), only if it still
+   * has the `from` status: two admins acting at the same moment cannot both
+   * win, and the loser gets `null`. It returns the account after the change.
+   */
+  changeStatus(
+    id: Types.ObjectId,
+    from: UserStatus,
+    to: UserStatus,
+  ): Promise<UserDocument | null> {
+    return this.users
+      .findOneAndUpdate(
+        { _id: id, status: from },
+        { $set: { status: to } },
+        { returnDocument: 'after' },
+      )
+      .exec();
   }
 
   /**
@@ -312,5 +376,26 @@ export class UsersService {
         { $set: { failedLoginAttempts: 0 }, $unset: { lockedUntil: 1 } },
       )
       .exec();
+  }
+
+  /**
+   * The ids of the moderators assigned to one hotel or airline, for the
+   * notification of a deactivated provider (ACC-15). Accounts closed by their
+   * owner (ACC-12) are left out. Uses the index on `assignment.providerId`.
+   */
+  async findModeratorIdsOfProvider(
+    providerType: ProviderType,
+    providerId: Types.ObjectId,
+  ): Promise<Types.ObjectId[]> {
+    const moderators = await this.users
+      .find({
+        'assignment.providerId': providerId,
+        'assignment.providerType': providerType,
+        status: { $ne: UserStatus.Deactivated },
+      })
+      .select('_id')
+      .lean()
+      .exec();
+    return moderators.map((moderator) => moderator._id);
   }
 }
