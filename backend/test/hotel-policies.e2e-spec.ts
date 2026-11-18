@@ -16,6 +16,7 @@ import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
 import { Hotel } from './../src/hotels/models/hotel.schema';
 import { User } from './../src/users/models/user.schema';
+import { deleteSessionsOf } from './support/delete-sessions';
 
 const PASSWORD = 'Passw0rdOK';
 const TIMES = {
@@ -117,6 +118,7 @@ describe('PUT /api/hotels/:id/policies (e2e, HTL-09, HTL-10)', () => {
       await hotels.findByIdAndDelete(id);
     }
     for (const id of createdUserIds) {
+      await deleteSessionsOf(app, id);
       await users.findByIdAndDelete(id);
     }
     await app.close();
@@ -325,6 +327,22 @@ describe('PUT /api/hotels/:id/policies (e2e, HTL-09, HTL-10)', () => {
         },
       ],
     });
+  });
+
+  it('answers 400, not 500, for a tier that is not an object, and keeps the policies (HTL-10)', async () => {
+    const before = await hotels.findById(hotelId).lean().exec();
+
+    for (const cancellationTiers of [[[]], [[{ daysBefore: 7 }]], [null]]) {
+      const response = await setPolicies(
+        hotelId,
+        { ...TIMES, cancellationTiers },
+        moderatorCookie,
+      );
+
+      expect(response.status).toBe(400);
+    }
+    const after = await hotels.findById(hotelId).lean().exec();
+    expect(after?.policy).toEqual(before?.policy);
   });
 
   it('answers 403 for a registered user and for an admin', async () => {

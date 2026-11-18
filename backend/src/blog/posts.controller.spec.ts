@@ -69,4 +69,80 @@ describe('PostsController', () => {
       ).toEqual([Role.User]);
     });
   });
+
+  describe('update (BLG-04)', () => {
+    it('passes the post id, update data, and authenticated user id to the service', async () => {
+      const post = {
+        id: 'post-1',
+        authorId: '507f1f77bcf86cd799439011',
+        title: 'Updated title',
+        body: 'Updated body',
+        status: PostStatus.Draft,
+        tags: [],
+        images: [],
+      };
+
+      const postsService = {
+        update: jest.fn().mockResolvedValue(post),
+      };
+
+      const controller = new PostsController(
+        postsService as unknown as PostsService,
+      );
+
+      const dto = {
+        title: 'Updated title',
+        body: 'Updated body',
+      };
+
+      expect(
+        await controller.update('post-1', dto, '507f1f77bcf86cd799439011'),
+      ).toBe(post);
+
+      expect(postsService.update).toHaveBeenCalledWith(
+        'post-1',
+        dto,
+        '507f1f77bcf86cd799439011',
+      );
+    });
+
+    it('is for registered users only', () => {
+      expect(
+        new Reflector().get<Role[] | undefined>(
+          ROLES_KEY,
+          PostsController.prototype.update,
+        ),
+      ).toEqual([Role.User]);
+    });
+  });
+
+  describe('remove (BLG-04)', () => {
+    it('passes the post id and authenticated user id to the service', async () => {
+      const postsService = {
+        remove: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const controller = new PostsController(
+        postsService as unknown as PostsService,
+      );
+
+      await expect(
+        controller.remove('post-1', '507f1f77bcf86cd799439011'),
+      ).resolves.toBeUndefined();
+
+      expect(postsService.remove).toHaveBeenCalledWith(
+        'post-1',
+        '507f1f77bcf86cd799439011',
+      );
+    });
+
+    it('is for registered users only', () => {
+      expect(
+        new Reflector().get<Role[] | undefined>(
+          ROLES_KEY,
+          PostsController.prototype.remove,
+        ),
+      ).toEqual([Role.User]);
+    });
+  });
 });
