@@ -7,6 +7,7 @@ import { Country } from '../reference/models/country.schema';
 import { User } from '../users/models/user.schema';
 import { SearchPublicItinerariesQueryDto } from './dto/search-public-itineraries-query.dto';
 import { BudgetCategory } from './enums/budget-category.enum';
+import { ItineraryModeration } from './enums/itinerary-moderation.enum';
 import { ItineraryVisibility } from './enums/itinerary-visibility.enum';
 import {
   Itinerary,
@@ -130,6 +131,7 @@ describe('PublicItinerariesService', () => {
           title: 'Ten days in Egypt',
           visibility: ItineraryVisibility.Public,
           author: { id: authorId.toString(), name: 'Sara Ahmed' },
+          moderation: ItineraryModeration.Visible,
         }),
       ]);
     });
@@ -231,6 +233,7 @@ describe('PublicItinerariesService', () => {
         id: authorId.toString(),
         name: 'Sara Ahmed',
       });
+      expect(response.moderation).toBe(ItineraryModeration.Visible);
       expect(response.days[0].activities[0].name).toBe('Museum');
       expect(response.cityGroups[0].budgetSubtotal).toEqual([
         { amount: 11500, currency: 'EGP' },

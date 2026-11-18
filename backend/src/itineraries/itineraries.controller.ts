@@ -26,8 +26,10 @@ import {
 } from '@nestjs/swagger';
 import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
 import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { Role } from '../common/enums/role.enum';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { AddDayDto } from './dto/add-day.dto';
 import { CreateActivityDto } from './dto/create-activity.dto';
@@ -45,6 +47,11 @@ import { TransportCostsService } from './transport-costs.service';
 @ApiTags('Itineraries')
 @ApiCookieAuth()
 @ApiUnauthorizedResponse({ description: 'Not logged in' })
+@ApiForbiddenResponse({
+  description:
+    'Not a registered user: administrators and moderators cannot use itineraries',
+})
+@Roles(Role.User)
 @Controller('itineraries')
 export class ItinerariesController {
   constructor(
@@ -96,7 +103,8 @@ export class ItinerariesController {
   @ApiOkResponse({ type: ItineraryDetailResponseDto })
   @ApiBadRequestResponse({ description: 'The id is not a valid id' })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({ description: 'No itinerary has this id' })
   findOne(
@@ -110,18 +118,23 @@ export class ItinerariesController {
   @ApiOperation({
     summary: 'Edit an itinerary',
     description:
-      'ITN-01, ITN-20. Edit the title, the countries or the start date of your own itinerary, or set its visibility. A public itinerary appears in the shared search and is read-only to other users. Setting it private removes it from the search at once. Send only the fields that change.',
+      'ITN-01, ITN-20. Edit the title, the countries or the start date of your own itinerary, or set its visibility. A public itinerary appears in the shared search and is read-only to other users. Setting it private removes it from the search at once. Send only the fields that change; null is refused.',
   })
   @ApiParam({ name: 'id', description: 'Itinerary id' })
   @ApiOkResponse({ type: ItineraryResponseDto })
   @ApiBadRequestResponse({
     description:
-      'The id or a field is invalid, an unknown field was sent, or a country code is not in the country list',
+      'The id or a field is invalid, a field is null, an unknown field was sent, or a country code is not in the country list',
   })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({ description: 'No itinerary has this id' })
+  @ApiConflictResponse({
+    description:
+      'The itinerary was changed by another request at the same time',
+  })
   update(
     @Param('id', ParseObjectIdPipe) id: string,
     @Body() dto: UpdateItineraryDto,
@@ -141,7 +154,8 @@ export class ItinerariesController {
   @ApiNoContentResponse({ description: 'The itinerary was deleted' })
   @ApiBadRequestResponse({ description: 'The id is not a valid id' })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({ description: 'No itinerary has this id' })
   remove(
@@ -164,7 +178,8 @@ export class ItinerariesController {
       'The id or a field is invalid, an unknown field was sent, or the city is not in the city list',
   })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({ description: 'No itinerary has this id' })
   @ApiConflictResponse({ description: 'The itinerary already has 60 days' })
@@ -190,7 +205,8 @@ export class ItinerariesController {
       'The id or a field is invalid, an unknown field was sent, or the position is after the last day',
   })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({
     description: 'No itinerary has this id, or it has no day with this id',
@@ -211,20 +227,25 @@ export class ItinerariesController {
   @ApiOperation({
     summary: 'Edit a day',
     description:
-      'ITN-05. Edit the city or the notes of a day of your own itinerary. Send only the fields that change. Send empty notes to clear them.',
+      'ITN-05. Edit the city or the notes of a day of your own itinerary. Send only the fields that change; null is refused. Send empty notes to clear them.',
   })
   @ApiParam({ name: 'id', description: 'Itinerary id' })
   @ApiParam({ name: 'dayId', description: 'Day id' })
   @ApiOkResponse({ type: ItineraryDetailResponseDto })
   @ApiBadRequestResponse({
     description:
-      'An id or a field is invalid, an unknown field was sent, or the city is not in the city list',
+      'An id or a field is invalid, a field is null, an unknown field was sent, or the city is not in the city list',
   })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({
     description: 'No itinerary has this id, or it has no day with this id',
+  })
+  @ApiConflictResponse({
+    description:
+      'The itinerary was changed by another request at the same time',
   })
   updateDay(
     @Param('id', ParseObjectIdPipe) id: string,
@@ -246,7 +267,8 @@ export class ItinerariesController {
   @ApiOkResponse({ type: ItineraryDetailResponseDto })
   @ApiBadRequestResponse({ description: 'An id is not a valid id' })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({
     description: 'No itinerary has this id, or it has no day with this id',
@@ -273,7 +295,8 @@ export class ItinerariesController {
       'An id or a field is invalid, an unknown field was sent, a cost has no currency, or the currency is not supported',
   })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({
     description: 'No itinerary has this id, or it has no day with this id',
@@ -304,7 +327,8 @@ export class ItinerariesController {
       'The id or a field is invalid, an unknown field was sent, a city is not in the city list, both cities are the same, or the currency is not supported',
   })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({
     description: 'No itinerary has this id, or it has no day with this dayId',
