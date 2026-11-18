@@ -4,6 +4,7 @@ import { UserStatus } from '../common/enums/user-status.enum';
 import type { User } from '../users/models/user.schema';
 import { DELETED_USER_NAME } from './blog.constants';
 import type { BlogPost } from './models/blog-post.schema';
+import { PostModeration } from './models/post-moderation.enum';
 import { PostStatus } from './models/post-status.enum';
 import { PublishedPostsService } from './published-posts.service';
 
@@ -61,8 +62,19 @@ function setup(stored = [post('6740f1c2a4b5c6d7e8f9aaa1', sara)]) {
 }
 
 describe('PublishedPostsService', () => {
+  describe('publishedFilter (GEN-10)', () => {
+    it('lets the public see published posts that an admin has not hidden', () => {
+      const { service } = setup();
+
+      expect(service.publishedFilter()).toEqual({
+        status: PostStatus.Published,
+        moderation: { $ne: PostModeration.Hidden },
+      });
+    });
+  });
+
   describe('listByTag (BLG-08)', () => {
-    it('lists only published posts that have the tag, newest first, one page', async () => {
+    it('lists only the published, not hidden posts that have the tag, newest first, one page', async () => {
       const { posts, postsQuery, service } = setup();
       const query = Object.assign(new PaginationQueryDto(), {
         page: 2,
@@ -71,7 +83,11 @@ describe('PublishedPostsService', () => {
 
       await service.listByTag('cairo', query);
 
-      const filter = { status: PostStatus.Published, tags: 'cairo' };
+      const filter = {
+        status: PostStatus.Published,
+        moderation: { $ne: PostModeration.Hidden },
+        tags: 'cairo',
+      };
       expect(posts.find).toHaveBeenCalledWith(filter);
       expect(posts.countDocuments).toHaveBeenCalledWith(filter);
       expect(postsQuery.sort).toHaveBeenCalledWith({

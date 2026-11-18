@@ -10,6 +10,7 @@ import { configureApp, setupSwagger } from './../src/app.setup';
 import { LOGIN_REQUIRED_MESSAGE } from './../src/auth/auth.constants';
 import { DELETED_USER_NAME } from './../src/blog/blog.constants';
 import { BlogPost } from './../src/blog/models/blog-post.schema';
+import { PostModeration } from './../src/blog/models/post-moderation.enum';
 import { PostStatus } from './../src/blog/models/post-status.enum';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
@@ -20,6 +21,7 @@ import { sessionCookieFor } from './support/session-cookie';
 /** A tag no real post has, so the tag page shows only the posts of this run. */
 const TAG = `blg08-${randomUUID().slice(0, 8)}`;
 const OTHER_TAG = `blg08-${randomUUID().slice(0, 8)}`;
+const HIDDEN_TAG = `blg08-${randomUUID().slice(0, 8)}`;
 
 interface Actor {
   id: string;
@@ -370,6 +372,65 @@ describe('Post tags (e2e, BLG-08)', () => {
 
       expect(asAdmin.status).toBe(200);
       expect(asAdmin.body).toEqual(guest.body);
+    });
+  });
+
+  describe('GET /api/tags/:tag/posts leaves out hidden posts (GEN-10)', () => {
+    let shown: string;
+    let moderated: string;
+
+    beforeAll(async () => {
+      shown = await createPost(author.id, {
+        title: 'Never hidden',
+        tags: [HIDDEN_TAG],
+        publishedAt: new Date(Date.UTC(2026, 10, 1, 9, 0, 0)),
+      });
+      moderated = await createPost(author.id, {
+        title: 'Hidden by an admin',
+        tags: [HIDDEN_TAG],
+        publishedAt: new Date(Date.UTC(2026, 10, 2, 9, 0, 0)),
+      });
+    });
+
+    /** What an admin's hide or show does, on this one post, by id. */
+    const setModeration = (id: string, moderation: PostModeration) =>
+      posts.updateOne({ _id: id }, { $set: { moderation } });
+
+    const listIds = async (cookie?: string) => {
+      const call = http().get(`/api/tags/${HIDDEN_TAG}/posts`);
+      const response = await (cookie ? call.set('Cookie', cookie) : call);
+      expect(response.status).toBe(200);
+      return {
+        ids: (response.body.items as SummaryRow[]).map((row) => row.id),
+        total: response.body.meta.total as number,
+      };
+    };
+
+    it('lists both posts while neither is hidden', async () => {
+      expect(await listIds()).toEqual({ ids: [moderated, shown], total: 2 });
+    });
+
+    it('leaves a hidden post out of the page and out of the total, for everyone', async () => {
+      await setModeration(moderated, PostModeration.Hidden);
+
+      const expected = { ids: [shown], total: 1 };
+      expect(await listIds()).toEqual(expected);
+      // A public list does not know who is asking: the author does not see it
+      // here either (they still have it in "my posts"), nor does an admin.
+      expect(await listIds(author.cookie)).toEqual(expected);
+      expect(await listIds(admin.cookie)).toEqual(expected);
+    });
+
+    it('lists the post again once it is shown again', async () => {
+      await setModeration(moderated, PostModeration.Visible);
+
+      expect(await listIds()).toEqual({ ids: [moderated, shown], total: 2 });
+    });
+
+    it('lists a post stored before moderation existed as visible', async () => {
+      await posts.updateOne({ _id: moderated }, { $unset: { moderation: 1 } });
+
+      expect(await listIds()).toEqual({ ids: [moderated, shown], total: 2 });
     });
   });
 
