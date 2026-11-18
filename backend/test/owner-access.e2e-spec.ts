@@ -72,6 +72,12 @@ interface SwaggerOperation {
  * cover what exists today: private itineraries and the own-account route. The
  * `it.todo` lines at the end mark the booking checks that the booking pull
  * requests add.
+ *
+ * Itineraries are for registered users only (ITN-01, ITN-21): an
+ * administrator and both moderators are refused by their role (403) before
+ * any lookup or id check, so they get 403 even for a missing itinerary or an
+ * invalid id. Another registered user gets 403 for someone else’s
+ * itinerary and 404 for a missing one.
  */
 describe('Owner-only access (e2e, ACC-11)', () => {
   let app: NestExpressApplication;
@@ -187,13 +193,21 @@ describe('Owner-only access (e2e, ACC-11)', () => {
     hotelModerator,
   ];
 
-  /** The requests of the outsiders that did not get `expected`, as readable lines. */
+  /** The accounts that may not use itineraries at all (ITN-01): an administrator and both moderators. */
+  const staff = (): Actor[] => [admin, airlineModerator, hotelModerator];
+
+  /**
+   * The requests of the outsiders that did not get the answer they should, as
+   * readable lines: another user gets `expectedForUser` (403, or 404 for a
+   * missing itinerary), staff always get 403 from their role.
+   */
   const wrongAnswers = async (
     itinerary: StoredItinerary,
-    expected: number,
+    expectedForUser: number,
   ): Promise<string[]> => {
     const failures: string[] = [];
     for (const actor of outsiders()) {
+      const expected = actor.role === Role.User ? expectedForUser : 403;
       for (const route of routesOf(itinerary)) {
         const response = await send(route, actor.cookie);
         if (response.status !== expected) {
@@ -377,10 +391,15 @@ describe('Owner-only access (e2e, ACC-11)', () => {
     );
 
     it('does not appear in the list of anyone else', async () => {
-      for (const actor of outsiders()) {
+      const others = await call('GET', '/api/itineraries', anotherUser.cookie);
+      expect(others.status).toBe(200);
+      expect(JSON.stringify(others.body)).not.toContain(itinerary.id);
+
+      // Staff cannot list itineraries at all.
+      for (const actor of staff()) {
         const response = await call('GET', '/api/itineraries', actor.cookie);
 
-        expect(response.status).toBe(200);
+        expect(response.status).toBe(403);
         expect(JSON.stringify(response.body)).not.toContain(itinerary.id);
       }
 
@@ -422,7 +441,7 @@ describe('Owner-only access (e2e, ACC-11)', () => {
     };
 
     it(
-      'answers 404 to everyone: the ownership check comes after the lookup',
+      'answers 404 to the owner and another user (the ownership check comes after the lookup), and 403 to staff',
       async () => {
         expect(await wrongAnswers(missing, 404)).toEqual([]);
 
@@ -434,8 +453,8 @@ describe('Owner-only access (e2e, ACC-11)', () => {
       MANY_REQUESTS_TIMEOUT,
     );
 
-    it('answers 400 to an id that is not a valid id, to every role', async () => {
-      for (const actor of [owner, ...outsiders()]) {
+    it('answers 400 to an id that is not a valid id, to a registered user', async () => {
+      for (const actor of [owner, anotherUser]) {
         const response = await call(
           'GET',
           '/api/itineraries/not-an-id',
@@ -444,6 +463,94 @@ describe('Owner-only access (e2e, ACC-11)', () => {
 
         expect(response.status).toBe(400);
       }
+    });
+
+    it('answers 403 to staff even for an id that is not a valid id: the role check comes first', async () => {
+      for (const actor of staff()) {
+        const response = await call(
+          'GET',
+          '/api/itineraries/not-an-id',
+          actor.cookie,
+        );
+
+        expect(response.status).toBe(403);
+      }
+    });
+  });
+
+  describe('itineraries are for registered users only (ITN-01, ITN-21)', () => {
+    it(
+      'refuses staff with 403 on create, clone, and the activity and transport cost routes, and they own no itinerary afterwards',
+      async () => {
+        const shared = await createItinerary(ItineraryVisibility.Public);
+        const routes: RouteCall[] = [
+          {
+            label: 'POST /api/itineraries',
+            verb: 'POST',
+            path: '/api/itineraries',
+            body: {
+              title: 'Staff trip',
+              countries: ['EG'],
+              startDate: '2026-12-20',
+            },
+          },
+          {
+            label: 'POST /api/itineraries/:id/clone',
+            verb: 'POST',
+            path: `/api/itineraries/${shared.id}/clone`,
+          },
+          {
+            label: 'PATCH /api/activities/:id',
+            verb: 'PATCH',
+            path: `/api/activities/${new Types.ObjectId().toString()}`,
+            body: { name: 'Taken over' },
+          },
+          {
+            label: 'DELETE /api/transport-costs/:id',
+            verb: 'DELETE',
+            path: `/api/transport-costs/${new Types.ObjectId().toString()}`,
+          },
+        ];
+        const failures: string[] = [];
+
+        for (const actor of staff()) {
+          for (const route of routes) {
+            const response = await send(route, actor.cookie);
+            if (response.status !== 403) {
+              failures.push(
+                `${actor.role}: ${route.label} answered ${response.status}`,
+              );
+            }
+          }
+        }
+
+        expect(failures).toEqual([]);
+        for (const actor of staff()) {
+          expect(
+            await itineraries.countDocuments({
+              ownerId: new Types.ObjectId(actor.id),
+            }),
+          ).toBe(0);
+        }
+      },
+      MANY_REQUESTS_TIMEOUT,
+    );
+
+    it('answers 404, not 403, to a registered user on an unknown activity or transport cost', async () => {
+      const activity = await call(
+        'PATCH',
+        `/api/activities/${new Types.ObjectId().toString()}`,
+        anotherUser.cookie,
+        { name: 'Taken over' },
+      );
+      const transportCost = await call(
+        'DELETE',
+        `/api/transport-costs/${new Types.ObjectId().toString()}`,
+        anotherUser.cookie,
+      );
+
+      expect(activity.status).toBe(404);
+      expect(transportCost.status).toBe(404);
     });
   });
 
