@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform, type TransformFnParams } from 'class-transformer';
-import { IsInt, IsNotEmpty, IsString, Min } from 'class-validator';
+import { IsInt, IsNotEmpty, IsString, Max, Min } from 'class-validator';
+import { ROOM_PRICE_MAX } from '../hotels.constants';
 
 const trim = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.trim() : value;
@@ -34,9 +35,13 @@ export class CreateRoomDto {
   @ApiProperty({
     example: 12500,
     minimum: 1,
-    description: 'Price per night in minor units',
+    maximum: ROOM_PRICE_MAX,
+    description: `Price per night in minor units, at most ${ROOM_PRICE_MAX}`,
   })
   @IsInt()
   @Min(1)
+  @Max(ROOM_PRICE_MAX, {
+    message: `pricePerNight must be at most ${ROOM_PRICE_MAX}`,
+  })
   pricePerNight: number;
 }

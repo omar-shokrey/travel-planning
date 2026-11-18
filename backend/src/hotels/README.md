@@ -68,6 +68,13 @@ hotel, so callers cannot choose a mismatched country.
   `pricePerNight`. It trims the text fields and requires positive whole-number
   beds, occupancy and price (minor units). The server sets `hotelId` and
   `active`.
+- The price per night is capped at `ROOM_PRICE_MAX` (1,000,000,000 minor
+  units, 10,000,000.00) in the DTO and the schema; a higher price answers 400.
+  The workbook gives no limit. It is an engineering limit: a reservation
+  (HTL-16) multiplies the price by nights and rooms, and
+  `ROOM_PRICE_MAX` x 366 nights x 1000 rooms = 3.66e14 stays below
+  `Number.MAX_SAFE_INTEGER` (about 9.007e15), so totals stay exact whole
+  numbers.
 - The real-AppModule e2e coverage is in `hotels-rooms.e2e-spec.ts`; it creates
   its own hotels and users, explicitly awaits the room indexes before testing
   hotel-scoped uniqueness, and removes its fixtures at the end.
@@ -85,3 +92,15 @@ hotel, so callers cannot choose a mismatched country.
   cannot both add overlapping ranges.
 - Past ranges are accepted because HTL-04 sets no limit; bookings are checked
   against dates later (HTL-11/HTL-18).
+
+## Editing a room (HTL-05)
+
+- `PATCH /api/hotels/:id/rooms/:roomId` changes `beds`, `maxOccupancy` and `pricePerNight`, and `PATCH /api/hotels/:id/rooms/:roomId/availability` changes the availability, as in the endpoint table. Both are for the moderator assigned to the hotel, checked through `HotelsService.findManagedEntityOrThrow`. A room of another hotel answers 404, because the room is looked up inside the hotel of the route.
+- The code is in its own `HotelRoomsService` and `HotelRoomsController`, so it does not collide with the room creation and availability code of HTL-03 and HTL-04 in `HotelsService`.
+- `UpdateRoomDto` lists only the three fields HTL-05 names. The room number and type are not editable here, and a body with only unknown fields or no field answers 400. A field sent as `null` answers 400, because every room field is required.
+- A new price applies to new reservations only. A reservation stores the price it was made at, so changing the room's price changes nothing that already exists.
+- The new price has the same cap as in HTL-03: at most `ROOM_PRICE_MAX` (1,000,000,000 minor units), or the request answers 400. The workbook gives no limit; it is an engineering limit so that a reservation total stays exact: `ROOM_PRICE_MAX` x 366 nights x 1000 rooms = 3.66e14, below `Number.MAX_SAFE_INTEGER` (about 9.007e15).
+- The availability route takes the complete new list of ranges and replaces the old one. The HTL-04 route only adds a range; HTL-05 asks to edit availability, which also means shortening or removing ranges, and one list is the simplest way to do all three. Overlapping ranges answer 400; ranges that only touch are allowed, as in HTL-04. At most 100 ranges (`ROOM_AVAILABILITY_RANGES_MAX_COUNT`), a limit I chose because the workbook gives none.
+- "Availability cannot be removed for dates with confirmed reservations": before saving, the service reads the room's nights in `room_nights` that are `booked`, or `held` with a hold that has not expired, and answers 409 if one of them would fall outside the new ranges. A held night counts too, because its reservation may still be paid and confirmed. A `blocked` night does not count: it is the moderator's own block (HTL-06).
+- `room_nights` is the collection of the data model in the spec. I added its schema (`RoomNight`, with the unique (`roomId`, `date`) index) because HTL-05 needs to read it. Nothing writes to it yet: the holds and reservations of HTL-16 and HTL-18 will. Until then no night is reserved, so the 409 can only be reached by the end-to-end test, which creates nights itself.
+- The check and the save are two steps. A reservation made between them could end up outside the availability; the hold of HTL-18 must therefore check the availability again when it inserts its nights.
