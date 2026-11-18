@@ -327,19 +327,21 @@ describe('PATCH/DELETE /api/posts/:id (e2e, BLG-04)', () => {
     expect(deleteResponse.body.message).toBe('You must log in to do this');
   });
 
-  it('rejects tags and unknown fields in the PATCH body', async () => {
+  // Tags became editable with BLG-08 (test/blog-tags.e2e-spec.ts). Images
+  // still have their own routes (BLG-10), so they stay refused here.
+  it('rejects images and unknown fields in the PATCH body', async () => {
     const user = await createUser();
     const cookie = await loginAs(user);
     const postId = await createPost(user, cookie);
 
-    const tagsResponse = await request(app.getHttpServer())
+    const imagesResponse = await request(app.getHttpServer())
       .patch(`/api/posts/${postId}`)
       .set('Cookie', cookie)
       .send({
-        tags: ['travel'],
+        images: ['photo.png'],
       });
 
-    expect(tagsResponse.status).toBe(400);
+    expect(imagesResponse.status).toBe(400);
 
     const unknownFieldResponse = await request(app.getHttpServer())
       .patch(`/api/posts/${postId}`)
