@@ -128,7 +128,14 @@ describe('Airport list (e2e, FLT-02)', () => {
   });
 
   it('lists every airport with its IATA code, name, city, country and time zone', async () => {
+    // Other suites create and delete airports in the same database when they
+    // run in parallel, so the list is compared with the ids stored before and
+    // after it was read, not with one exact count.
+    const storedIds = async (): Promise<string[]> =>
+      (await airports.find().select('_id').lean().exec()).map(({ _id }) => _id);
+    const before = await storedIds();
     const listed = await listAll();
+    const after = await storedIds();
 
     for (const [index, code] of testAirports.entries()) {
       expect(listed).toContainEqual({
@@ -141,7 +148,17 @@ describe('Airport list (e2e, FLT-02)', () => {
         timeZone: ['Africa/Cairo', 'Asia/Tokyo'][index],
       });
     }
-    expect(listed).toHaveLength(await airports.countDocuments());
+    const listedIds = new Set(listed.map((airport) => airport.id));
+    // No airport is listed twice.
+    expect(listedIds.size).toBe(listed.length);
+    const stable = before.filter((id) => after.includes(id));
+    const seen = new Set([...before, ...after]);
+    for (const id of stable) {
+      expect([id, listedIds.has(id)]).toEqual([id, true]);
+    }
+    for (const id of listedIds) {
+      expect([id, seen.has(id)]).toEqual([id, true]);
+    }
   });
 
   it('sorts the airports by IATA code', async () => {
@@ -151,18 +168,27 @@ describe('Airport list (e2e, FLT-02)', () => {
   });
 
   it('pages the list', async () => {
-    const total = await airports.countDocuments();
+    // Other suites create and delete airports in the same database when they
+    // run in parallel, so the total must lie between the counts read before
+    // and after the request.
+    const before = await airports.countDocuments();
 
     const response = await http()
       .get('/api/airports?page=2&limit=1')
       .expect(200);
 
+    const after = await airports.countDocuments();
+    const { meta } = response.body as {
+      meta: { page: number; limit: number; total: number; totalPages: number };
+    };
     expect(response.body.items).toHaveLength(1);
-    expect(response.body.meta).toEqual({
+    expect(meta.total).toBeGreaterThanOrEqual(Math.min(before, after));
+    expect(meta.total).toBeLessThanOrEqual(Math.max(before, after));
+    expect(meta).toEqual({
       page: 2,
       limit: 1,
-      total,
-      totalPages: total,
+      total: meta.total,
+      totalPages: meta.total,
     });
   });
 

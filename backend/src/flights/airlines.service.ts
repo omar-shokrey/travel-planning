@@ -80,6 +80,24 @@ export class AirlinesService {
   }
 
   /**
+   * Returns the airline assigned to an airline moderator.
+   * Used by feature modules that need to determine the moderator's
+   * airline without trusting an airline id supplied by the client.
+   */
+  async findAssignedAirlineOrThrow(userId: string): Promise<AirlineDocument> {
+    const user = await this.usersService.findEntityById(userId);
+
+    if (
+      user?.assignment?.providerType !== ProviderType.Airline ||
+      !user.assignment.providerId
+    ) {
+      throw new ForbiddenException('You are not assigned to an airline');
+    }
+
+    return this.findEntityOrThrow(user.assignment.providerId.toString());
+  }
+
+  /**
    * Replaces the cancellation tiers of an airline (FLT-09). Only the airline
    * moderator assigned to it may do it. The tiers are stored highest
    * threshold first, in one update, so a reader never sees half a policy.

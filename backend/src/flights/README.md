@@ -1,15 +1,16 @@
 # flights
 
-Owns airline profile persistence for FLT-01: the `airlines` collection, `Airline` schema, `AirlinesService`, controller, request and response DTOs, and response mapper. The implemented scope in this module is airline profile creation, retrieval, and update (FLT-01), and the airline cancellation policy (FLT-09).
+Owns airline profile persistence for FLT-01: the `airlines` collection, `Airline` schema, `AirlinesService`, controller, request and response DTOs, and response mapper. The implemented scope in this module is airline profile creation, retrieval, and update (FLT-01), the airline cancellation policy (FLT-09), and flight creation (FLT-03: the `flights` collection, `Flight` schema, `FlightsService` and `FlightsController`).
 
 ## Built so far
 
-| Route                                       | Requirement | Access                             |
-| ------------------------------------------- | ----------- | ---------------------------------- |
-| `POST /api/airlines`                        | FLT-01      | Administrator                      |
-| `GET /api/airlines/:id`                     | FLT-01      | Anyone (guest)                     |
-| `PATCH /api/airlines/:id`                   | FLT-01      | Airline moderator for that airline |
-| `PUT /api/airlines/:id/cancellation-policy` | FLT-09      | Airline moderator for that airline |
+| Route                                       | Requirement    | Access                                     |
+| ------------------------------------------- | -------------- | ------------------------------------------ |
+| `POST /api/airlines`                        | FLT-01         | Administrator                              |
+| `GET /api/airlines/:id`                     | FLT-01         | Anyone (guest)                             |
+| `PATCH /api/airlines/:id`                   | FLT-01         | Airline moderator for that airline         |
+| `PUT /api/airlines/:id/cancellation-policy` | FLT-09         | Airline moderator for that airline         |
+| `POST /api/flights`                         | FLT-03, FLT-02 | Airline moderator with an assigned airline |
 
 Creation accepts `name`, `code`, and a required multipart `logo`. Updates accept `name` and `code`, and can replace the logo; a field sent as `null` gets 400, as in the hotel edit (HTL-01). Duplicate airline codes return 409.
 
@@ -42,3 +43,23 @@ Creation accepts `name`, `code`, and a required multipart `logo`. Updates accept
 - **Everyone sees the policy.** `AirlineResponseDto` has `cancellationTiers` (always a list, empty by default), so `GET /api/airlines/:id` shows the policy to guests before they book, and the `PUT` returns it. The tiers are returned flat, not under a `policy` object. When the baggage rules arrive (FLT-04, FLT-08), that pull request decides whether they also go flat or the whole policy moves under `policy`; the second choice changes this response.
 - **The refund rule is shared with hotels.** `refundPercentFor(tiers, daysRemaining)` in `common/cancellation-tiers.ts` is one pure function used by flights (FLT-09) and hotels (HTL-10), so both refund the same way. It returns the `refundPercent` of the tier with the highest `daysBefore` that does not exceed `daysRemaining`, or 0 when no tier applies (an empty policy, fewer days than the smallest threshold, or a negative number). It reads neither the database nor the clock. The booking cancellation (FLT-26, PAY-03) computes `daysRemaining`, the whole number of days between the cancellation and the departure, and must use the tiers **copied into the booking** when it was made, as the data model says, so a later policy change never changes the refund of an existing booking.
 - **Tests:** `common/cancellation-tiers.spec.ts` (the shared refund rule), `dto/update-cancellation-policy.dto.spec.ts`, the `setCancellationPolicy` cases in `airlines.service.spec.ts`, `airlines.controller.spec.ts` (roles), the mapper spec, and `test/airlines-cancellation-policy.e2e-spec.ts`.
+
+## Create a flight (FLT-03)
+
+`POST /api/flights` creates a flight of the moderator's airline and returns it (201, `FlightResponseDto`). The body is `flightNumber`, `departureAirport`, `arrivalAirport`, `departureLocal` and `arrivalLocal`; nothing else is accepted.
+
+- **The airline comes from the moderator's assignment.** `@Roles(Role.AirlineModerator)`, then `AirlinesService.findAssignedAirlineOrThrow(userId)` reads the airline from the user's `assignment`: an airline moderator with no assigned airline gets 403 "You are not assigned to an airline"; an administrator, a user and a hotel moderator get 403 from the role guard, a guest 401. The client never sends `airlineId` or `status`: the global `ValidationPipe` (`forbidNonWhitelisted`) refuses them, and any other unknown field, with 400.
+- **A deactivated airline can still create flights.** ACC-15 only hides its flights from search and blocks booking (see "Deactivated airlines" above), so the moderator may keep the schedule up to date while the airline is inactive.
+- **The flight number format is ours.** The workbook gives none: 2 to 10 letters or digits (`FLIGHT_NUMBER_PATTERN`), trimmed and uppercased first, so `ms123` and `MS123` are the same number.
+- **Only airports of the airports list (FLT-02).** Both codes are read from the `airports` collection in one query (`FlightsModule` imports `ReferenceModule`, which exports the `Airport` model). An unknown code is 400 on its field, and two identical airports are 400 on `arrivalAirport`.
+- **Local time in, UTC stored.** `departureLocal` and `arrivalLocal` are typed as `YYYY-MM-DDTHH:mm` (seconds optional) with no `Z` and no offset (`LOCAL_DATE_TIME_PATTERN`, hours 00 to 23, then a strict calendar check). luxon reads each one in its airport's IANA `timeZone` (`DateTime.fromISO(value, { zone })`); hours are never added or subtracted by hand.
+- **A local time that does not exist is refused.** In a daylight saving change the clocks skip an hour (New York, 02:00 to 03:00), and luxon silently moves such a time forward. The service formats the converted instant back in the zone and compares it with the input; when they differ, the field gets 400 ("… does not exist in America/New_York …").
+- **A local time that happens twice is accepted, always as the second occurrence.** When the clocks go back, 01:30 happens twice. luxon's own guess follows the zone's offset at the moment of the request, so the same request would be stored an hour apart in summer and in winter. The service therefore takes the later of luxon's candidates (`getPossibleOffsets()`): the second occurrence, standard time in both hemispheres (New York 01:30 on 2027-11-07 is `06:30Z`, Sydney 02:30 on 2027-04-04 is `16:30Z` the day before).
+- **The arrival must be after the departure, compared in UTC.** A New York 20:00 departure arriving in Cairo at 01:00 the next day looks later on the clocks but is earlier in UTC: 400 on `arrivalLocal`. The same instant is refused too.
+- **The departure must be in the future**, strictly after the current UTC moment: 400 on `departureLocal`.
+- **`departureDateLocal` is the departure date at the departure airport** (`YYYY-MM-DD`, matched by the schema), not the UTC date: 01:00 in Tokyo is the day before in UTC.
+- **One error shape.** The rules that do not depend on each other are all checked, and one 400 lists every broken one in the project shape `{ message: 'Validation failed', errors: [{ field, messages }] }`, in the order of the fields, with the DTO field name. A time is checked only when its airport is known. The format rules of the DTO come first: the global `ValidationPipe` answers them before the service runs, so a body with a malformed field and an unknown airport reports the malformed field, and the airport and time rules once the body is well formed.
+- **A moderator whose airline was deleted gets 404** "Airline not found": `findAssignedAirlineOrThrow` reads the assigned airline with `findEntityOrThrow`. Swagger documents it.
+- **The duplicate rule is the unique index.** (`airlineId`, `flightNumber`, `departureDateLocal`) is unique. The service inserts with `status: scheduled` and answers MongoDB's E11000 with 409 "A flight with this number already exists for your airline on this departure date"; any other database error is rethrown. There is no check before the insert, so two identical requests at the same moment give one 201 and one 409. The index covers every status: **a cancelled flight still holds its number on that date.** The same number on another local date is fine.
+- **Response.** `FlightResponseDto` (`toFlightResponse`): `id`, `airlineId`, `flightNumber`, the two airport codes, `departureAt` and `arrivalAt` as UTC ISO strings ending in `Z`, `departureDateLocal`, `status`, `createdAt` and `updatedAt`. `FlightStatus` is in `models/flight-status.enum.ts`. Cabins, seats and prices are FLT-04.
+- **Tests:** `dto/create-flight.dto.spec.ts` (each field's rule and message, missing, null and unknown fields, through the global pipe options), `models/flight.schema.spec.ts`, `flights.service.spec.ts` (fake clock: time zones, DST gap and repeated hour, UTC comparison, past, collected errors, 409, 403), `flights.controller.spec.ts`, `mappers/flight.mapper.spec.ts`, `findAssignedAirlineOrThrow` in `airlines.service.spec.ts`, and `test/flights-create.e2e-spec.ts` (its own airports, airline and users; every role, every 400, the duplicate rules and Swagger).
