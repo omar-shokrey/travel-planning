@@ -1,6 +1,7 @@
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
 import { ROLES_KEY } from '../common/decorators/roles.decorator';
+import { Role } from '../common/enums/role.enum';
 import { ActivitiesController } from './activities.controller';
 import type { ActivitiesService } from './activities.service';
 import type { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
@@ -24,13 +25,18 @@ describe('ActivitiesController', () => {
     return { activitiesService, controller };
   }
 
-  /** Every activity route needs a login and is open to every role. */
-  function expectLoginForEveryRole(handler: (...args: never[]) => unknown) {
+  /** Every activity route needs a login as a registered user (ITN-01). */
+  function expectRegisteredUsersOnly(handler: (...args: never[]) => unknown) {
     const reflector = new Reflector();
-    expect(reflector.get(IS_PUBLIC_KEY, handler)).toBeUndefined();
-    expect(reflector.get(IS_PUBLIC_KEY, ActivitiesController)).toBeUndefined();
-    expect(reflector.get(ROLES_KEY, handler)).toBeUndefined();
-    expect(reflector.get(ROLES_KEY, ActivitiesController)).toBeUndefined();
+    expect(
+      reflector.getAllAndOverride(IS_PUBLIC_KEY, [
+        handler,
+        ActivitiesController,
+      ]),
+    ).toBeUndefined();
+    expect(
+      reflector.getAllAndOverride(ROLES_KEY, [handler, ActivitiesController]),
+    ).toEqual([Role.User]);
   }
 
   describe('update (ITN-10)', () => {
@@ -46,8 +52,8 @@ describe('ActivitiesController', () => {
       );
     });
 
-    it('needs a login, and is open to every role', () => {
-      expectLoginForEveryRole(ActivitiesController.prototype.update);
+    it('is for registered users only', () => {
+      expectRegisteredUsersOnly(ActivitiesController.prototype.update);
     });
   });
 
@@ -59,8 +65,8 @@ describe('ActivitiesController', () => {
       expect(activitiesService.remove).toHaveBeenCalledWith(activityId, userId);
     });
 
-    it('needs a login, and is open to every role', () => {
-      expectLoginForEveryRole(ActivitiesController.prototype.remove);
+    it('is for registered users only', () => {
+      expectRegisteredUsersOnly(ActivitiesController.prototype.remove);
     });
   });
 });

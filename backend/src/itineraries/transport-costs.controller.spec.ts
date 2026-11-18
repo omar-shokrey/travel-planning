@@ -1,6 +1,7 @@
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
 import { ROLES_KEY } from '../common/decorators/roles.decorator';
+import { Role } from '../common/enums/role.enum';
 import type { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
 import type { UpdateTransportCostDto } from './dto/update-transport-cost.dto';
 import { TransportCostsController } from './transport-costs.controller';
@@ -24,15 +25,21 @@ describe('TransportCostsController', () => {
     return { transportCostsService, controller };
   }
 
-  /** Every transport cost route needs a login and is open to every role. */
-  function expectLoginForEveryRole(handler: (...args: never[]) => unknown) {
+  /** Every transport cost route needs a login as a registered user (ITN-01). */
+  function expectRegisteredUsersOnly(handler: (...args: never[]) => unknown) {
     const reflector = new Reflector();
-    expect(reflector.get(IS_PUBLIC_KEY, handler)).toBeUndefined();
     expect(
-      reflector.get(IS_PUBLIC_KEY, TransportCostsController),
+      reflector.getAllAndOverride(IS_PUBLIC_KEY, [
+        handler,
+        TransportCostsController,
+      ]),
     ).toBeUndefined();
-    expect(reflector.get(ROLES_KEY, handler)).toBeUndefined();
-    expect(reflector.get(ROLES_KEY, TransportCostsController)).toBeUndefined();
+    expect(
+      reflector.getAllAndOverride(ROLES_KEY, [
+        handler,
+        TransportCostsController,
+      ]),
+    ).toEqual([Role.User]);
   }
 
   describe('update (ITN-16)', () => {
@@ -50,8 +57,8 @@ describe('TransportCostsController', () => {
       );
     });
 
-    it('needs a login, and is open to every role', () => {
-      expectLoginForEveryRole(TransportCostsController.prototype.update);
+    it('is for registered users only', () => {
+      expectRegisteredUsersOnly(TransportCostsController.prototype.update);
     });
   });
 
@@ -66,8 +73,8 @@ describe('TransportCostsController', () => {
       );
     });
 
-    it('needs a login, and is open to every role', () => {
-      expectLoginForEveryRole(TransportCostsController.prototype.remove);
+    it('is for registered users only', () => {
+      expectRegisteredUsersOnly(TransportCostsController.prototype.remove);
     });
   });
 });
