@@ -54,7 +54,7 @@
 - **Indexes.** A keyword is matched anywhere in the text, ignoring case, so no index can serve it: every search reads the published posts. That is fine at this project's size. The feed without `q` uses the `publishedAt` index.
 - **No results** is an empty page (`items: []`, `meta.total: 0`); the frontend shows "no results".
 - **Rows** are `PostSummaryResponseDto` (BLG-08): title, author, date and excerpt as the requirement asks, plus tags and the two counters.
-- **Tests:** `search-pattern.spec.ts`, `dto/search-posts-query.dto.spec.ts`, `post-search.controller.spec.ts`, the search cases of `published-posts.service.spec.ts`, and `test/blog-search.e2e-spec.ts`.
+- **Tests:** `search-pattern.spec.ts`, `dto/search-posts-query.dto.spec.ts`, `post-search.controller.spec.ts`, the search and newest-list cases of `published-posts.service.spec.ts` (with the moderation condition), and `test/blog-search.e2e-spec.ts` (with hide and show again: by title, tag and author name, in the newest list and in `meta.total`).
 
 ## Comments (BLG-05)
 

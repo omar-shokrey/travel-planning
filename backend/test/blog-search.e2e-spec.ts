@@ -8,6 +8,7 @@ import request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
 import { BlogPost } from './../src/blog/models/blog-post.schema';
+import { PostModeration } from './../src/blog/models/post-moderation.enum';
 import { PostStatus } from './../src/blog/models/post-status.enum';
 import { Role } from './../src/common/enums/role.enum';
 import { User } from './../src/users/models/user.schema';
@@ -20,6 +21,7 @@ const KEYWORD = word('blg09k');
 const REGEX_WORD = word('blg09r');
 const ORDER_WORD = word('blg09o');
 const MODERATOR_WORD = word('blg09m');
+const HIDDEN_WORD = word('blg09h');
 
 interface SummaryRow {
   id: string;
@@ -344,5 +346,112 @@ describe('Search published posts (e2e, BLG-09)', () => {
     expect(Object.keys(operation.responses)).toEqual(
       expect.arrayContaining(['200', '400']),
     );
+  });
+
+  // Last in the file, so its posts are created after the feed test above and
+  // are the newest of this run.
+  describe('leaves out hidden posts (GEN-10)', () => {
+    let moderated: string;
+    let shown: string;
+    let draft: string;
+
+    beforeAll(async () => {
+      const hiddenAuthor = await createUser(`Writer ${HIDDEN_WORD}name Lina`);
+      // Far ahead, so these are the newest posts of the test database; on
+      // every run later than a leftover of a stopped run.
+      const base = Date.UTC(2099, 0, 1) + Date.now() + 10_000;
+      shown = await createPost({
+        title: `${HIDDEN_WORD} never hidden`,
+        publishedAt: new Date(base + 1_000),
+      });
+      moderated = await createPost({
+        title: `${HIDDEN_WORD}title hidden by an admin`,
+        tags: [`${HIDDEN_WORD}tag`],
+        authorId: hiddenAuthor,
+        publishedAt: new Date(base + 2_000),
+      });
+      draft = await createPost({
+        title: `${HIDDEN_WORD} draft`,
+        status: PostStatus.Draft,
+        publishedAt: new Date(base + 3_000),
+      });
+    });
+
+    /** What an admin's hide or show does, on this one post, by id. */
+    const setModeration = (moderation: PostModeration) =>
+      posts.updateOne({ _id: moderated }, { $set: { moderation } });
+
+    /** The ids and the total of one search, or of the newest list without `q`. */
+    const found = async (query: Record<string, string>) => {
+      const response = await search(query);
+      expect(response.status).toBe(200);
+      return {
+        ids: idsOf(response),
+        total: response.body.meta.total as number,
+      };
+    };
+
+    const newestTwo = async () => (await found({ limit: '2' })).ids;
+
+    it('finds the post by title, tag and author name, and lists it, while it is visible', async () => {
+      expect(await found({ q: `${HIDDEN_WORD}title` })).toEqual({
+        ids: [moderated],
+        total: 1,
+      });
+      expect(await found({ q: `${HIDDEN_WORD}tag` })).toEqual({
+        ids: [moderated],
+        total: 1,
+      });
+      expect(await found({ q: `${HIDDEN_WORD}name` })).toEqual({
+        ids: [moderated],
+        total: 1,
+      });
+      expect((await found({ q: HIDDEN_WORD })).total).toBe(2);
+      expect(await newestTwo()).toEqual([moderated, shown]);
+    });
+
+    it('does not find a hidden post by title, tag or author name, and leaves it out of the total', async () => {
+      await setModeration(PostModeration.Hidden);
+
+      const none = { ids: [], total: 0 };
+      expect(await found({ q: `${HIDDEN_WORD}title` })).toEqual(none);
+      expect(await found({ q: `${HIDDEN_WORD}tag` })).toEqual(none);
+      expect(await found({ q: `${HIDDEN_WORD}name` })).toEqual(none);
+      expect(await found({ q: HIDDEN_WORD })).toEqual({
+        ids: [shown],
+        total: 1,
+      });
+    });
+
+    it('leaves a hidden post out of the newest list', async () => {
+      const ids = await newestTwo();
+
+      expect(ids[0]).toBe(shown);
+      expect(ids).not.toContain(moderated);
+    });
+
+    it('finds and lists the post again once it is shown again', async () => {
+      await setModeration(PostModeration.Visible);
+
+      expect(await found({ q: `${HIDDEN_WORD}title` })).toEqual({
+        ids: [moderated],
+        total: 1,
+      });
+      expect(await found({ q: `${HIDDEN_WORD}tag` })).toEqual({
+        ids: [moderated],
+        total: 1,
+      });
+      expect(await found({ q: `${HIDDEN_WORD}name` })).toEqual({
+        ids: [moderated],
+        total: 1,
+      });
+      expect((await found({ q: HIDDEN_WORD })).total).toBe(2);
+      expect(await newestTwo()).toEqual([moderated, shown]);
+    });
+
+    it('still never shows a draft, in the search or in the newest list', async () => {
+      expect((await found({ q: HIDDEN_WORD })).ids).not.toContain(draft);
+      expect(await newestTwo()).not.toContain(draft);
+    });
   });
 });
