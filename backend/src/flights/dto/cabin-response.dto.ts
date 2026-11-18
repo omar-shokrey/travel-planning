@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { PLATFORM_CURRENCY } from '../../common/constants/currency';
 import { CabinClass } from '../models/cabin-class.enum';
 
 /**
@@ -45,9 +46,8 @@ export class CabinResponseDto {
   price: number;
 
   @ApiProperty({
-    example: 'USD',
-    description:
-      'Currency of `price`: always the platform currency, USD (PAY-04)',
+    example: PLATFORM_CURRENCY,
+    description: `Currency of \`price\`: always the platform currency, ${PLATFORM_CURRENCY} (PAY-04)`,
   })
   currency: string;
 

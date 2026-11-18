@@ -1,3 +1,5 @@
+import type { CabinClass } from './models/cabin-class.enum';
+
 /**
  * The most cancellation tiers an airline may define (FLT-09). The workbook
  * sets no limit: this is an engineering safeguard that keeps a policy small
@@ -55,7 +57,7 @@ export const CABIN_FREE_BAGS_MAX = 10;
 export const CABIN_BAG_WEIGHT_MAX_KG = 100;
 
 /**
- * How often a cabin edit is tried when a booking moves the cabin's seat
+ * How many times a cabin edit is tried when a booking moves the cabin's seat
  * counters between the read and the write (FLT-04). Ours: a booking takes a
  * few milliseconds, so three tries in a row failing means a busy cabin.
  */
@@ -76,7 +78,8 @@ export const EMPTY_CABIN_UPDATE_MESSAGE =
 
 /**
  * The 409 answer when the flight already has a cabin of this class (FLT-04),
- * for example "This flight already has an economy cabin".
+ * for example "This flight already has an economy cabin". The class is named
+ * by its API value (`premium_economy`), the value the client sent.
  */
-export const duplicateCabinMessage = (cabin: string): string =>
+export const duplicateCabinMessage = (cabin: CabinClass): string =>
   `This flight already has ${/^[aeiou]/.test(cabin) ? 'an' : 'a'} ${cabin} cabin`;

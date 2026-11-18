@@ -104,7 +104,8 @@ describe('Flight cabins (e2e, FLT-04)', () => {
   });
 
   afterAll(async () => {
-    await fx.cleanup();
+    // fx is unset when the fixture failed; it then cleaned up after itself.
+    await fx?.cleanup();
   });
 
   describe('who may call the routes', () => {
@@ -181,15 +182,22 @@ describe('Flight cabins (e2e, FLT-04)', () => {
       expect(changed.body.message).toBe(FOREIGN_FLIGHT_MESSAGE);
     });
 
-    it('answers 404 to a moderator whose airline no longer exists', async () => {
+    it('answers 404 to a moderator whose airline no longer exists, on both routes', async () => {
       const added = await post(
         flightId,
         cabinBody({ cabin: 'business' }),
         fx.orphanModerator,
       );
+      const changed = await patch(
+        flightId,
+        cabinId,
+        { price: 1 },
+        fx.orphanModerator,
+      );
 
-      expect(added.status).toBe(404);
+      expect([added.status, changed.status]).toEqual([404, 404]);
       expect(added.body.message).toBe('Airline not found');
+      expect(changed.body.message).toBe('Airline not found');
     });
   });
 
@@ -576,7 +584,8 @@ describe('Flight cabins (e2e, FLT-04)', () => {
         bookedSeats: 0,
         heldSeats: 0,
       });
-      expect(after.updatedAt.getTime()).toBeGreaterThanOrEqual(
+      // The write itself happened: timestamps moved updatedAt.
+      expect(after.updatedAt.getTime()).toBeGreaterThan(
         before.updatedAt.getTime(),
       );
     });

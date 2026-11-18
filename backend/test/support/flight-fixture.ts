@@ -81,8 +81,6 @@ export interface InsertFlightOptions {
   status?: FlightStatus;
   /** Default: no cabin. Missing cabin fields get the fixture's values. */
   cabins?: StoredCabin[];
-  /** Default: the fixture's airline. */
-  airlineId?: string;
 }
 
 export interface FlightFixture {
@@ -121,6 +119,8 @@ export interface FlightFixture {
  * two airlines and one account per role. Accounts get a live session (ACC-06).
  * Every name and email carries `run`, and cleanup deletes only the ids it
  * created, so suites running at the same time never touch each other's data.
+ * If setup fails halfway, what it already made is deleted before the error
+ * is thrown.
  */
 export async function createFlightFixture(
   label: string,
@@ -137,17 +137,63 @@ export async function createFlightFixture(
   const airlines = app.get<Model<Airline>>(getModelToken(Airline.name));
   const airportModel = app.get<Model<Airport>>(getModelToken(Airport.name));
   const flights = app.get<Model<Flight>>(getModelToken(Flight.name));
-  // The duplicate-number rule is a unique index: make sure it exists.
-  await flights.init();
 
   const run = `${label}-${randomUUID().slice(0, 8)}`;
+  /** What the fixture created, recorded as soon as it exists, so cleanup finds it. */
   const userIds: string[] = [];
   const airlineIds: string[] = [];
   const airportCodes: string[] = [];
   const http = () => request(app.getHttpServer());
 
+  /**
+   * Deletes every record the fixture recorded, one by one by id. A failed
+   * delete does not stop the others, and the app is always closed; the first
+   * error is thrown at the end so the test run shows it.
+   */
+  const cleanup = async (): Promise<void> => {
+    let firstError: unknown;
+    const attempt = async (step: () => Promise<unknown>): Promise<void> => {
+      try {
+        await step();
+      } catch (error) {
+        firstError ??= error;
+      }
+    };
+    try {
+      // Every flight of the fixture's airlines was made by its tests.
+      await attempt(async () => {
+        const ours = await flights
+          .find({ airlineId: { $in: airlineIds } })
+          .select('_id')
+          .lean()
+          .exec();
+        for (const { _id } of ours) {
+          await attempt(() => flights.findByIdAndDelete(_id).exec());
+        }
+      });
+      for (const id of userIds) {
+        await attempt(() => deleteSessionsOf(app, id));
+        await attempt(() => users.findByIdAndDelete(id).exec());
+      }
+      for (const id of airlineIds) {
+        await attempt(() => airlines.findByIdAndDelete(id).exec());
+      }
+      for (const code of airportCodes) {
+        await attempt(() => airportModel.findByIdAndDelete(code).exec());
+      }
+    } finally {
+      await app.close();
+    }
+    if (firstError !== undefined) {
+      throw firstError;
+    }
+  };
+
   /** An airport with a random free code. Suites run at the same time, so a code taken in between is tried again. */
-  const createAirport = async (timeZone: string): Promise<string> => {
+  const createAirport = async (
+    timeZone: string,
+    countryCode: string,
+  ): Promise<string> => {
     for (;;) {
       const code = randomLetters(3);
       if (OFFICIAL_CODES.has(code)) continue;
@@ -156,7 +202,7 @@ export async function createFlightFixture(
           _id: code,
           name: `${run} airport ${code}`,
           cityId: `${run}-city`,
-          countryCode: 'EG',
+          countryCode,
           timeZone,
         });
         airportCodes.push(code);
@@ -200,10 +246,6 @@ export async function createFlightFixture(
     return { id, cookie: await sessionCookieFor(app, id) };
   };
 
-  const departure = await createAirport(FIXTURE_ZONES.departure);
-  const arrival = await createAirport(FIXTURE_ZONES.arrival);
-  const airlineId = await createAirline();
-  const otherAirlineId = await createAirline();
   const airlineModerator = (providerId: string) =>
     createActor(Role.AirlineModerator, {
       providerType: ProviderType.Airline,
@@ -222,70 +264,62 @@ export async function createFlightFixture(
     ...fields,
   });
 
-  const insertFlight = async (
-    options: InsertFlightOptions = {},
-  ): Promise<string> => {
-    const departureAt =
-      options.departureAt ?? new Date(Date.now() + 30 * DAY_MS);
-    const flight = await flights.create({
-      airlineId: new Types.ObjectId(options.airlineId ?? airlineId),
-      flightNumber: newFlightNumber(),
-      departureAirport: departure,
-      arrivalAirport: arrival,
-      departureAt,
-      arrivalAt: new Date(departureAt.getTime() + 12 * HOUR_MS),
-      departureDateLocal: DateTime.fromJSDate(departureAt, {
-        zone: FIXTURE_ZONES.departure,
-      }).toFormat('yyyy-MM-dd'),
-      status: options.status ?? FlightStatus.Scheduled,
-      cabins: (options.cabins ?? []).map(storedCabin),
-    });
-    return flight._id.toString();
-  };
+  try {
+    // The duplicate-number rule is a unique index: make sure it exists.
+    await flights.init();
+    const departure = await createAirport(FIXTURE_ZONES.departure, 'EG');
+    const arrival = await createAirport(FIXTURE_ZONES.arrival, 'US');
+    const airlineId = await createAirline();
+    const otherAirlineId = await createAirline();
 
-  const fixture: FlightFixture = {
-    app,
-    http,
-    flights,
-    airlines,
-    run,
-    airports: { departure, arrival },
-    airlineId,
-    otherAirlineId,
-    moderator: await airlineModerator(airlineId),
-    otherModerator: await airlineModerator(otherAirlineId),
-    unassignedModerator: await createActor(Role.AirlineModerator),
-    orphanModerator: await airlineModerator(new Types.ObjectId().toString()),
-    hotelModerator: await createActor(Role.HotelModerator, {
-      providerType: ProviderType.Hotel,
-      providerId: new Types.ObjectId().toString(),
-    }),
-    admin: await createActor(Role.Admin),
-    user: await createActor(Role.User),
-    insertFlight,
-    storedCabin,
-    cleanup: async () => {
-      // Every flight of the fixture's airlines was made by its tests.
-      const ours = await flights
-        .find({ airlineId: { $in: airlineIds } })
-        .select('_id')
-        .lean()
-        .exec();
-      for (const { _id } of ours) {
-        await flights.findByIdAndDelete(_id).exec();
-      }
-      for (const id of userIds) {
-        await deleteSessionsOf(app, id);
-        await users.findByIdAndDelete(id).exec();
-      }
-      for (const id of airlineIds) {
-        await airlines.findByIdAndDelete(id).exec();
-      }
-      for (const code of airportCodes) {
-        await airportModel.findByIdAndDelete(code).exec();
-      }
-      await app.close();
-    },
-  };
-  return fixture;
+    /** Always a flight of the fixture's own airline, so cleanup deletes it. */
+    const insertFlight = async (
+      options: InsertFlightOptions = {},
+    ): Promise<string> => {
+      const departureAt =
+        options.departureAt ?? new Date(Date.now() + 30 * DAY_MS);
+      const flight = await flights.create({
+        airlineId: new Types.ObjectId(airlineId),
+        flightNumber: newFlightNumber(),
+        departureAirport: departure,
+        arrivalAirport: arrival,
+        departureAt,
+        arrivalAt: new Date(departureAt.getTime() + 12 * HOUR_MS),
+        departureDateLocal: DateTime.fromJSDate(departureAt, {
+          zone: FIXTURE_ZONES.departure,
+        }).toFormat('yyyy-MM-dd'),
+        status: options.status ?? FlightStatus.Scheduled,
+        cabins: (options.cabins ?? []).map(storedCabin),
+      });
+      return flight._id.toString();
+    };
+
+    return {
+      app,
+      http,
+      flights,
+      airlines,
+      run,
+      airports: { departure, arrival },
+      airlineId,
+      otherAirlineId,
+      moderator: await airlineModerator(airlineId),
+      otherModerator: await airlineModerator(otherAirlineId),
+      unassignedModerator: await createActor(Role.AirlineModerator),
+      orphanModerator: await airlineModerator(new Types.ObjectId().toString()),
+      hotelModerator: await createActor(Role.HotelModerator, {
+        providerType: ProviderType.Hotel,
+        providerId: new Types.ObjectId().toString(),
+      }),
+      admin: await createActor(Role.Admin),
+      user: await createActor(Role.User),
+      insertFlight,
+      storedCabin,
+      cleanup,
+    };
+  } catch (error) {
+    // Setup failed halfway: delete what was already made, then report it.
+    await cleanup().catch(() => undefined);
+    throw error;
+  }
 }

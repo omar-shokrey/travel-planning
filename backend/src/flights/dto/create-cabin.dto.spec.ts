@@ -143,6 +143,7 @@ describe('CreateCabinDto (FLT-04)', () => {
     [
       'totalSeats',
       [
+        'totalSeats is required',
         `totalSeats must be at most ${CABIN_SEATS_MAX}`,
         'totalSeats must be more than 0',
         'totalSeats must be a whole number',
@@ -151,6 +152,7 @@ describe('CreateCabinDto (FLT-04)', () => {
     [
       'price',
       [
+        'price is required',
         `price must be at most ${CABIN_PRICE_MAX}`,
         'price must be more than 0',
         'price must be a whole number of minor units (cents)',
@@ -159,6 +161,7 @@ describe('CreateCabinDto (FLT-04)', () => {
     [
       'freeBags',
       [
+        'freeBags is required',
         `freeBags must be at most ${CABIN_FREE_BAGS_MAX}`,
         'freeBags must be 0 or more',
         'freeBags must be a whole number',
@@ -167,6 +170,7 @@ describe('CreateCabinDto (FLT-04)', () => {
     [
       'maxBagKg',
       [
+        'maxBagKg is required',
         `maxBagKg must be at most ${CABIN_BAG_WEIGHT_MAX_KG}`,
         'maxBagKg must be at least 1',
         'maxBagKg must be a whole number of kg',
@@ -174,10 +178,13 @@ describe('CreateCabinDto (FLT-04)', () => {
     ],
     [
       'cabin',
-      ['cabin must be one of economy, premium_economy, business, first'],
+      [
+        'cabin is required',
+        'cabin must be one of economy, premium_economy, business, first',
+      ],
     ],
   ])(
-    'requires %s: missing or null, it gets every rule of the field',
+    'requires %s: missing or null, it is reported as required first, then with its rules',
     async (field, messages) => {
       const { [field as keyof typeof validData]: _left, ...missing } =
         validData;

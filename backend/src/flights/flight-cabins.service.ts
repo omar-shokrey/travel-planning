@@ -38,6 +38,8 @@ const EDITABLE_CABIN_FIELDS = [
   'maxBagKg',
 ] as const;
 
+type EditableCabinField = (typeof EDITABLE_CABIN_FIELDS)[number];
+
 /** What the service reads of a flight to check a change, or to tell why a write matched nothing. */
 type FlightState = Pick<Flight, 'airlineId' | 'status'> & {
   cabins?: CabinSource[];
@@ -139,7 +141,8 @@ export class FlightCabinsService {
     dto: UpdateCabinDto,
     userId: string,
   ): Promise<FlightResponseDto> {
-    const changes: Record<string, number> = {};
+    const changes: Partial<Record<`cabins.$.${EditableCabinField}`, number>> =
+      {};
     for (const field of EDITABLE_CABIN_FIELDS) {
       const value = dto[field];
       if (value !== undefined) {
@@ -168,7 +171,8 @@ export class FlightCabinsService {
             {
               field: 'totalSeats',
               messages: [
-                `totalSeats cannot be below the ${taken} ${taken === 1 ? 'seat' : 'seats'} already booked or held`,
+                // taken is at least 2 here: the DTO refuses fewer than 1 seat.
+                `totalSeats cannot be below the ${taken} seats already booked or held`,
               ],
             },
           ],

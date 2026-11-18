@@ -28,12 +28,22 @@ import { CreateCabinDto } from './dto/create-cabin.dto';
 import { FlightResponseDto } from './dto/flight-response.dto';
 import { UpdateCabinDto } from './dto/update-cabin.dto';
 import { FlightCabinsService } from './flight-cabins.service';
+import { PLATFORM_CURRENCY } from '../common/constants/currency';
 import {
+  CABIN_BAG_WEIGHT_MAX_KG,
+  CABIN_CHANGED_MESSAGE,
+  CABIN_FREE_BAGS_MAX,
+  CABIN_NOT_FOUND_MESSAGE,
+  CABIN_PRICE_MAX,
   CABIN_SEATS_MAX,
+  duplicateCabinMessage,
   EMPTY_CABIN_UPDATE_MESSAGE,
+  FLIGHT_CHANGED_MESSAGE,
+  FLIGHT_NOT_FOUND_MESSAGE,
   FLIGHT_NOT_SCHEDULED_MESSAGE,
   FOREIGN_FLIGHT_MESSAGE,
 } from './flights.constants';
+import { CabinClass } from './models/cabin-class.enum';
 
 const FLIGHT_ID_PARAM = {
   name: 'id',
@@ -66,8 +76,8 @@ export class FlightCabinsController {
   @ApiOperation({
     summary: 'Add a cabin category to a flight (FLT-04)',
     description: [
-      "Airline moderators only, for a scheduled flight of the moderator's assigned airline. The body is the cabin category (`economy`, `premium_economy`, `business` or `first`), the seat count, the price of one seat in USD cents, the free bags per passenger and the maximum weight of one bag in kg. All are required.",
-      `Each category at most once per flight (409 otherwise). Seats: a whole number from 1 to ${CABIN_SEATS_MAX}. Price: a whole number of cents above 0. The client never sends \`bookedSeats\`, \`heldSeats\`, \`currency\` or an id (400).`,
+      `Airline moderators only, for a scheduled flight of the moderator's assigned airline. The body is the cabin category (\`economy\`, \`premium_economy\`, \`business\` or \`first\`), the seat count, the price of one seat in ${PLATFORM_CURRENCY} cents, the free bags per passenger and the maximum weight of one bag in kg. All are required.`,
+      `Each category at most once per flight (409 otherwise). All numbers are whole numbers: seats from 1 to ${CABIN_SEATS_MAX}, price from 1 to ${CABIN_PRICE_MAX} cents, free bags from 0 to ${CABIN_FREE_BAGS_MAX}, bag weight from 1 to ${CABIN_BAG_WEIGHT_MAX_KG} kg (also when there is no free bag). The client never sends \`bookedSeats\`, \`heldSeats\`, \`currency\` or an id (400).`,
       'Answers the whole flight with its cabins. Each cabin shows `availableSeats`, never the internal seat counters.',
     ].join('\n\n'),
   })
@@ -81,11 +91,10 @@ export class FlightCabinsController {
       'The flight id is not a valid id, or a field is missing, invalid or not allowed. `errors` lists each field with its messages.',
   })
   @ApiNotFoundResponse({
-    description:
-      "Flight not found, or the moderator's assignment names an airline that no longer exists",
+    description: `"${FLIGHT_NOT_FOUND_MESSAGE}", or "Airline not found": the moderator's assignment names an airline that no longer exists`,
   })
   @ApiConflictResponse({
-    description: `"${FLIGHT_NOT_SCHEDULED_MESSAGE}", the flight already has a cabin of this category, or the flight was changed by another request at the same moment`,
+    description: `"${FLIGHT_NOT_SCHEDULED_MESSAGE}" (cancelled or departed), "${duplicateCabinMessage(CabinClass.Economy)}" (the class sent is named), or "${FLIGHT_CHANGED_MESSAGE}" (the flight changed at the same moment)`,
   })
   addCabin(
     @Param('id', ParseObjectIdPipe) flightId: string,
@@ -115,11 +124,10 @@ export class FlightCabinsController {
     description: `An id is not a valid id, a field is invalid, null or not allowed (\`cabin\` included), the seat count is below the seats already booked or held, or no field was sent ("${EMPTY_CABIN_UPDATE_MESSAGE}")`,
   })
   @ApiNotFoundResponse({
-    description:
-      "Flight not found, Cabin not found, or the moderator's assignment names an airline that no longer exists",
+    description: `"${FLIGHT_NOT_FOUND_MESSAGE}", "${CABIN_NOT_FOUND_MESSAGE}", or "Airline not found": the moderator's assignment names an airline that no longer exists`,
   })
   @ApiConflictResponse({
-    description: `"${FLIGHT_NOT_SCHEDULED_MESSAGE}", or the cabin was changed by another request (a booking) several times in a row`,
+    description: `"${FLIGHT_NOT_SCHEDULED_MESSAGE}" (cancelled or departed), or "${CABIN_CHANGED_MESSAGE}" (a booking changed the cabin's seats three times in a row)`,
   })
   updateCabin(
     @Param('id', ParseObjectIdPipe) flightId: string,

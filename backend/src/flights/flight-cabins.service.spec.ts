@@ -69,15 +69,17 @@ const stored = (fields: Record<string, unknown> = {}) => ({
 function setup() {
   /** What each `findById(...).exec()` resolves to, in order. */
   const reads: unknown[] = [];
-  /** What each `updateOne(...).exec()` reports as `matchedCount`, in order. */
+  /** What each `updateOne(...).exec()` reports as `matchedCount`, in order (default 1). */
   const matches: number[] = [];
+  /** What each `updateOne(...).exec()` reports as `modifiedCount`, in order (default 1). */
+  const modified: number[] = [];
   const selects: unknown[] = [];
   const flights = {
     updateOne: jest.fn(() => ({
       exec: jest.fn(() =>
         Promise.resolve({
           matchedCount: matches.shift() ?? 1,
-          modifiedCount: 0,
+          modifiedCount: modified.shift() ?? 1,
         }),
       ),
     })),
@@ -107,7 +109,7 @@ function setup() {
     flights as never,
     airlines as unknown as AirlinesService,
   );
-  return { service, flights, airlines, reads, matches, selects };
+  return { service, flights, airlines, reads, matches, modified, selects };
 }
 
 /** The error a call rejects with, or fails when it resolves. */
@@ -280,6 +282,7 @@ describe('FlightCabinsService.addCabin (FLT-04)', () => {
           cabins: [economy({ cabin: CabinClass.Business })],
         }),
         ForbiddenException,
+        FOREIGN_FLIGHT_MESSAGE,
       ],
       [
         'not scheduled before the class',
@@ -288,8 +291,9 @@ describe('FlightCabinsService.addCabin (FLT-04)', () => {
           cabins: [economy({ cabin: CabinClass.Business })],
         }),
         ConflictException,
+        FLIGHT_NOT_SCHEDULED_MESSAGE,
       ],
-    ])('checks %s', async (_case, flight, type) => {
+    ])('checks %s', async (_case, flight, type, message) => {
       const { service, reads, matches } = setup();
       matches.push(0);
       reads.push(flight);
@@ -299,9 +303,7 @@ describe('FlightCabinsService.addCabin (FLT-04)', () => {
       );
 
       expect(error).toBeInstanceOf(type);
-      expect(error.message).not.toBe(
-        'This flight already has a business cabin',
-      );
+      expect(error.message).toBe(message);
     });
   });
 
@@ -399,9 +401,10 @@ describe('FlightCabinsService.updateCabin (FLT-04, FLT-05)', () => {
     });
   });
 
-  it('counts a write that changes no value as a success', async () => {
-    const { service, reads, matches } = setup();
+  it('counts a write that matched but changed no value as a success', async () => {
+    const { service, flights, reads, matches, modified } = setup();
     matches.push(1);
+    modified.push(0);
     reads.push(stored(), stored());
 
     const result = await service.updateCabin(
@@ -412,6 +415,8 @@ describe('FlightCabinsService.updateCabin (FLT-04, FLT-05)', () => {
     );
 
     expect(result.cabins[0].price).toBe(25000);
+    // No retry: matchedCount decides, modifiedCount is not read.
+    expect(flights.updateOne).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a seat count below the seats booked and held with 400 on totalSeats', async () => {
@@ -440,20 +445,6 @@ describe('FlightCabinsService.updateCabin (FLT-04, FLT-05)', () => {
       ] satisfies FieldError[],
     });
     expect(flights.updateOne).not.toHaveBeenCalled();
-  });
-
-  it('says "seat" for one seat booked or held', async () => {
-    const { service, reads } = setup();
-    reads.push(stored({ cabins: [economy({ bookedSeats: 1, heldSeats: 0 })] }));
-
-    const error = await failureOf(
-      service.updateCabin(FLIGHT_ID, cabinId, { totalSeats: 0 }, 'moderator-1'),
-    );
-
-    expect(
-      ((error as BadRequestException).getResponse() as { errors: FieldError[] })
-        .errors[0].messages,
-    ).toEqual(['totalSeats cannot be below the 1 seat already booked or held']);
   });
 
   it('accepts a seat count equal to the seats booked and held', async () => {
@@ -634,6 +625,38 @@ describe('FlightCabinsService.updateCabin (FLT-04, FLT-05)', () => {
     await expect(
       service.updateCabin(FLIGHT_ID, cabinId, { price: 1 }, 'moderator-1'),
     ).rejects.toThrow(new ConflictException(FLIGHT_NOT_SCHEDULED_MESSAGE));
+  });
+
+  it('reads only the fields the checks need, by the flight id', async () => {
+    const { service, flights, reads, selects } = setup();
+    reads.push(stored(), stored());
+
+    await service.updateCabin(FLIGHT_ID, cabinId, { price: 1 }, 'moderator-1');
+
+    expect(flights.findById).toHaveBeenNthCalledWith(1, FLIGHT_ID);
+    expect(selects).toEqual(['airlineId status cabins']);
+  });
+
+  it('answers 404 if the flight is gone when it is read back after the write', async () => {
+    const { service, reads } = setup();
+    reads.push(stored());
+
+    await expect(
+      service.updateCabin(FLIGHT_ID, cabinId, { price: 1 }, 'moderator-1'),
+    ).rejects.toThrow(new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE));
+  });
+
+  it('answers 404 when the airline of the moderator no longer exists, and writes nothing', async () => {
+    const { service, flights, airlines } = setup();
+    airlines.findAssignedAirlineOrThrow.mockRejectedValue(
+      new NotFoundException('Airline not found'),
+    );
+
+    await expect(
+      service.updateCabin(FLIGHT_ID, cabinId, { price: 1 }, 'moderator-1'),
+    ).rejects.toThrow(new NotFoundException('Airline not found'));
+    expect(flights.findById).not.toHaveBeenCalled();
+    expect(flights.updateOne).not.toHaveBeenCalled();
   });
 
   it(`gives up with 409 after ${CABIN_UPDATE_ATTEMPTS} tries that all matched nothing`, async () => {

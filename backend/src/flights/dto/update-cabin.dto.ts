@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsInt, Max, Min, ValidateIf } from 'class-validator';
+import { PLATFORM_CURRENCY } from '../../common/constants/currency';
 import {
   CABIN_BAG_WEIGHT_MAX_KG,
   CABIN_FREE_BAGS_MAX,
@@ -42,7 +43,7 @@ export class UpdateCabinDto {
     type: 'integer',
     minimum: 1,
     maximum: CABIN_PRICE_MAX,
-    description: `New price of one seat in minor units of USD (cents), from 1 to ${CABIN_PRICE_MAX}. It applies to new bookings only.`,
+    description: `New price of one seat in minor units of ${PLATFORM_CURRENCY} (cents), from 1 to ${CABIN_PRICE_MAX}. It applies to new bookings only.`,
   })
   @ValidateIf(whenSent)
   @IsInt({ message: 'price must be a whole number of minor units (cents)' })

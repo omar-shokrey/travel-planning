@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { PLATFORM_CURRENCY } from '../../common/constants/currency';
 import { CabinClass } from '../models/cabin-class.enum';
 import { FlightStatus } from '../models/flight-status.enum';
 import { CabinResponseDto } from './cabin-response.dto';
@@ -70,7 +71,7 @@ export class FlightResponseDto {
         totalSeats: 180,
         availableSeats: 180,
         price: 25000,
-        currency: 'USD',
+        currency: PLATFORM_CURRENCY,
         freeBags: 1,
         maxBagKg: 23,
       },
