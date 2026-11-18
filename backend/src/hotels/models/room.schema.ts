@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { SchemaTypes, type HydratedDocument, type Types } from 'mongoose';
+import { ROOM_PRICE_MAX } from '../hotels.constants';
 import { Hotel } from './hotel.schema';
 import {
   RoomAvailability,
@@ -43,6 +44,7 @@ export class Room {
     type: Number,
     required: true,
     min: 1,
+    max: ROOM_PRICE_MAX,
     validate: {
       validator: Number.isInteger,
       message: 'Price per night must be a whole number of minor units',
