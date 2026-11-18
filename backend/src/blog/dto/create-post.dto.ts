@@ -1,8 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
-  ArrayMaxSize,
-  IsArray,
   IsEnum,
   IsNotEmpty,
   IsString,
@@ -10,6 +8,8 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { PostStatus } from '../models/post-status.enum';
+import { POST_TAG_MAX_LENGTH, POST_TAGS_MAX_COUNT } from '../blog.constants';
+import { PostTags } from './post-tags.decorator';
 
 /**
  * The longest title and body a post may have, counted after trimming. The
@@ -67,29 +67,9 @@ export class CreatePostDto {
   @ApiPropertyOptional({
     type: [String],
     example: ['cairo', 'egypt'],
-    maxItems: 5,
-    description:
-      'Up to 5 tags of at most 30 characters each (BLG-08). They are trimmed, lowercased and de-duplicated; empty tags are dropped.',
+    maxItems: POST_TAGS_MAX_COUNT,
+    description: `Up to ${POST_TAGS_MAX_COUNT} tags of at most ${POST_TAG_MAX_LENGTH} characters each (BLG-08). They are trimmed, lowercased and de-duplicated; empty tags are dropped.`,
   })
-  @Transform(({ value }) => {
-    if (!Array.isArray(value)) {
-      return value;
-    }
-
-    return [
-      ...new Set(
-        value
-          .map((tag) =>
-            typeof tag === 'string' ? tag.trim().toLowerCase() : tag,
-          )
-          .filter((tag) => tag !== ''),
-      ),
-    ];
-  })
-  @IfSent()
-  @IsArray()
-  @ArrayMaxSize(5)
-  @IsString({ each: true })
-  @MaxLength(30, { each: true })
+  @PostTags()
   tags?: string[];
 }
