@@ -58,7 +58,8 @@ export class FlightResponseDto {
     enum: FlightStatus,
     enumName: 'FlightStatus',
     example: FlightStatus.Scheduled,
-    description: 'Set by the server: a new flight is scheduled',
+    description:
+      'Set by the server (FLT-30): scheduled until the departure time passes, then departed; a cancelled flight stays cancelled. A new flight is scheduled.',
   })
   status: FlightStatus;
 

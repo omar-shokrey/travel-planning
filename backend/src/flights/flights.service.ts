@@ -144,7 +144,7 @@ export class FlightsService {
         departureDateLocal: departureAt.toFormat('yyyy-MM-dd'),
         status: FlightStatus.Scheduled,
       });
-      return toFlightResponse(flight);
+      return toFlightResponse(flight, new Date());
     } catch (error) {
       // The unique (airlineId, flightNumber, departureDateLocal) index, for
       // every status: a cancelled flight still holds its number and date.

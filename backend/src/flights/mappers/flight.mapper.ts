@@ -2,6 +2,7 @@ import type { Types } from 'mongoose';
 import { PLATFORM_CURRENCY } from '../../common/constants/currency';
 import type { CabinResponseDto } from '../dto/cabin-response.dto';
 import type { FlightResponseDto } from '../dto/flight-response.dto';
+import { effectiveStatus } from '../flight-status';
 import type { Flight, FlightCabin } from '../models/flight.schema';
 
 /** The fields the mapper reads of a cabin. A subdocument and a lean cabin both fit. */
@@ -53,8 +54,16 @@ export function toCabinResponse(cabin: CabinSource): CabinResponseDto {
   };
 }
 
-/** Maps a flight to its public API fields: ids as strings, moments as UTC ISO strings. */
-export function toFlightResponse(flight: FlightSource): FlightResponseDto {
+/**
+ * Maps a flight to its public API fields: ids as strings, moments as UTC ISO
+ * strings, and the status at `now` (FLT-30: a scheduled flight whose departure
+ * has passed is departed). `now` is required, so the mapper reads no clock and
+ * no caller can forget it.
+ */
+export function toFlightResponse(
+  flight: FlightSource,
+  now: Date,
+): FlightResponseDto {
   return {
     id: flight._id.toString(),
     airlineId: flight.airlineId.toString(),
@@ -64,7 +73,7 @@ export function toFlightResponse(flight: FlightSource): FlightResponseDto {
     departureAt: flight.departureAt.toISOString(),
     arrivalAt: flight.arrivalAt.toISOString(),
     departureDateLocal: flight.departureDateLocal,
-    status: flight.status,
+    status: effectiveStatus(flight, now),
     cabins: (flight.cabins ?? []).map(toCabinResponse),
     createdAt: flight.createdAt.toISOString(),
     updatedAt: flight.updatedAt.toISOString(),

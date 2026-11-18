@@ -5,6 +5,9 @@ import { toCabinResponse, toFlightResponse } from './flight.mapper';
 
 const cabinId = new Types.ObjectId('6740f1c2a4b5c6d7e8f90789');
 
+/** "Now" for every test: before the departure of the stored flight below. */
+const NOW = new Date('2027-01-10T00:00:00.000Z');
+
 /** A stored cabin with 12 seats booked and 3 held for a payment. */
 const storedCabin = {
   _id: cabinId,
@@ -17,7 +20,7 @@ const storedCabin = {
   maxBagKg: 32,
 };
 
-describe('toFlightResponse (FLT-03, FLT-04)', () => {
+describe('toFlightResponse (FLT-03, FLT-04, FLT-30)', () => {
   const id = new Types.ObjectId('6740f1c2a4b5c6d7e8f90456');
   const airlineId = new Types.ObjectId('6740f1c2a4b5c6d7e8f90123');
   const stored = {
@@ -38,7 +41,7 @@ describe('toFlightResponse (FLT-03, FLT-04)', () => {
   };
 
   it('returns the public fields: string ids, UTC ISO moments, the local date and the cabins', () => {
-    expect(toFlightResponse(stored)).toEqual({
+    expect(toFlightResponse(stored, NOW)).toEqual({
       id: '6740f1c2a4b5c6d7e8f90456',
       airlineId: '6740f1c2a4b5c6d7e8f90123',
       flightNumber: 'MS123',
@@ -66,7 +69,7 @@ describe('toFlightResponse (FLT-03, FLT-04)', () => {
   });
 
   it('never returns _id or __v', () => {
-    const response = toFlightResponse(stored);
+    const response = toFlightResponse(stored, NOW);
 
     expect(response).not.toHaveProperty('_id');
     expect(response).not.toHaveProperty('__v');
@@ -75,7 +78,7 @@ describe('toFlightResponse (FLT-03, FLT-04)', () => {
   it('reads a lean flight stored before FLT-04, with no cabins field, as no cabins', () => {
     const { cabins: _cabins, ...withoutCabins } = stored;
 
-    expect(toFlightResponse(withoutCabins).cabins).toEqual([]);
+    expect(toFlightResponse(withoutCabins, NOW).cabins).toEqual([]);
   });
 
   it('keeps the order of the stored cabins', () => {
@@ -86,11 +89,56 @@ describe('toFlightResponse (FLT-03, FLT-04)', () => {
     };
 
     expect(
-      toFlightResponse({
-        ...stored,
-        cabins: [economy, storedCabin],
-      }).cabins.map((cabin) => cabin.cabin),
+      toFlightResponse(
+        { ...stored, cabins: [economy, storedCabin] },
+        NOW,
+      ).cabins.map((cabin) => cabin.cabin),
     ).toEqual(['economy', 'business']);
+  });
+});
+
+describe('toFlightResponse status (FLT-30)', () => {
+  const departure = '2027-06-15T11:30:00.000Z';
+  const flight = (status: FlightStatus) => ({
+    _id: new Types.ObjectId(),
+    airlineId: new Types.ObjectId(),
+    flightNumber: 'MS123',
+    departureAirport: 'CAI',
+    arrivalAirport: 'JFK',
+    departureAt: new Date(departure),
+    arrivalAt: new Date('2027-06-15T22:30:00.000Z'),
+    departureDateLocal: '2027-06-15',
+    status,
+    createdAt: NOW,
+    updatedAt: NOW,
+  });
+
+  it.each([
+    ['1 ms before the departure', '2027-06-15T11:29:59.999Z', 'scheduled'],
+    ['at the departure instant', departure, 'departed'],
+    ['1 ms after the departure', '2027-06-15T11:30:00.001Z', 'departed'],
+  ])(
+    'answers a stored scheduled flight %s as %s, at the now it is given',
+    (_case, now, expected) => {
+      expect(
+        toFlightResponse(flight(FlightStatus.Scheduled), new Date(now)).status,
+      ).toBe(expected);
+    },
+  );
+
+  it('keeps a cancelled flight cancelled after its departure time', () => {
+    expect(
+      toFlightResponse(
+        flight(FlightStatus.Cancelled),
+        new Date('2027-07-01T00:00:00.000Z'),
+      ).status,
+    ).toBe('cancelled');
+  });
+
+  it('keeps a stored departed flight departed', () => {
+    expect(toFlightResponse(flight(FlightStatus.Departed), NOW).status).toBe(
+      'departed',
+    );
   });
 });
 
