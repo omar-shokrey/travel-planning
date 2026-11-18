@@ -9,6 +9,8 @@ import {
 } from 'class-validator';
 import { POST_BODY_MAX_LENGTH, POST_TITLE_MAX_LENGTH } from './create-post.dto';
 import { PostStatus } from '../models/post-status.enum';
+import { POST_TAG_MAX_LENGTH, POST_TAGS_MAX_COUNT } from '../blog.constants';
+import { PostTags } from './post-tags.decorator';
 
 const IfSent = () => ValidateIf((_dto, value) => value !== undefined);
 
@@ -45,4 +47,13 @@ export class UpdatePostDto {
   @IfSent()
   @IsEnum(PostStatus)
   status?: PostStatus;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['cairo', 'egypt'],
+    maxItems: POST_TAGS_MAX_COUNT,
+    description: `Optional (BLG-08). The new tags: they replace the old ones, and \`[]\` removes them all. Up to ${POST_TAGS_MAX_COUNT} tags of at most ${POST_TAG_MAX_LENGTH} characters each, trimmed, lowercased and de-duplicated, as when the post is created. Leave it out to keep the tags.`,
+  })
+  @PostTags()
+  tags?: string[];
 }
