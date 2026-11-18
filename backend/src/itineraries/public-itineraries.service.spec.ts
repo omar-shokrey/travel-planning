@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Mongoose, Types } from 'mongoose';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
 import { User } from '../users/models/user.schema';
@@ -222,6 +223,84 @@ describe('PublicItinerariesService', () => {
       const response = await service.search(query());
 
       expect(response.items[0].author.name).toBe(UNKNOWN_AUTHOR);
+    });
+  });
+
+  describe('listByAuthor (BLG-12)', () => {
+    const page = (fields: Partial<PaginationQueryDto> = {}) =>
+      Object.assign(new PaginationQueryDto(), fields);
+
+    it('lists only the publicly visible itineraries of that author, newest first, without days', async () => {
+      const itinerary = publicItinerary();
+      const { chain, find } = withSearchResults([itinerary]);
+
+      const response = await service.listByAuthor(authorId.toString(), page());
+
+      expect(find).toHaveBeenCalledWith({
+        ...PUBLICLY_VISIBLE,
+        ownerId: authorId,
+      });
+      const filter = find.mock.calls[0][0] as unknown as { ownerId: unknown };
+      expect(filter.ownerId).toBeInstanceOf(Types.ObjectId);
+      expect(ItineraryModel.countDocuments).toHaveBeenCalledWith({
+        ...PUBLICLY_VISIBLE,
+        ownerId: authorId,
+      });
+      expect(chain.select).toHaveBeenCalledWith('-days');
+      expect(chain.sort).toHaveBeenCalledWith({ updatedAt: -1, _id: -1 });
+      expect(response.items).toEqual([
+        expect.objectContaining({
+          id: itinerary.id as string,
+          title: 'Ten days in Egypt',
+          visibility: ItineraryVisibility.Public,
+          author: { id: authorId.toString(), name: 'Sara Ahmed' },
+        }),
+      ]);
+      expect(response.items[0]).not.toHaveProperty('days');
+    });
+
+    it('reads the page asked for and counts every match', async () => {
+      const { chain } = withSearchResults([publicItinerary()], 7);
+
+      const response = await service.listByAuthor(
+        authorId.toString(),
+        page({ page: 3, limit: 2 }),
+      );
+
+      expect(chain.skip).toHaveBeenCalledWith(4);
+      expect(chain.limit).toHaveBeenCalledWith(2);
+      expect(response.meta).toEqual({
+        page: 3,
+        limit: 2,
+        total: 7,
+        totalPages: 4,
+      });
+    });
+
+    it('answers an empty page without reading any author', async () => {
+      withSearchResults([]);
+
+      const response = await service.listByAuthor(authorId.toString(), page());
+
+      expect(response).toEqual({
+        items: [],
+        meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
+      });
+      expect(users.find).not.toHaveBeenCalled();
+    });
+
+    it('names an author it cannot find "Unknown author"', async () => {
+      users.find.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve([]) }),
+      });
+      withSearchResults([publicItinerary()]);
+
+      const response = await service.listByAuthor(authorId.toString(), page());
+
+      expect(response.items[0].author).toEqual({
+        id: authorId.toString(),
+        name: UNKNOWN_AUTHOR,
+      });
     });
   });
 
