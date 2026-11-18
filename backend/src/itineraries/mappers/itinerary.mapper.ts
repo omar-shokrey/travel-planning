@@ -1,4 +1,5 @@
 import { DateTime } from 'luxon';
+import { imageUrl } from '../../uploads/uploads.constants';
 import type { ActivityResponseDto } from '../dto/activity-response.dto';
 import type { CityGroupResponseDto } from '../dto/city-group-response.dto';
 import type { ItineraryDayResponseDto } from '../dto/itinerary-day-response.dto';
@@ -69,7 +70,10 @@ export function toTransportCostResponse(
   };
 }
 
-/** ITN-10: an activity with only the fields it has. */
+/**
+ * ITN-10: an activity with only the optional fields it has. ITN-12: its
+ * images, always as a list, each with the URL it is served at.
+ */
 export function toActivityResponse(activity: Activity): ActivityResponseDto {
   return {
     id: activity._id.toString(),
@@ -78,6 +82,10 @@ export function toActivityResponse(activity: Activity): ActivityResponseDto {
     ...(activity.time ? { time: activity.time } : {}),
     ...(activity.cost != null ? { cost: activity.cost } : {}),
     ...(activity.currency ? { currency: activity.currency } : {}),
+    images: (activity.images ?? []).map((filename) => ({
+      filename,
+      url: imageUrl(filename),
+    })),
   };
 }
 

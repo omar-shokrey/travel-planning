@@ -8,6 +8,7 @@ import { Test } from '@nestjs/testing';
 import { Mongoose, Types } from 'mongoose';
 import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
+import { UploadsService } from '../uploads/uploads.service';
 import { ItinerariesService } from './itineraries.service';
 import {
   Itinerary,
@@ -35,6 +36,8 @@ const trip = {
 };
 
 describe('TransportCostsService', () => {
+  // UploadsService: only deleteImage is used by these services (ITN-12).
+  const uploads = { deleteImage: jest.fn().mockResolvedValue(undefined) };
   let service: TransportCostsService;
 
   /** Two days, cairo then luxor; day 1 already has the train to luxor. */
@@ -65,6 +68,7 @@ describe('TransportCostsService', () => {
       providers: [
         TransportCostsService,
         ItinerariesService,
+        { provide: UploadsService, useValue: uploads },
         { provide: getModelToken(Itinerary.name), useValue: ItineraryModel },
         {
           provide: getModelToken(Country.name),
