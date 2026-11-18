@@ -103,7 +103,7 @@ export class PostsController {
   @ApiOperation({
     summary: 'Edit your own blog post (BLG-04)',
     description:
-      'Registered users can edit only their own posts. Title, body, and status are editable. Tags and images are managed by their dedicated requirements. When a post is published, the server manages publishedAt.',
+      'Registered users can edit only their own posts. Title, body, status and tags (BLG-08) are editable; the tags sent replace the old ones and `[]` removes them. Images are managed by their own routes (BLG-10). When a post is published, the server manages publishedAt.',
   })
   @ApiResponse({
     status: 200,
@@ -112,7 +112,7 @@ export class PostsController {
   })
   @ApiBadRequestResponse({
     description:
-      'The post id is malformed, or a field is invalid, such as an empty title or body, a title over 200 characters, a body over 20,000 characters, or an unknown status.',
+      'The post id is malformed, or a field is invalid, such as an empty title or body, a title over 200 characters, a body over 20,000 characters, an unknown status, more than 5 tags or a tag over 30 characters.',
   })
   @ApiUnauthorizedResponse({
     description: 'Not logged in, or the access token is invalid or expired',
