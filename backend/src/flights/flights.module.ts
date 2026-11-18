@@ -2,10 +2,13 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { UsersModule } from '../users/users.module';
 import { UploadsModule } from '../uploads/uploads.module';
+import { ReferenceModule } from '../reference/reference.module';
 import { Airline, AirlineSchema } from './models/airline.schema';
 import { Flight, FlightSchema } from './models/flight.schema';
 import { AirlinesService } from './airlines.service';
 import { AirlinesController } from './airlines.controller';
+import { FlightsController } from './flights.controller';
+import { FlightsService } from './flights.service';
 
 @Module({
   imports: [
@@ -15,9 +18,11 @@ import { AirlinesController } from './airlines.controller';
     ]),
     UsersModule,
     UploadsModule,
+    // The Airport model, read only, for the airports list and time zones (FLT-02).
+    ReferenceModule,
   ],
-  controllers: [AirlinesController],
-  providers: [AirlinesService],
+  controllers: [AirlinesController, FlightsController],
+  providers: [AirlinesService, FlightsService],
   exports: [AirlinesService],
 })
 export class FlightsModule {}
