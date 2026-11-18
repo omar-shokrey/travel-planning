@@ -27,6 +27,7 @@ import {
   type FlightSource,
   toFlightResponse,
 } from './mappers/flight.mapper';
+import { effectiveStatus, scheduledFlightFilter } from './flight-status';
 import { FlightStatus } from './models/flight-status.enum';
 import { Flight } from './models/flight.schema';
 
@@ -41,17 +42,20 @@ const EDITABLE_CABIN_FIELDS = [
 type EditableCabinField = (typeof EDITABLE_CABIN_FIELDS)[number];
 
 /** What the service reads of a flight to check a change, or to tell why a write matched nothing. */
-type FlightState = Pick<Flight, 'airlineId' | 'status'> & {
+type FlightState = Pick<Flight, 'airlineId' | 'status' | 'departureAt'> & {
   cabins?: CabinSource[];
 };
 
 /**
  * The checks every cabin change shares, in this order: the flight exists
- * (404), it belongs to the moderator's airline (403), it is scheduled (409).
+ * (404), it belongs to the moderator's airline (403), it is scheduled at
+ * `now` (409): not cancelled, not departed, and its departure time has not
+ * passed (FLT-30).
  */
 function assertEditable(
   flight: FlightState | null,
   airlineId: Types.ObjectId,
+  now: Date,
 ): asserts flight is FlightState {
   if (!flight) {
     throw new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE);
@@ -59,7 +63,7 @@ function assertEditable(
   if (!flight.airlineId.equals(airlineId)) {
     throw new ForbiddenException(FOREIGN_FLIGHT_MESSAGE);
   }
-  if (flight.status !== FlightStatus.Scheduled) {
+  if (effectiveStatus(flight, now) !== FlightStatus.Scheduled) {
     throw new ConflictException(FLIGHT_NOT_SCHEDULED_MESSAGE);
   }
 }
@@ -69,6 +73,9 @@ function assertEditable(
  * and edits them, for a scheduled flight of their own airline. Every rule
  * that depends on the stored flight is part of the write's filter, so a
  * concurrent request can never slip between a check and the write.
+ * "Scheduled" is `scheduledFlightFilter(now)` (FLT-30), with one `now` per
+ * request: a flight that departs between the check and the write is never
+ * changed.
  */
 @Injectable()
 export class FlightCabinsService {
@@ -88,6 +95,7 @@ export class FlightCabinsService {
     dto: CreateCabinDto,
     userId: string,
   ): Promise<FlightResponseDto> {
+    const now = new Date();
     const airline = await this.airlines.findAssignedAirlineOrThrow(userId);
     const cabin = {
       _id: new Types.ObjectId(),
@@ -105,7 +113,7 @@ export class FlightCabinsService {
         {
           _id: flightId,
           airlineId: airline._id,
-          status: FlightStatus.Scheduled,
+          ...scheduledFlightFilter(now),
           'cabins.cabin': { $ne: dto.cabin },
         },
         { $push: { cabins: cabin } },
@@ -115,7 +123,7 @@ export class FlightCabinsService {
 
     if (matchedCount === 0) {
       const flight = await this.readState(flightId);
-      assertEditable(flight, airline._id);
+      assertEditable(flight, airline._id, now);
       if (flight.cabins?.some((existing) => existing.cabin === dto.cabin)) {
         throw new ConflictException(duplicateCabinMessage(dto.cabin));
       }
@@ -123,13 +131,13 @@ export class FlightCabinsService {
       // it changed between the write and the read.
       throw new ConflictException(FLIGHT_CHANGED_MESSAGE);
     }
-    return this.reload(flightId);
+    return this.reload(flightId, now);
   }
 
   /**
    * Changes the seat count, the price or the baggage allowance of a cabin
    * (FLT-04, FLT-05). Compare-and-set: the write matches only if the flight is
-   * still the moderator's and scheduled, and the cabin's seat counters are
+   * still the moderator's and scheduled at `now`, and the cabin's seat counters are
    * still the ones the seat floor was checked against. If a booking moved them
    * in between, the cabin is read and checked again, up to
    * `CABIN_UPDATE_ATTEMPTS` times. A new price applies to new bookings only:
@@ -153,10 +161,11 @@ export class FlightCabinsService {
       throw new BadRequestException(EMPTY_CABIN_UPDATE_MESSAGE);
     }
 
+    const now = new Date();
     const airline = await this.airlines.findAssignedAirlineOrThrow(userId);
     for (let attempt = 1; attempt <= CABIN_UPDATE_ATTEMPTS; attempt += 1) {
       const flight = await this.readState(flightId);
-      assertEditable(flight, airline._id);
+      assertEditable(flight, airline._id, now);
       const cabin = flight.cabins?.find((existing) =>
         existing._id.equals(cabinId),
       );
@@ -184,7 +193,7 @@ export class FlightCabinsService {
           {
             _id: flightId,
             airlineId: airline._id,
-            status: FlightStatus.Scheduled,
+            ...scheduledFlightFilter(now),
             cabins: {
               $elemMatch: {
                 _id: cabin._id,
@@ -199,7 +208,7 @@ export class FlightCabinsService {
         .exec();
       // Matched is enough: values equal to the stored ones are a success too.
       if (matchedCount === 1) {
-        return this.reload(flightId);
+        return this.reload(flightId, now);
       }
     }
     throw new ConflictException(CABIN_CHANGED_MESSAGE);
@@ -208,13 +217,16 @@ export class FlightCabinsService {
   private readState(flightId: string): Promise<FlightState | null> {
     return this.flights
       .findById(flightId)
-      .select('airlineId status cabins')
+      .select('airlineId status departureAt cabins')
       .lean<FlightState>()
       .exec();
   }
 
   /** The flight after a successful change, as the API returns it. */
-  private async reload(flightId: string): Promise<FlightResponseDto> {
+  private async reload(
+    flightId: string,
+    now: Date,
+  ): Promise<FlightResponseDto> {
     const flight = await this.flights
       .findById(flightId)
       .lean<FlightSource>()
@@ -222,6 +234,6 @@ export class FlightCabinsService {
     if (!flight) {
       throw new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE);
     }
-    return toFlightResponse(flight);
+    return toFlightResponse(flight, now);
   }
 }
