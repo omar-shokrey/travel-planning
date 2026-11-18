@@ -24,7 +24,9 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { AuditLogResponseDto } from '../audit/dto/audit-log-response.dto';
 import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
 import { ProviderType } from '../common/enums/provider-type.enum';
@@ -34,6 +36,7 @@ import { UserResponseDto } from '../users/dto/user-response.dto';
 import { AdminService } from './admin.service';
 import { CreateModeratorDto } from './dto/create-moderator.dto';
 import { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
+import { ListAuditLogsQueryDto } from './dto/list-audit-logs-query.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ProviderStatusResponseDto } from './dto/provider-status-response.dto';
 import { PROVIDER_TYPE_MESSAGE } from './admin.constants';
@@ -74,6 +77,26 @@ export class AdminController {
     return this.adminService.listAccounts(query);
   }
 
+  @Get('audit-logs')
+  @ApiOperation({
+    summary: 'List the audit log of admin actions (GEN-07)',
+    description:
+      'Admin only. Every recorded admin action, newest first, 10 per page by default (GEN-05): who acted (`adminId`), what they did (`action`), on which record (`targetType`, `targetId`), a short note (`details`) and when (`createdAt`, UTC). `action`, `adminId`, `targetType` and `targetId` filter, and all given filters must match. The log is append-only: no route changes or deletes a record. Recorded today: password resets (ACC-07a), moderator creation (ACC-13), account suspension and reactivation (ACC-15, ACC-16), provider deactivation and reactivation (ACC-15), and report handling and content moderation (GEN-10).',
+  })
+  @ApiPaginatedResponse(AuditLogResponseDto)
+  @ApiBadRequestResponse({
+    description:
+      '`page`, `limit`, `action`, `adminId`, `targetType` or `targetId` is invalid, or the query has a parameter that is not allowed',
+  })
+  @ApiForbiddenResponse({
+    description: 'The caller is not an administrator, or is suspended',
+  })
+  listAuditLogs(
+    @Query() query: ListAuditLogsQueryDto,
+  ): Promise<PaginatedResponse<AuditLogResponseDto>> {
+    return this.adminService.listAuditLogs(query);
+  }
+
   @Post('moderators')
   @ApiOperation({
     summary: 'Create a hotel or airline moderator account (ACC-13)',
@@ -92,8 +115,11 @@ export class AdminController {
   @ApiForbiddenResponse({
     description: 'The caller is not an administrator, or is suspended',
   })
-  createModerator(@Body() dto: CreateModeratorDto): Promise<UserResponseDto> {
-    return this.adminService.createModerator(dto);
+  createModerator(
+    @Body() dto: CreateModeratorDto,
+    @CurrentUser('id') adminId: string,
+  ): Promise<UserResponseDto> {
+    return this.adminService.createModerator(dto, adminId);
   }
 
   @Patch('accounts/:id/suspend')
@@ -123,8 +149,9 @@ export class AdminController {
   })
   suspend(
     @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') adminId: string,
   ): Promise<UserResponseDto> {
-    return this.adminService.suspend(id);
+    return this.adminService.suspend(id, adminId);
   }
 
   @Patch('accounts/:id/reactivate')
@@ -154,8 +181,9 @@ export class AdminController {
   })
   reactivate(
     @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') adminId: string,
   ): Promise<UserResponseDto> {
-    return this.adminService.reactivate(id);
+    return this.adminService.reactivate(id, adminId);
   }
 
   @Post('users/:id/reset-password')
@@ -186,8 +214,9 @@ export class AdminController {
   resetPassword(
     @Param('id', ParseObjectIdPipe) id: string,
     @Body() dto: ResetPasswordDto,
+    @CurrentUser('id') adminId: string,
   ): Promise<UserResponseDto> {
-    return this.adminService.resetPassword(id, dto);
+    return this.adminService.resetPassword(id, dto, adminId);
   }
 
   // ---- Provider status (ACC-15) ----
@@ -223,8 +252,9 @@ export class AdminController {
   deactivateProvider(
     @Param('type', PROVIDER_TYPE_PIPE) type: ProviderType,
     @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') adminId: string,
   ): Promise<ProviderStatusResponseDto> {
-    return this.adminService.deactivateProvider(type, id);
+    return this.adminService.deactivateProvider(type, id, adminId);
   }
 
   @Patch('providers/:type/:id/reactivate')
@@ -258,7 +288,8 @@ export class AdminController {
   reactivateProvider(
     @Param('type', PROVIDER_TYPE_PIPE) type: ProviderType,
     @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') adminId: string,
   ): Promise<ProviderStatusResponseDto> {
-    return this.adminService.reactivateProvider(type, id);
+    return this.adminService.reactivateProvider(type, id, adminId);
   }
 }

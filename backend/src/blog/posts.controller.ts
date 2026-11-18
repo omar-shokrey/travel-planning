@@ -1,10 +1,24 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
+  ApiNotFoundResponse,
   ApiOperation,
+  ApiResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -14,9 +28,11 @@ import { Roles } from '../common/decorators/roles.decorator';
 import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Role } from '../common/enums/role.enum';
+import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { CreatePostDto } from './dto/create-post.dto';
 import { MyPostResponseDto } from './dto/my-post-response.dto';
 import { PostResponseDto } from './dto/post-response.dto';
+import { UpdatePostDto } from './dto/update-post.dto';
 import { PostsService } from './posts.service';
 
 @ApiTags('Blog')
@@ -80,5 +96,67 @@ export class PostsController {
     @Query() query: PaginationQueryDto,
   ): Promise<PaginatedResponse<MyPostResponseDto>> {
     return this.posts.listMine(userId, query);
+  }
+
+  @Patch(':id')
+  @Roles(Role.User)
+  @ApiOperation({
+    summary: 'Edit your own blog post (BLG-04)',
+    description:
+      'Registered users can edit only their own posts. Title, body, status and tags (BLG-08) are editable; the tags sent replace the old ones and `[]` removes them. Images are managed by their own routes (BLG-10). When a post is published, the server manages publishedAt.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'The post was updated',
+    type: PostResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'The post id is malformed, or a field is invalid, such as an empty title or body, a title over 200 characters, a body over 20,000 characters, an unknown status, more than 5 tags or a tag over 30 characters.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Not logged in, or the access token is invalid or expired',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The caller is not a registered user, or the post belongs to another user.',
+  })
+  @ApiNotFoundResponse({
+    description: 'The requested post does not exist.',
+  })
+  update(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: UpdatePostDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<PostResponseDto> {
+    return this.posts.update(id, dto, userId);
+  }
+
+  @Delete(':id')
+  @Roles(Role.User)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete your own blog post (BLG-04)',
+    description: 'Registered users can delete only their own posts.',
+  })
+  @ApiNoContentResponse({ description: 'The post was deleted' })
+  @ApiBadRequestResponse({
+    description: 'The post id is not a valid MongoDB ObjectId.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Not logged in, or the access token is invalid or expired',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The caller is not a registered user, or the post belongs to another user.',
+  })
+  @ApiNotFoundResponse({
+    description: 'The requested post does not exist.',
+  })
+  async remove(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<void> {
+    await this.posts.remove(id, userId);
   }
 }

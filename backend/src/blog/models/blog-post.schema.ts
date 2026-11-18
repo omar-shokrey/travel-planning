@@ -4,6 +4,7 @@ import {
   POST_BODY_MAX_LENGTH,
   POST_TITLE_MAX_LENGTH,
 } from '../dto/create-post.dto';
+import { PostModeration } from './post-moderation.enum';
 import { PostStatus } from './post-status.enum';
 
 @Schema({ collection: 'posts', timestamps: true })
@@ -31,6 +32,19 @@ export class BlogPost {
   })
   status: PostStatus;
 
+  /**
+   * GEN-10: set by an admin, never by the author. A hidden post is visible
+   * only to its author and to admins. A post stored before this field existed
+   * reads as visible (the default applies to hydrated documents).
+   */
+  @Prop({
+    type: String,
+    required: true,
+    enum: Object.values(PostModeration),
+    default: PostModeration.Visible,
+  })
+  moderation: PostModeration;
+
   @Prop({ type: Date, index: true })
   publishedAt?: Date;
 
@@ -57,3 +71,16 @@ export const BlogPostSchema = SchemaFactory.createForClass(BlogPost);
 
 /** "My posts" (BLG-03): one author's posts, newest first. */
 BlogPostSchema.index({ authorId: 1, createdAt: -1, _id: -1 });
+
+/**
+ * The tag page (BLG-08): the published, not hidden (GEN-10) posts of one tag,
+ * newest first. `status` and `moderation` come before the sort keys, so the
+ * filter of `PublishedPostsService.publishedFilter()` uses the index too.
+ */
+BlogPostSchema.index({
+  tags: 1,
+  status: 1,
+  moderation: 1,
+  publishedAt: -1,
+  _id: -1,
+});

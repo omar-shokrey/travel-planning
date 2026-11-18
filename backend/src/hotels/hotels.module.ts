@@ -3,6 +3,10 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceModule } from '../reference/reference.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { UsersModule } from '../users/users.module';
+import { HotelDetailsController } from './hotel-details.controller';
+import { HotelDetailsService } from './hotel-details.service';
+import { HotelPoliciesController } from './hotel-policies.controller';
+import { HotelPoliciesService } from './hotel-policies.service';
 import { HotelsController } from './hotels.controller';
 import { Hotel, HotelSchema } from './models/hotel.schema';
 import { Room, RoomSchema } from './models/room.schema';
@@ -18,8 +22,14 @@ import { HotelsService } from './hotels.service';
     UploadsModule,
     UsersModule,
   ],
-  controllers: [HotelsController],
-  providers: [HotelsService],
+  // HotelDetailsController holds `GET /hotels/:id` and must stay last, so a
+  // controller with a fixed path such as `GET /hotels/search` is matched first.
+  controllers: [
+    HotelsController,
+    HotelPoliciesController,
+    HotelDetailsController,
+  ],
+  providers: [HotelsService, HotelDetailsService, HotelPoliciesService],
   exports: [HotelsService],
 })
 export class HotelsModule {}

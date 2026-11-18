@@ -11,6 +11,7 @@ import {
   HOTEL_STAR_CLASS_MAX,
   HOTEL_STAR_CLASS_MIN,
 } from '../hotels.constants';
+import { HotelPolicy, HotelPolicySchema } from './hotel-policy.schema';
 
 @Schema({ collection: 'hotels', timestamps: true })
 export class Hotel {
@@ -81,6 +82,10 @@ export class Hotel {
 
   @Prop({ type: Number, required: true, min: 0, max: 5, default: 0 })
   averageRating: number;
+
+  /** Check-in and check-out times (HTL-09). Empty until the moderator sets them. */
+  @Prop({ type: HotelPolicySchema })
+  policy?: HotelPolicy;
 
   createdAt: Date;
   updatedAt: Date;
