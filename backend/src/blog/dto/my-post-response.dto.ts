@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PostModeration } from '../models/post-moderation.enum';
 import { PostStatus } from '../models/post-status.enum';
 
 /**
@@ -15,6 +16,14 @@ export class MyPostResponseDto {
 
   @ApiProperty({ enum: PostStatus, example: PostStatus.Draft })
   status: PostStatus;
+
+  @ApiProperty({
+    enum: PostModeration,
+    example: PostModeration.Visible,
+    description:
+      'GEN-10: `hidden` when an admin hid the post. Only its author and admins still see a hidden post.',
+  })
+  moderation: PostModeration;
 
   @ApiPropertyOptional({
     type: String,

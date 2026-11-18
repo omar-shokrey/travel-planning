@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -13,6 +15,7 @@ import {
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOperation,
   ApiResponse,
@@ -84,9 +87,6 @@ export class PostsController {
   @ApiUnauthorizedResponse({
     description: 'Not logged in, or the access token is invalid or expired',
   })
-  @ApiUnauthorizedResponse({
-    description: 'Not logged in, or the access token is invalid or expired',
-  })
   @ApiForbiddenResponse({
     description:
       'The caller is not a registered user (moderators and admins have no posts), or the account is suspended',
@@ -134,14 +134,12 @@ export class PostsController {
 
   @Delete(':id')
   @Roles(Role.User)
+  @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete your own blog post (BLG-04)',
     description: 'Registered users can delete only their own posts.',
   })
-  @ApiResponse({
-    status: 200,
-    description: 'The post was deleted successfully.',
-  })
+  @ApiNoContentResponse({ description: 'The post was deleted' })
   @ApiBadRequestResponse({
     description: 'The post id is not a valid MongoDB ObjectId.',
   })

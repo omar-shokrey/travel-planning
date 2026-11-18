@@ -10,6 +10,7 @@ import {
   type CreateUserInput,
   type LockoutPolicy,
 } from './users.service';
+import { ProviderType } from '../common/enums/provider-type.enum';
 
 const input: CreateUserInput = {
   name: 'Sara Ahmed',
@@ -133,6 +134,86 @@ describe('UsersService', () => {
       await expect(service.createRegisteredUser(input)).rejects.toBe(
         duplicateKey,
       );
+    });
+  });
+
+  describe('createModerator (ACC-13)', () => {
+    const moderator = {
+      name: 'Mona Hotel',
+      email: ' Mona@Example.com ',
+      password: 'Temp0rary1',
+      role: Role.HotelModerator,
+      providerType: ProviderType.Hotel,
+      providerId: new Types.ObjectId('6740f1c2a4b5c6d7e8f90abc'),
+    } as const;
+
+    it('stores an active moderator linked to its provider, who must change the password', async () => {
+      const { service, storedFields } = setup();
+
+      await service.createModerator(moderator);
+
+      const { passwordHash, ...others } = storedFields();
+      expect(others).toEqual({
+        name: 'Mona Hotel',
+        email: 'mona@example.com',
+        role: Role.HotelModerator,
+        status: UserStatus.Active,
+        mustChangePassword: true,
+        assignment: {
+          providerType: ProviderType.Hotel,
+          providerId: moderator.providerId,
+        },
+      });
+      expect(await compare('Temp0rary1', passwordHash as string)).toBe(true);
+    });
+
+    it('refuses an email that is already registered and stores nothing', async () => {
+      const { model, service } = setup({ _id: 'someone' });
+
+      const attempt = service.createModerator(moderator);
+
+      await expect(attempt).rejects.toBeInstanceOf(ConflictException);
+      await expect(attempt).rejects.toThrow(EMAIL_TAKEN_MESSAGE);
+      expect(model.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('changeStatus (ACC-16)', () => {
+    function setupStatus(updated: object | null) {
+      const exec = jest.fn().mockResolvedValue(updated);
+      const model = { findOneAndUpdate: jest.fn(() => ({ exec })) };
+      const service = new UsersService(model as unknown as Model<User>);
+      return { model, service };
+    }
+
+    it('moves the status only when it is still the expected one, in one update', async () => {
+      const updated = { _id: userObjectId, status: UserStatus.Suspended };
+      const { model, service } = setupStatus(updated);
+
+      const result = await service.changeStatus(
+        userObjectId,
+        UserStatus.Active,
+        UserStatus.Suspended,
+      );
+
+      expect(result).toBe(updated);
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: userObjectId, status: UserStatus.Active },
+        { $set: { status: UserStatus.Suspended } },
+        { returnDocument: 'after' },
+      );
+    });
+
+    it('returns null when the status was already different, and changes nothing', async () => {
+      const { service } = setupStatus(null);
+
+      expect(
+        await service.changeStatus(
+          userObjectId,
+          UserStatus.Suspended,
+          UserStatus.Active,
+        ),
+      ).toBeNull();
     });
   });
 
@@ -614,6 +695,49 @@ describe('UsersService', () => {
       const pattern = asRegExp(filter());
       expect(pattern.test('xa.b+(c)y')).toBe(true);
       expect(pattern.test('axbbc')).toBe(false);
+    });
+  });
+
+  describe('findModeratorIdsOfProvider (ACC-15)', () => {
+    const providerId = new Types.ObjectId('6740f1c2a4b5c6d7e8f90abc');
+
+    function setupModerators(found: { _id: Types.ObjectId }[]) {
+      const exec = jest.fn().mockResolvedValue(found);
+      const lean = jest.fn(() => ({ exec }));
+      const select = jest.fn(() => ({ lean }));
+      const model = { find: jest.fn(() => ({ select })) };
+      const service = new UsersService(model as unknown as Model<User>);
+      return { model, select, service };
+    }
+
+    it('finds the moderators of one provider that have not closed their account', async () => {
+      const { model, select, service } = setupModerators([
+        { _id: userObjectId },
+      ]);
+
+      const ids = await service.findModeratorIdsOfProvider(
+        ProviderType.Hotel,
+        providerId,
+      );
+
+      expect(ids).toEqual([userObjectId]);
+      expect(model.find).toHaveBeenCalledWith({
+        'assignment.providerId': providerId,
+        'assignment.providerType': ProviderType.Hotel,
+        status: { $ne: UserStatus.Deactivated },
+      });
+      expect(select).toHaveBeenCalledWith('_id');
+    });
+
+    it('returns an empty list when the provider has no moderator', async () => {
+      const { service } = setupModerators([]);
+
+      expect(
+        await service.findModeratorIdsOfProvider(
+          ProviderType.Airline,
+          providerId,
+        ),
+      ).toEqual([]);
     });
   });
 });

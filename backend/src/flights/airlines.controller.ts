@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   UploadedFile,
 } from '@nestjs/common';
 import {
@@ -36,6 +37,7 @@ import { AirlinesService } from './airlines.service';
 import { AirlineResponseDto } from './dto/airline-response.dto';
 import { CreateAirlineDto } from './dto/create-airline.dto';
 import { UpdateAirlineDto } from './dto/update-airline.dto';
+import { UpdateCancellationPolicyDto } from './dto/update-cancellation-policy.dto';
 
 @ApiTags('Airlines')
 @Controller('airlines')
@@ -114,6 +116,36 @@ export class AirlinesController {
     return this.airlinesService.findById(id);
   }
 
+  @Put(':id/cancellation-policy')
+  @Roles(Role.AirlineModerator)
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Set the cancellation policy of an assigned airline',
+    description:
+      'FLT-09. The airline moderator assigned to this airline sets its cancellation tiers. The list sent replaces the whole policy; an empty list means no refund. Each tier has a different `daysBefore` (a whole number of 0 or more) and a `refundPercent` from 0 to 100. A cancellation is refunded by the tier with the highest `daysBefore` that does not exceed the days remaining before departure, or 0% when none applies. The tiers are returned highest threshold first.',
+  })
+  @ApiOkResponse({
+    type: AirlineResponseDto,
+    description: 'The policy was saved. The airline is returned with it.',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'The airline ID is invalid, `tiers` is missing or not a list, it has more than 20 tiers, two tiers have the same `daysBefore`, a number is negative, fractional or not a number, a refund is above 100, or the body has a field that is not allowed',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication is required' })
+  @ApiForbiddenResponse({
+    description:
+      'Only the airline moderator assigned to this airline can set its policy',
+  })
+  @ApiNotFoundResponse({ description: 'Airline not found' })
+  setCancellationPolicy(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: UpdateCancellationPolicyDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<AirlineResponseDto> {
+    return this.airlinesService.setCancellationPolicy(id, userId, dto);
+  }
+
   @Patch(':id')
   @Roles(Role.AirlineModerator)
   @ApiCookieAuth()
@@ -136,20 +168,21 @@ export class AirlinesController {
   @ApiOperation({
     summary: 'Update an assigned airline profile',
     description:
-      'FLT-01. The airline moderator assigned to this airline edits its name, code or logo. Send only the fields that change. A new logo replaces the old one.',
+      'FLT-01. The airline moderator assigned to this airline edits its name, code or logo. Send only the fields that change; null is refused. A new logo replaces the old one.',
   })
   @ApiOkResponse({
     type: AirlineResponseDto,
     description: 'Airline profile updated successfully',
   })
   @ApiBadRequestResponse({
-    description: 'The airline ID, profile fields, or logo are invalid',
+    description:
+      'The airline ID, profile fields, or logo are invalid, or a field is null',
   })
   @ApiUnauthorizedResponse({ description: 'Authentication is required' })
   @ApiForbiddenResponse({
     description: 'Only the assigned airline moderator can update this profile',
   })
-  @ApiNotFoundResponse({ description: 'Airline or user not found' })
+  @ApiNotFoundResponse({ description: 'Airline not found' })
   @ApiConflictResponse({
     description: 'An airline with this code already exists',
   })

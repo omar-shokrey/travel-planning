@@ -15,6 +15,8 @@ import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
 import { BlogPost } from './../src/blog/models/blog-post.schema';
 import { PostStatus } from './../src/blog/models/post-status.enum';
+import { Comment } from './../src/blog/models/comment.schema';
+import { Like } from './../src/blog/models/like.schema';
 import { User } from './../src/users/models/user.schema';
 import { deleteSessionsOf } from './support/delete-sessions';
 
@@ -26,10 +28,14 @@ describe('PATCH/DELETE /api/posts/:id (e2e, BLG-04)', () => {
   let app: NestExpressApplication;
   let users: Model<User>;
   let posts: Model<BlogPost>;
+  let comments: Model<Comment>;
+  let likes: Model<Like>;
   let passwordHash: string;
 
   const createdUserIds: string[] = [];
   const createdPostIds: string[] = [];
+  const createdCommentIds: string[] = [];
+  const createdLikeIds: string[] = [];
 
   interface TestUser {
     id: string;
@@ -118,11 +124,21 @@ describe('PATCH/DELETE /api/posts/:id (e2e, BLG-04)', () => {
 
     users = app.get<Model<User>>(getModelToken(User.name));
     posts = app.get<Model<BlogPost>>(getModelToken(BlogPost.name));
+    comments = app.get<Model<Comment>>(getModelToken(Comment.name));
+    likes = app.get<Model<Like>>(getModelToken(Like.name));
   });
 
   afterAll(async () => {
     for (const id of createdPostIds) {
       await posts.findByIdAndDelete(id);
+    }
+
+    for (const id of createdCommentIds) {
+      await comments.findByIdAndDelete(id);
+    }
+
+    for (const id of createdLikeIds) {
+      await likes.findByIdAndDelete(id);
     }
 
     // The logins made sessions (ACC-06): delete them first.
@@ -368,7 +384,7 @@ describe('PATCH/DELETE /api/posts/:id (e2e, BLG-04)', () => {
       .delete(`/api/posts/${postId}`)
       .set('Cookie', cookie);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(204);
 
     const deletedPost = await posts.findById(postId);
     expect(deletedPost).toBeNull();
@@ -380,5 +396,42 @@ describe('PATCH/DELETE /api/posts/:id (e2e, BLG-04)', () => {
     expect(getResponse.status).toBe(404);
 
     createdPostIds.splice(createdPostIds.indexOf(postId), 1);
+  });
+
+  it('deletes the post and its associated comment and like', async () => {
+    const user = await createUser();
+    const cookie = await loginAs(user);
+    const postId = await createPost(user, cookie);
+
+    const comment = await comments.create({
+      postId,
+      authorId: user.id,
+      body: 'BLG-04 test comment',
+    });
+
+    const like = await likes.create({
+      postId,
+      userId: user.id,
+    });
+
+    const commentId = comment._id.toString();
+    const likeId = like._id.toString();
+
+    createdCommentIds.push(commentId);
+    createdLikeIds.push(likeId);
+
+    const response = await request(app.getHttpServer())
+      .delete(`/api/posts/${postId}`)
+      .set('Cookie', cookie);
+
+    expect(response.status).toBe(204);
+
+    expect(await posts.findById(postId)).toBeNull();
+    expect(await comments.findById(commentId)).toBeNull();
+    expect(await likes.findById(likeId)).toBeNull();
+
+    createdPostIds.splice(createdPostIds.indexOf(postId), 1);
+    createdCommentIds.splice(createdCommentIds.indexOf(commentId), 1);
+    createdLikeIds.splice(createdLikeIds.indexOf(likeId), 1);
   });
 });

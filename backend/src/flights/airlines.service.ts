@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -11,6 +12,8 @@ import { Airline, AirlineDocument } from './models/airline.schema';
 import { CreateAirlineDto } from './dto/create-airline.dto';
 import { UpdateAirlineDto } from './dto/update-airline.dto';
 import { AirlineResponseDto } from './dto/airline-response.dto';
+import { UpdateCancellationPolicyDto } from './dto/update-cancellation-policy.dto';
+import { sortTiersByDaysBefore } from '../common/cancellation-tiers';
 import { toAirlineResponse } from './mappers/airline.mapper';
 import { UploadsService } from '../uploads/uploads.service';
 import type { ImageFile } from '../uploads/uploads.types';
@@ -76,26 +79,82 @@ export class AirlinesService {
     return airline;
   }
 
+  /**
+   * Replaces the cancellation tiers of an airline (FLT-09). Only the airline
+   * moderator assigned to it may do it. The tiers are stored highest
+   * threshold first, in one update, so a reader never sees half a policy.
+   */
+  async setCancellationPolicy(
+    id: string,
+    userId: string,
+    dto: UpdateCancellationPolicyDto,
+  ): Promise<AirlineResponseDto> {
+    const airline = await this.findEntityOrThrow(id);
+    await this.assertAssignedModerator(airline, userId);
+
+    const tiers = sortTiersByDaysBefore(dto.tiers).map((tier) => ({
+      daysBefore: tier.daysBefore,
+      refundPercent: tier.refundPercent,
+    }));
+    const updated = await this.airlineModel
+      .findByIdAndUpdate(
+        id,
+        { $set: { 'policy.cancellationTiers': tiers } },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
+    if (!updated) {
+      throw new NotFoundException('Airline not found');
+    }
+    return toAirlineResponse(updated);
+  }
+
+  /**
+   * 403 unless the user is the airline moderator assigned to this airline.
+   * Used by `update` (FLT-01) and `setCancellationPolicy` (FLT-09), so both
+   * answer the same way, also for an account that no longer exists.
+   */
+  private async assertAssignedModerator(
+    airline: AirlineDocument,
+    userId: string,
+    message = 'You can only change the policy of your assigned airline',
+  ): Promise<void> {
+    const user = await this.usersService.findEntityById(userId);
+    if (
+      user?.assignment?.providerType !== ProviderType.Airline ||
+      user.assignment.providerId.toString() !== airline._id.toString()
+    ) {
+      throw new ForbiddenException(message);
+    }
+  }
+
   async update(
     id: string,
     userId: string,
     dto: UpdateAirlineDto,
     logo?: ImageFile,
   ): Promise<AirlineResponseDto> {
+    // `null` answers 400, as in the hotel edit (HTL-01): the DTO lets it
+    // through because every field is optional.
+    const nullFields = (['name', 'code'] as const).filter(
+      (field) => dto[field] === null,
+    );
+    if (nullFields.length > 0) {
+      throw new BadRequestException({
+        message: 'Validation failed',
+        errors: nullFields.map((field) => ({
+          field,
+          messages: [`${field} must not be null`],
+        })),
+      });
+    }
+
     const airline = await this.findEntityOrThrow(id);
-
-    const user = await this.usersService.findEntityById(userId);
-
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    if (
-      user.assignment?.providerType !== ProviderType.Airline ||
-      user.assignment?.providerId.toString() !== airline._id.toString()
-    ) {
-      throw new ForbiddenException('You can only edit your assigned airline');
-    }
+    await this.assertAssignedModerator(
+      airline,
+      userId,
+      'You can only edit your assigned airline',
+    );
 
     const code = dto.code?.trim().toUpperCase();
 
@@ -157,5 +216,21 @@ export class AirlinesService {
     }
 
     return toAirlineResponse(updatedAirline);
+  }
+
+  /**
+   * Deactivates or reactivates the airline, for the admin (ACC-15). It
+   * changes `active` only when it is not already that value, in one update,
+   * so two admins at once cannot both succeed. `null` when the airline is
+   * missing or already in that state. Never exposed by a controller.
+   */
+  setActive(id: string, active: boolean): Promise<AirlineDocument | null> {
+    return this.airlineModel
+      .findOneAndUpdate(
+        { _id: id, active: { $ne: active } },
+        { $set: { active } },
+        { returnDocument: 'after' },
+      )
+      .exec();
   }
 }

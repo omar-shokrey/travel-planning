@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -92,6 +93,109 @@ function setup(
 }
 
 describe('AirlinesService', () => {
+  describe('setCancellationPolicy (FLT-09)', () => {
+    const tiers = [
+      { daysBefore: 7, refundPercent: 50 },
+      { daysBefore: 30, refundPercent: 100 },
+      { daysBefore: 1, refundPercent: 25 },
+    ];
+    const sorted = [
+      { daysBefore: 30, refundPercent: 100 },
+      { daysBefore: 7, refundPercent: 50 },
+      { daysBefore: 1, refundPercent: 25 },
+    ];
+
+    it('saves the tiers sorted by threshold, in one update, and returns the airline with them', async () => {
+      const { model, service, updateExec, usersService } = setup({
+        updatedAirline: airlineDocument({
+          policy: { cancellationTiers: sorted },
+        }),
+      });
+
+      const response = await service.setCancellationPolicy(
+        AIRLINE_ID,
+        MODERATOR_ID,
+        { tiers },
+      );
+
+      expect(usersService.findEntityById).toHaveBeenCalledWith(MODERATOR_ID);
+      expect(model.findByIdAndUpdate).toHaveBeenCalledTimes(1);
+      expect(model.findByIdAndUpdate).toHaveBeenCalledWith(
+        AIRLINE_ID,
+        { $set: { 'policy.cancellationTiers': sorted } },
+        { returnDocument: 'after', runValidators: true },
+      );
+      expect(updateExec).toHaveBeenCalled();
+      expect(response.cancellationTiers).toEqual(sorted);
+    });
+
+    it('replaces the list: an empty list clears it and nothing is merged', async () => {
+      const { model, service } = setup({
+        updatedAirline: airlineDocument({ policy: { cancellationTiers: [] } }),
+      });
+
+      const response = await service.setCancellationPolicy(
+        AIRLINE_ID,
+        MODERATOR_ID,
+        { tiers: [] },
+      );
+
+      expect(model.findByIdAndUpdate).toHaveBeenCalledWith(
+        AIRLINE_ID,
+        { $set: { 'policy.cancellationTiers': [] } },
+        expect.any(Object),
+      );
+      expect(response.cancellationTiers).toEqual([]);
+    });
+
+    it('refuses the moderator of another airline with 403 and writes nothing', async () => {
+      const { model, service } = setup({ assignedAirlineId: OTHER_AIRLINE_ID });
+
+      await expect(
+        service.setCancellationPolicy(AIRLINE_ID, MODERATOR_ID, { tiers }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('refuses an account with no airline assignment with 403', async () => {
+      const { model, service, usersService } = setup();
+      usersService.findEntityById.mockResolvedValue({
+        assignment: {
+          providerType: ProviderType.Hotel,
+          providerId: new Types.ObjectId(AIRLINE_ID),
+        },
+      });
+
+      await expect(
+        service.setCancellationPolicy(AIRLINE_ID, MODERATOR_ID, { tiers }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      usersService.findEntityById.mockResolvedValue(null);
+      await expect(
+        service.setCancellationPolicy(AIRLINE_ID, MODERATOR_ID, { tiers }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for an airline that does not exist', async () => {
+      const { findByIdExec, model, service } = setup();
+      findByIdExec.mockResolvedValue(null);
+
+      await expect(
+        service.setCancellationPolicy(AIRLINE_ID, MODERATOR_ID, { tiers }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the airline is deleted before the update', async () => {
+      const { service, updateExec } = setup();
+      updateExec.mockResolvedValue(null);
+
+      await expect(
+        service.setCancellationPolicy(AIRLINE_ID, MODERATOR_ID, { tiers }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
   describe('create (FLT-01)', () => {
     it('saves the logo filename and returns the mapped profile', async () => {
       const { model, service, uploadsService } = setup();
@@ -114,6 +218,7 @@ describe('AirlinesService', () => {
         logo: LOGO_FILENAME,
         logoUrl: `/api/uploads/${LOGO_FILENAME}`,
         active: true,
+        cancellationTiers: [],
         createdAt: '2026-11-05T11:00:00.000Z',
         updatedAt: '2026-11-06T12:00:00.000Z',
       });
@@ -209,6 +314,35 @@ describe('AirlinesService', () => {
       expect(uploadsService.saveImage).not.toHaveBeenCalled();
     });
 
+    it('answers 403 when the moderator account no longer exists, as the policy route does', async () => {
+      const { model, service, usersService } = setup();
+      usersService.findEntityById.mockResolvedValue(null);
+
+      await expect(
+        service.update(AIRLINE_ID, MODERATOR_ID, { name: 'Changed' }),
+      ).rejects.toThrow(
+        new ForbiddenException('You can only edit your assigned airline'),
+      );
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('answers 400 for a field sent as null, before reading anything', async () => {
+      const { model, service, uploadsService } = setup();
+
+      const error = (await service
+        .update(AIRLINE_ID, MODERATOR_ID, { name: 'Kept', code: null } as never)
+        .catch((caught: unknown) => caught)) as BadRequestException;
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(error.getResponse()).toEqual({
+        message: 'Validation failed',
+        errors: [{ field: 'code', messages: ['code must not be null'] }],
+      });
+      expect(model.findById).not.toHaveBeenCalled();
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+      expect(uploadsService.saveImage).not.toHaveBeenCalled();
+    });
+
     it('deletes the old logo after successful replacement and returns the new logo', async () => {
       const oldAirline = airlineDocument({ logo: OLD_LOGO_FILENAME });
       const updatedAirline = airlineDocument({ logo: LOGO_FILENAME });
@@ -242,6 +376,40 @@ describe('AirlinesService', () => {
         service.update(AIRLINE_ID, MODERATOR_ID, {}, uploadedLogo),
       ).rejects.toThrow('database update failed');
       expect(uploadsService.deleteImage).toHaveBeenCalledWith(LOGO_FILENAME);
+    });
+  });
+
+  describe('setActive (ACC-15)', () => {
+    function setupActive(updated: AirlineDocument | null) {
+      const exec = jest.fn().mockResolvedValue(updated);
+      const model = { findOneAndUpdate: jest.fn(() => ({ exec })) };
+      const service = new AirlinesService(
+        model as unknown as Model<Airline>,
+        {} as UploadsService,
+        {} as UsersService,
+      );
+      return { model, service };
+    }
+
+    it.each([false, true])(
+      'sets active to %s only when it is not already, in one update',
+      async (active) => {
+        const updated = airlineDocument({ active });
+        const { model, service } = setupActive(updated);
+
+        expect(await service.setActive(AIRLINE_ID, active)).toBe(updated);
+        expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+          { _id: AIRLINE_ID, active: { $ne: active } },
+          { $set: { active } },
+          { returnDocument: 'after' },
+        );
+      },
+    );
+
+    it('returns null when the airline is missing or already in that state', async () => {
+      const { service } = setupActive(null);
+
+      expect(await service.setActive(AIRLINE_ID, false)).toBeNull();
     });
   });
 });

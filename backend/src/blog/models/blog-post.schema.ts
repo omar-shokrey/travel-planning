@@ -4,6 +4,7 @@ import {
   POST_BODY_MAX_LENGTH,
   POST_TITLE_MAX_LENGTH,
 } from '../dto/create-post.dto';
+import { PostModeration } from './post-moderation.enum';
 import { PostStatus } from './post-status.enum';
 
 @Schema({ collection: 'posts', timestamps: true })
@@ -30,6 +31,19 @@ export class BlogPost {
     default: PostStatus.Draft,
   })
   status: PostStatus;
+
+  /**
+   * GEN-10: set by an admin, never by the author. A hidden post is visible
+   * only to its author and to admins. A post stored before this field existed
+   * reads as visible (the default applies to hydrated documents).
+   */
+  @Prop({
+    type: String,
+    required: true,
+    enum: Object.values(PostModeration),
+    default: PostModeration.Visible,
+  })
+  moderation: PostModeration;
 
   @Prop({ type: Date, index: true })
   publishedAt?: Date;

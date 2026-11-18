@@ -1,5 +1,11 @@
+import { Reflector } from '@nestjs/core';
+import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
+import { ROLES_KEY } from '../common/decorators/roles.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { Role } from '../common/enums/role.enum';
+import type { ActivitiesService } from './activities.service';
 import { ItinerariesController } from './itineraries.controller';
+import type { TransportCostsService } from './transport-costs.service';
 import type { ItinerariesService } from './itineraries.service';
 
 const id = '6741c0ffee0ddba11ad0c0de';
@@ -20,8 +26,12 @@ describe('ItinerariesController', () => {
     update: jest.fn(),
     remove: jest.fn(),
   };
+  const activities = { add: jest.fn() };
+  const transportCosts = { add: jest.fn() };
   const controller = new ItinerariesController(
     service as unknown as ItinerariesService,
+    activities as unknown as ActivitiesService,
+    transportCosts as unknown as TransportCostsService,
   );
 
   beforeEach(() => {
@@ -73,5 +83,62 @@ describe('ItinerariesController', () => {
       { notes: 'Museum' },
       userId,
     );
+  });
+
+  it('passes a new activity, the ids and the logged-in user to the activities service', async () => {
+    const dayId = '6741c0ffee0ddba11ad0d0d0';
+    const activity = { name: 'Museum', cost: 2000, currency: 'EGP' };
+    activities.add.mockResolvedValue({ id });
+
+    await controller.addActivity(id, dayId, activity, userId);
+
+    expect(activities.add).toHaveBeenCalledWith(id, dayId, activity, userId);
+  });
+
+  it('passes a new transport cost and the logged-in user to the transport costs service', async () => {
+    const cost = {
+      dayId: '6741c0ffee0ddba11ad0d0d0',
+      mode: 'train',
+      fromCityId: 'cairo',
+      toCityId: 'luxor',
+      amount: 90000,
+      currency: 'EGP',
+    };
+    transportCosts.add.mockResolvedValue({ id });
+
+    await controller.addTransportCost(id, cost, userId);
+
+    expect(transportCosts.add).toHaveBeenCalledWith(id, cost, userId);
+  });
+
+  it('is for registered users only (ITN-01): the class needs a login and Role.User, and no route changes that', () => {
+    const reflector = new Reflector();
+    const handlers = Object.getOwnPropertyNames(ItinerariesController.prototype)
+      .filter((name) => name !== 'constructor')
+      .map(
+        (name) =>
+          (
+            ItinerariesController.prototype as unknown as Record<
+              string,
+              () => unknown
+            >
+          )[name],
+      );
+
+    expect(handlers.length).toBeGreaterThan(0);
+    expect(reflector.get(IS_PUBLIC_KEY, ItinerariesController)).toBeUndefined();
+    expect(reflector.get(ROLES_KEY, ItinerariesController)).toEqual([
+      Role.User,
+    ]);
+    for (const handler of handlers) {
+      expect(reflector.get(IS_PUBLIC_KEY, handler)).toBeUndefined();
+      expect(reflector.get(ROLES_KEY, handler)).toBeUndefined();
+      expect(
+        reflector.getAllAndOverride(ROLES_KEY, [
+          handler,
+          ItinerariesController,
+        ]),
+      ).toEqual([Role.User]);
+    }
   });
 });
