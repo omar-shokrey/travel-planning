@@ -453,6 +453,34 @@ change-password feature exists. Changed: nothing. Rejected: nothing.
 ================================================
 
 ================================================
+Date: 2026-11-14
+Student: Ali Ahmed
+Tool: Claude Code (desktop app)
+Branch / Issue: feature/GEN-01-notifications / #92 (PR #125)
+Related Requirement: GEN-01
+Prompt:
+I gave Claude my 13 assigned issues, the team development plan and the GEN-01 issue, and asked it
+to read AGENTS.md, CLAUDE.md, the specification, the PR template and this log, to ask me before
+deciding anything, and to never commit or open .env. It found that ACC-04 (the auth guard) had
+been merged after my branch was cut, so I recreated the branch from the latest develop. I approved
+four routes: GET /api/notifications (paginated, ?unread filter), GET /api/notifications/unread-count,
+PATCH /api/notifications/:id/read and PATCH /api/notifications/read-all, plus
+NotificationsService.notify() for the other members. Then I asked it to build GEN-01 with tests.
+How the output was used:
+Claude wrote the notifications module (schema, enums, DTOs, mapper, service, controller with Swagger
+text, README) and its unit tests and e2e test. It ran format, lint, typecheck, the unit tests, the
+build and the root format check. I run the e2e test myself, with my own backend/.env, which
+Claude never reads.
+Accepted, changed, or rejected:
+Accepted: the four routes; 404 instead of 403 for another user's notification; notify() and
+notifyMany() that log a failure instead of throwing, because they run after the booking or refund
+is already saved; keeping the first read time when a notification is marked read again. Added by
+Claude beyond the approved contract: notifyMany(), so a flight change reaches all passengers in one
+write. Changed: Claude first wrote the files in the main checkout instead of its worktree; a hook
+stopped it before any file was written. Rejected: email notifications (GEN-01-B, an optional bonus).
+================================================
+
+================================================
 Date: 2026-11-15
 Student: Omar Hossam
 Tool: Claude (claude.ai Project chat)
@@ -733,6 +761,386 @@ changed nothing and rejected nothing.
 ================================================
 
 ================================================
+Date: 2026-11-15
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/ACC-08-change-password / #14 (PR #137)
+Related Requirement: ACC-08 (prepares the mustChangePassword flag used by ACC-07a and ACC-13)
+Prompt:
+"lets start wave 2" with my wave 2 issue list, then "Start ACC-08". Claude read the workbook
+rows and section 8 of the project description and asked three questions. I chose: ACC-08
+first, the "must change password" rule as a flag in the account only (the backend does not
+block other routes), and ACC-13 and GEN-09 on hold until airlines, hotels, blog and
+itineraries exist on develop.
+How the output was used:
+Claude wrote PATCH /api/auth/change-password: ChangePasswordDto, AuthService.changePassword,
+UsersService.findEntityByIdWithPasswordHash and updatePassword, mustChangePassword in
+UserResponseDto and the mapper, unit tests, an e2e test (auth-change-password.e2e-spec.ts) and
+the README notes in auth/ and users/.
+Accepted, changed, or rejected:
+Accepted after reading the diff. Design choices kept: a wrong current password answers 400 (not
+401, the user is logged in), the new password must differ from the current one, and wrong
+current passwords do not count for the lockout. Changed: the new e2e test hung on
+users.updateOne, so it now suspends the user with findByIdAndUpdate like the ACC-04 tests. The
+GEN-13 test "never sends the password or its hash back" rejected the word "password" anywhere,
+which the new mustChangePassword field matched; I chose to narrow it to forbid a password or
+passwordHash field. Checked: format, lint (0 warnings), typecheck, unit tests, build and
+test:e2e (193 tests) passed.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/ACC-07a-admin-password-reset / #13 (PR #138)
+Related Requirement: ACC-07a
+Prompt:
+"Start ACC-07a and make the branch and switch to it". Claude created the branch from the latest
+team develop and built the admin password reset on the wave 2 decisions (mustChangePassword is
+a flag only; the owner changes the password with ACC-08).
+How the output was used:
+Claude wrote POST /api/admin/users/:id/reset-password: the admin module (AdminController for
+admins only, AdminService, ResetPasswordDto, constants, README), UsersService.setTemporaryPassword,
+unit tests and an e2e test (admin-reset-password.e2e-spec.ts).
+Accepted, changed, or rejected:
+Accepted after reading the diff. Design choices kept: the admin chooses the temporary password
+(same as ACC-13), it follows the password rule, the reset sets mustChangePassword and clears the
+login lockout, an administrator's password cannot be reset here (403), and the status is not
+changed. Checked: format, lint (0 warnings), typecheck, unit tests, build and test:e2e
+(197 tests) passed.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/ACC-06-logout-and-session-expiry / #12
+Related Requirement: ACC-06
+Prompt:
+I asked Claude to develop ACC-06 (a logged-in user can log out, and a session that is idle for 30
+minutes ends), after checking the issue, the specification and what the auth code already had. In
+the same chat I later asked Claude how to resolve the merge conflict in src/auth/README.md after
+the ACC-08 and ACC-07a pull requests were merged, and what to do about two end-to-end failures.
+How the output was used:
+Claude told me its design decisions first, then wrote the code into my project folder. Sessions are
+stored in a new sessions collection (user id, SHA-256 hash of the refresh token, last activity,
+expiry with a TTL index, revoked date). Both cookies carry the user id and the session id, and the
+refresh token also has a random id so no two refresh tokens are the same. JwtAuthGuard calls
+SessionsService.touch, one atomic update that accepts a session only if it is not revoked and was
+active in the last 30 minutes, and moves the last activity forward. Two new routes: POST
+/api/auth/logout (public, 204, always succeeds, clears both cookies and revokes the session) and
+POST /api/auth/refresh (public, rotates the refresh token with a compare-and-set, so an old refresh
+token cannot be used twice). GET /api/auth/me stays the current-user route. Claude added unit tests
+for the new and changed auth files and test/auth-session.e2e-spec.ts, and documented the design and
+the known trade-offs in the auth README (for example, every login made before the merge stops
+working). Because the guard now needs a live session, the end-to-end specs that create users
+straight in the database could no longer log in with a hand-signed token. Claude changed
+test/itineraries.e2e-spec.ts and added test/support/session-cookie.ts (sessionCookieFor) and
+test/support/delete-sessions.ts (deleteSessionsOf) so those tests create and remove their own
+sessions in the -test database. Claude also updated the lockout and login end-to-end specs. Claude
+could not install packages or run the tests in its own workspace, so it only formatted the files
+with Prettier and checked their syntax, then put them into my project folder. I created the branch
+and ran format, lint, typecheck, the unit tests, the end-to-end tests (13 suites, 251 tests) and
+the build myself. For the conflict in the auth README, Claude explained how to keep both the
+ACC-08 and the ACC-06 sections and rewrote the sentence about the other sessions of an account.
+Accepted, changed, or rejected:
+Accepted: the session design, the logout and refresh routes, the code and the tests. Changed: (1)
+my first end-to-end run failed because the itineraries test that sends 61 requests timed out at 30
+seconds, since every request now also checks its session in the remote database; Claude gave that
+test a 120-second timeout. (2) My second run failed on one of Claude's own refresh tests, which
+expected a new access token after a refresh, but two access tokens made in the same second are
+identical; Claude removed that check and kept the check that the refresh token changes. (3) Claude
+first sent me to GET /api/users/me in Swagger; I corrected it to GET /api/auth/me, because
+/api/users/me belongs to ACC-11, and Claude fixed the steps and the pull request description.
+Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/ACC-14-admin-account-list / #20 (PR #140)
+Related Requirement: ACC-14 (with GEN-05 pagination)
+Prompt:
+"Start ACC-14", after ACC-08 and ACC-07a were merged. Claude created the branch from the latest
+team develop and built the admin account list.
+How the output was used:
+Claude wrote GET /api/admin/accounts: ListAccountsQueryDto (page, limit, search, role, status),
+UsersService.listAccounts, AdminService.listAccounts, the route, unit tests, an e2e test
+(admin-accounts.e2e-spec.ts) and the README notes in admin/ and users/.
+Accepted, changed, or rejected:
+Accepted after reading the diff. Design choices kept: every account is listed (all roles and
+statuses), newest first, the search is plain text on name or email in any case, filters combine.
+Changed: the local e2e test hung on Atlas; Claude traced it to a count with RegExp objects inside
+$or and switched the search to the equivalent { $regex, $options } form, and the test now creates
+its accounts with one insertMany. Checked: format, lint (0 warnings), typecheck, unit tests,
+build and test:e2e (230 tests) passed.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/ACC-09-edit-profile / #15 (PR #141)
+Related Requirement: ACC-09
+Prompt:
+"Start ACC-09". Claude created the branch from the latest team develop and built the profile
+edit, checking the preferred currency against the countries list (GEN-12).
+How the output was used:
+Claude wrote PATCH /api/users/me: UsersController, UpdateProfileDto, ProfileService (currency
+check), UsersService.updateProfile (one update with $set/$unset), phone and preferredCurrency in
+UserResponseDto and the mapper, unit tests, an e2e test (users-profile.e2e-spec.ts) and the
+README notes in users/.
+Accepted, changed, or rejected:
+Accepted after reading the diff. Design choices kept: only sent fields change and null removes
+the phone or currency, nothing is saved unless every field is valid, the phone must be
+international (+ country code), the currency must be one of the countries list, email, role,
+status and password are refused. Changed: ProfileChanges was moved in users.service.ts so the PR
+merges cleanly with ACC-14 (#140). Checked: format, lint (0 warnings), typecheck, unit tests,
+build and test:e2e (225 tests) passed.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ahmed Rashad (Mado)
+Tool: Claude Code (VS Code extension)
+Branch / Issue: feature/BLG-05-post-comments / #85 (PR #142)
+Related Requirement: BLG-05
+Prompt:
+I gave Claude Code the development plan, my 14 issues with their branch names and the repo
+rules, and asked it to implement them one branch per issue and run the checks before every PR.
+How the output was used:
+It built comments in the blog module: Comment schema, DTOs, mapper, CommentsService and
+CommentsController (POST and GET /api/posts/:id/comments), unit and end-to-end tests, README.
+It ran format, lint, typecheck, build and the tests on my laptop.
+Accepted, changed, or rejected:
+Kept its design: own collection, a draft answers 404, a public paginated GET for reading
+comments because the endpoint table has none, commentCount raised with one $inc update.
+I checked the routes in Swagger on 16 Nov (201, 400, 404 and the guest list all as expected).
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ahmed Rashad (Mado)
+Tool: Claude Code (VS Code extension)
+Branch / Issue: feature/BLG-06-post-likes / #86 (PR #143)
+Related Requirement: BLG-06
+Prompt:
+Same session as BLG-05. I asked it to continue with BLG-06 (like once, unlike, like count).
+How the output was used:
+It built the Like schema, response DTO, mapper, LikesService and LikesController (POST and
+DELETE /api/posts/:id/like), unit and end-to-end tests and the README section.
+Accepted, changed, or rejected:
+Kept its design: "like once" by a unique (postId, userId) index, 409 for a second like and
+for removing a like that does not exist, likeCount changed with one guarded $inc update.
+Changed after a failed run: the clean-up of the likes e2e file made about 130 delete calls
+and timed out on a slow connection; it now makes one call per test post.
+I checked the routes in Swagger on 16 Nov (201, 409, 200, 409 and 401 for a guest).
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ahmed Rashad (Mado)
+Tool: Claude Code (VS Code extension)
+Branch / Issue: feature/BLG-07-edit-delete-comments / #87 (PR #144)
+Related Requirement: BLG-07
+Prompt:
+Same session. I asked it to continue with BLG-07 (edit and delete my own comments).
+How the output was used:
+It added UpdateCommentDto, the update and remove methods of CommentsService, PATCH and
+DELETE /api/comments/:id, unit and end-to-end tests and the README section.
+Accepted, changed, or rejected:
+Kept its design: ownership checked in the service (403 for another user's comment, 404 for a
+missing one), the post author cannot edit others' comments, delete answers 204 and lowers
+commentCount with one guarded update.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: fix/ACC-08-end-other-sessions-on-password-change / no own issue (PR #145)
+Related Requirement: ACC-08, ACC-07a
+Prompt:
+After a password change, end the user's other sessions; after an admin reset, end all of
+them. Add tests.
+How the output was used:
+Claude changed the auth and admin services and the tests; I ran the checks and committed.
+Accepted, changed, or rejected:
+Accepted.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ahmed Rashad (Mado)
+Tool: Claude Code (VS Code extension)
+Branch / Issue: feature/HTL-02-hotel-details / #44 (PR #146)
+Related Requirement: HTL-02
+Prompt:
+Same session. I asked it to continue with my wave 2 hotel issues, starting with HTL-02.
+How the output was used:
+It added the public route GET /api/hotels/:id in its own HotelDetailsController and
+HotelDetailsService, with unit and end-to-end tests and a README section.
+Accepted, changed, or rejected:
+Kept its design: public route, a deactivated hotel answers 404, the details controller is
+registered last so /hotels/search is matched before /hotels/:id. Not in this PR: reviews
+(HTL-24) and free rooms for dates (HTL-15), which do not exist yet.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ahmed Rashad (Mado)
+Tool: Claude Code (VS Code extension)
+Branch / Issue: feature/HTL-09-check-in-out-times / #50 (PR #147)
+Related Requirement: HTL-09
+Prompt:
+Same session. I asked it to continue with HTL-09 (check-in and check-out times).
+How the output was used:
+It added the embedded HotelPolicy schema, DTOs, mapper, HotelPoliciesService and
+HotelPoliciesController (PUT /api/hotels/:id/policies), the policy on the hotel page, unit
+and end-to-end tests and a README section.
+Accepted, changed, or rejected:
+Kept its design: times are HH:mm strings, PUT replaces the policies as a whole, a hotel
+without policies shows policy null. It added one method to HotelsService,
+findManagedEntityOrThrow, which reuses the existing moderator check.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ahmed Rashad (Mado)
+Tool: Claude Code (VS Code extension)
+Branch / Issue: feature/HTL-10-hotel-cancellation-tiers / #51 (PR #148)
+Related Requirement: HTL-10
+Prompt:
+Same session. I asked it to continue with HTL-10 (cancellation tiers, the rule of FLT-09).
+How the output was used:
+It added the CancellationTier schema, the tier list in the DTOs and mapper, the selection
+rule as a pure function (selectRefundPercent), the tiers in PUT /api/hotels/:id/policies
+and on the hotel page, unit and end-to-end tests and a README section.
+Accepted, changed, or rejected:
+Kept its design: same PUT route as the times, an empty list means no refund, two tiers with
+the same daysBefore answer 400, at most 10 tiers (a limit it chose, the workbook has none).
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/FLT-01-airline-profile / #24
+Related Requirement: FLT-01
+Prompt:
+Omar asked me to take over FLT-01 and FLT-02. I asked Claude to do both on the existing branches
+and to give me the AI log entries instead of adding them to the file. Later, after I found a
+problem in Swagger, I asked Claude to fix it.
+How the output was used:
+Claude found that Khadija had already implemented FLT-01 on the branch (create, get and edit an
+airline with a logo, ownership checks, unit and end-to-end tests) and kept her commits. It found
+that the branch's last commit deleted AI_PROMPTS.txt, which would have removed the team log on
+merge, so the merge with develop keeps develop's version. It added four commits: { new: true }
+replaced by { returnDocument: 'after' } in the update; Swagger descriptions that start with FLT-01,
+with an end-to-end check; the end-to-end tests now delete the login sessions of their test users,
+as the other suites do since ACC-06; and a fix for the Swagger forms. Claude ran format, lint,
+typecheck, build and the unit tests (670 passed) in its own workspace, and the airline end-to-end
+tests against a local MongoDB-compatible stand-in (FerretDB), not real MongoDB.
+Accepted, changed, or rejected:
+Accepted: keeping Khadija's design and commits, the merge that keeps the AI log, and the four
+commits. Changed after my check: when I tried POST /api/airlines in Swagger, the form showed only
+the logo field, so name and code could not be sent. The shared @UploadImage decorator replaced the
+route's own form; Claude moved it above the route's @ApiBody and added an end-to-end test that
+checks both forms. Checked by me: npm run test:e2e on the test database, 16 suites and 314 tests
+passed. In Swagger, logged in as admin, POST /api/airlines with name, code and a PNG logo answered
+201, the same code again answered 409, and PATCH /api/airlines/:id as admin answered 403 because
+the route is for airline moderators only. The moderator success case is covered by the end-to-end
+tests and cannot be tried in Swagger until ACC-13. I created two test airlines in the shared
+database (EgyptAir MS, id 6afa19a67e03da9856c71369, and Test Airline Ali TSTALI, id
+6afa19f57e03da9856c7136a). Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository)
+Branch / Issue: feature/FLT-02-airport-list / #25
+Related Requirement: FLT-02
+Prompt:
+In the same request as FLT-01, I asked Claude to implement FLT-02 (a predefined, read-only list of
+airports) and to give me the AI log entry instead of adding it to the file.
+How the output was used:
+No FLT-02 branch existed, so Claude created it from develop. It wrote GET /api/airports (public,
+paginated, sorted by IATA code, with the city and country names), the response DTO and mapper,
+AirportsService with findEntityOrThrow(code) for flight creation and search (400 for an unknown
+code), the reference module README, unit tests and test/airports.e2e-spec.ts (12 tests, which add
+and delete their own country, city and airports). Claude ran format, lint, typecheck, build and
+the unit tests (669 passed) in its own workspace, and the end-to-end file against a local
+MongoDB-compatible stand-in (FerretDB), not real MongoDB.
+Accepted, changed, or rejected:
+Accepted: the route, the service, the tests and the README. Checked by me: npm run test:e2e on the
+test database passed. In Swagger, without logging in, GET /api/airports answered 200 with the 8
+seeded airports sorted by IATA code, each with its city, country and time zone, and meta total 8.
+Changed: nothing. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/BLG-01-create-a-blog-post / #81 (PR #152)
+Related Requirement: BLG-01
+Prompt:
+"lets make this issue first" (BLG-01), after the team agreed I finish it. Claude built on
+Maha's branch feature/BLG-01-create-post (closed PR #130), merged the latest develop, reviewed
+it against the workbook, the spec and AGENTS.md, and checked it would not conflict with
+Ahmed's blog PRs #142-#144. Later: "review blg-01 before merge", then "Yes, fix it".
+How the output was used:
+Claude changed the post response dates to UTC ISO strings in the mapper, added title (200)
+and body (20,000) limits in the DTO and schema, wrote the Swagger summary and error
+descriptions, added e2e tests (ISO dates, limits, 403 for moderators and admins) and session
+cleanup, and corrected the blog README. In the review it found that "status": null and
+"tags": null passed validation and stored a post with no status; it fixed this (validated
+whenever sent, status required in the schema) and made the mapper read _id so lean posts map.
+Accepted, changed, or rejected:
+Accepted after reading the diff. Kept Maha's design (user role only, draft by default, tag
+rules). Did not touch the counters, blog.constants.ts or the end of the README, which Ahmed's
+PRs change. Changed: the 403 e2e test creates its accounts with one insertMany after a local
+Atlas timeout. Checked: format, lint (0 warnings), typecheck, unit tests (692), build and
+test:e2e (313) passed.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/BLG-03-my-posts / #83 (PR #153)
+Related Requirement: BLG-03 (with GEN-05)
+Prompt:
+"Start BLG-03", built on my BLG-01 branch (#152), without conflicting with Ahmed's blog PRs.
+How the output was used:
+Claude wrote GET /api/posts/mine: MyPostResponseDto, toMyPostResponse, PostsService.listMine
+(filtered by the logged-in author, newest first, paginated), the commentCount and likeCount
+schema fields written exactly as in Ahmed's BLG-05/06 PRs, an (authorId, createdAt) index, unit
+tests, an e2e test (blog-my-posts.e2e-spec.ts) and README notes.
+Accepted, changed, or rejected:
+Accepted after reading the diff. Checked trial merges with Ahmed's branches (#143, #144 clean;
+#142 has a small schema conflict: keep both counters). Checked: format, lint (0 warnings),
+typecheck, unit tests (701), build and test:e2e (324) passed.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/HTL-01-finish-hotel-profile / #43 (PR #154)
+Related Requirement: HTL-01
+Prompt:
+Finish the hotel profile: admin creates a hotel, its hotel moderator edits the profile and
+photos (GEN-08 upload rules).
+How the output was used:
+Claude wrote the update and photo routes, ownership checks and tests; I committed.
+Accepted, changed, or rejected:
+Accepted. The hotels controller had no unit spec; added in the fix PR.
+================================================
+
+================================================
 Date: 2026-11-16
 Student: Ali Ghayesh
 Tool: Claude (claude.ai chat, with access to my copy of the repository and my laptop)
@@ -934,4 +1342,628 @@ ids and clonedFrom crediting the author. After setting the original private, the
 found it and the public view answered 404. After deleting the original, the clone still opened with
 its 4 days and its credit, and deleting its activity and transport cost worked. Claude then deleted
 its test itineraries one by one by id. I changed nothing and rejected nothing.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: fix/mongoose-validation-error-400 (shared layer) (PR #155)
+Related Requirement: GEN-02 (found in HTL-01)
+Prompt:
+The team leader's follow-up: a separate shared-layer PR from develop so that a Mongoose
+ValidationError answers 400 in the usual error shape instead of 500, and an e2e test of the
+hotel photo routes on PR #154.
+How the output was used:
+Claude changed AllExceptionsFilter to answer mongoose.Error.ValidationError with 400,
+"Validation failed" and one field error per failing path, not logged as a server error, with
+unit tests using a real ValidationError. On #154 it added hotels-photos.e2e-spec.ts (9 tests:
+add, served url, 6th photo 400, non-image 415, other moderator 403, 401, delete removes the
+file, second delete 404, path traversal 404).
+Accepted, changed, or rejected:
+Accepted after reading the diff. Kept nullFieldsOf in HotelsService. Checked: format, lint
+(0 warnings), typecheck, unit tests (725 on develop), build and test:e2e (358) passed.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Asser
+Tool: Copilot SDK in VS Code
+Branch / Issue: feature/HTL-03-add-hotel-room / #45 (PR #157)
+Related Requirement: HTL-03
+Prompt:
+Implement HTL-03 room creation for the assigned hotel moderator, with validation, Swagger
+documentation and tests. Verify it in Swagger and with the test suite, add separate room end-to-end
+coverage, and open a pull request.
+How the output was used:
+The AI implemented room creation for the assigned hotel moderator with validated DTOs, Swagger
+documentation and unit and end-to-end tests, and checked it in Swagger and with the test suite. I
+opened PR #157.
+Accepted, changed, or rejected:
+Accepted after the review of the pull request: the platform currency added to the room response and
+the removal of an unused moderator account from the profile test. Kept the design: the currency
+comes from PLATFORM_CURRENCY, so no currency field was added to the Room schema.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Omar Hossam
+Tool: Claude (claude.ai Project chat)
+Branch / Issue: feature/ACC-10-send-guests-to-login-for-restricted / #16
+Related Requirement: ACC-10
+Prompt:
+I asked Claude to develop ACC-10 (a guest who tries a restricted action such as book, review or
+post is sent to login and returned to the action afterwards), working only on this issue, and to
+fix any problem left by earlier branches that ACC-10 needs.
+How the output was used:
+Claude checked every route in the backend first. Every route is either marked @Public() on purpose
+or already answers 401 "You must log in to do this" through JwtAuthGuard, so no production code was
+needed. Booking and review routes do not exist yet. Claude wrote test/guest-access.e2e-spec.ts,
+which reads the app's real route table with Nest's DiscoveryService and Reflector. It checks that
+every non-public route answers 401 with the login message to a guest and to a forged cookie, and
+documents the 401 in Swagger. It also checks that no public route changes data except the account
+routes and the Stripe webhook (PUBLIC_WRITES), that bookings, payments, refunds, notifications,
+accounts and private itineraries are never public, and that a refused guest who logs in is served on
+the same route. Claude added a section to the auth README explaining that the redirect back to the
+action is frontend work for Milestone 2. Claude checked that the open pull requests of other team
+members already document 401, so the new test would not break them. Claude could not run the tests
+in its own workspace, so it formatted the files and checked their syntax, then put them into my
+project folder. I created the branch and ran format, lint, typecheck, the unit tests (58 suites,
+774 tests), the end-to-end tests (23 suites, 398 tests) and the build myself. Claude then ran the
+Swagger checks in the browser on my computer: as a guest, GET /api/auth/me, GET /api/itineraries
+and POST /api/posts answered 401 and nothing was created; I logged in myself, and the same routes
+answered 200; after logout they answered 401 again.
+Accepted, changed, or rejected:
+Accepted: the tests and the README section. Changed: nothing in the code. My first end-to-end run
+failed because my IP address was not on the MongoDB Atlas access list; after I added it in Atlas,
+the tests passed.
+Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/ACC-13-create-moderators / #19 (PR #166)
+Related Requirement: ACC-13 (depends on FLT-01 #24 and HTL-01 #43, both merged)
+Prompt:
+"Start ACC-13". Claude asked whether one airline or hotel may have several moderators; I chose
+several allowed.
+How the output was used:
+Claude wrote POST /api/admin/moderators: CreateModeratorDto (moderator roles only, password
+rule, no nulls), AdminService.createModerator (checks the airline or hotel exists and matches
+the role, else 400 on providerId), UsersService.createModerator (active account, assignment,
+mustChangePassword, bcrypt hash, 409 on a used email), assignment in UserResponseDto,
+HotelsService.findEntityOrThrow, unit tests, an e2e test (admin-moderators.e2e-spec.ts, 17 tests:
+the moderator logs in with the temporary password, edits its hotel and changes the password),
+and README notes.
+Accepted, changed, or rejected:
+Accepted after reading the diff. Changed: moved the new hotel method and its test so Ahmed's
+open hotel PRs still merge cleanly (trial merge with all 10 open PRs). Checked: format, lint
+(0 warnings), typecheck, unit tests (808), build and test:e2e (415) passed.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/ACC-16-suspend-users / #22 (PR #168)
+Related Requirement: ACC-16 (depends on ACC-14 #20 and ACC-06 #12, both merged)
+Prompt:
+"start acc-16". Claude asked whether ACC-16 should also cover moderators; I chose registered
+users only, so ACC-15 (#21) extends the same routes to moderators later.
+How the output was used:
+Claude wrote PATCH /api/admin/accounts/:id/suspend and /reactivate: AdminService.suspend and
+reactivate (users only; 400 for moderators, 403 for admins, 409 for already suspended, not
+suspended or deactivated accounts, 404 for unknown ids), UsersService.changeStatus (one
+conditional update, so two admins cannot both win), ending every session on suspension, unit
+tests, an e2e test (admin-suspend-users.e2e-spec.ts, 15 tests with real logins) and README notes.
+Accepted, changed, or rejected:
+Accepted after reading the diff. Checked: format, lint (0 warnings), typecheck, unit tests
+(824), build and test:e2e (430) passed; trial merge with all 15 open PRs adds no conflict.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/GEN-09-report-content / #98 (PR #170)
+Related Requirement: GEN-09 (depends on ACC-04)
+Prompt:
+"lets make all of these now" with subagents. Team decision: posts and itineraries only;
+comments (#142) and reviews come in a later PR.
+How the output was used:
+A Claude subagent built POST /api/reports: the reports module (Report schema with a unique
+index per reporter and item, DTOs, mapper, service, controller, README), a
+PostsService.findPublishedAuthorId lookup, unit tests and an e2e suite (29 tests). Claude
+reviewed it and ran a Swagger check on the -test database.
+Accepted, changed, or rejected:
+Accepted after review: user role only, reason trimmed 1-500 characters, null refused, 404 for
+drafts and itineraries the reporter cannot see, 400 for own content, 409 for a second report.
+The duplicate check counts instead of exists(), which stalled against the Atlas test
+database. Checked: lint, typecheck, unit tests (851), build and test:e2e (444) passed.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/ACC-15-suspend-moderators-providers / #21 (PR #171)
+Related Requirement: ACC-15 (depends on ACC-16 #22, PR #168)
+Prompt:
+"lets make all of these now" with subagents, built on the ACC-16 branch.
+How the output was used:
+A Claude subagent extended PATCH /api/admin/accounts/:id/suspend and /reactivate to moderator
+accounts (same rules as users, plus an account_suspended notification) and added PATCH
+/api/admin/providers/:type/:id/deactivate and /reactivate for hotels and airlines (race-safe
+setActive in the owning services, 404/409 rules, provider_deactivated notifications to the
+provider's moderators), unit tests and an e2e suite. Claude reviewed it and ran a Swagger
+check on the -test database.
+Accepted, changed, or rejected:
+Accepted after review. Left for later: notifying travellers (bookings do not exist yet) and a
+notification on provider reactivation (no such type in the data model). Checked: lint,
+typecheck, unit tests (858), build and test:e2e (451) passed.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/GEN-07-audit-log / #96 (PR #172)
+Related Requirement: GEN-07 (records ACC-07a and ACC-13 actions; GEN-05 pagination)
+Prompt:
+"lets make all of these now" with subagents. Team decision: build the audit log and record
+the admin actions already in develop (ACC-07a password reset, ACC-13 moderator creation);
+ACC-15, ACC-16 and GEN-10 add their own audit call after this merges.
+How the output was used:
+A Claude subagent built the audit module (AuditLog schema in audit_logs, action and target
+enums, append-only AuditService.record that logs instead of failing the request, list with
+filters), GET /api/admin/audit-logs (admin only, paginated, newest first, filters by action,
+admin and target), recording of the reset and the moderator creation in AdminService, unit
+tests and an e2e suite. Claude reviewed it and ran a Swagger check on the -test database.
+Accepted, changed, or rejected:
+Accepted after review. The field is adminId (the spec's name). A filter by target type and id
+timed out locally; Claude traced it to an Atlas command shape (skip(0) with sort) that never
+answers on this connection, not to the code. Checked: lint, typecheck, unit tests (848),
+build and test:e2e (431) passed.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Ahmed Rashad (Mado)
+Tool: Claude Code (VS Code extension)
+Branch / Issue: my six branches (BLG-05, BLG-06, BLG-07, HTL-02, HTL-09, HTL-10) / pull requests #142, #143, #144, #146, #147, #148
+Related Requirement: BLG-05, BLG-06, BLG-07, HTL-02, HTL-09, HTL-10
+Prompt:
+I gave Claude Code the team leader's review of my six PRs and asked it to fix them one PR at
+a time: merge develop, leave AI_PROMPTS.txt to the team leader, rerun every check.
+How the output was used:
+It merged develop into the bottom branch of each stack and each branch into the next, with
+merge commits only. Conflicts: blog-post.schema.ts on BLG-05 and AI_PROMPTS.txt on five
+branches, all resolved with develop's version. It reran format, lint, typecheck, build, unit
+and end-to-end tests on every branch and updated the six PR descriptions.
+Accepted, changed, or rejected:
+Results on the tips: blog 65 unit suites (815 tests) and 26 e2e suites (440 tests); hotels
+66 unit suites (880 tests) and 27 e2e suites (451 tests). CI is green on all six. One e2e
+run on HTL-02 failed with connection timeouts in unrelated files and passed when repeated.
+The only code change was the clean-up of the likes e2e file. HotelsService has one
+findManagedEntityOrThrow and differs from develop only by that method.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Maha Mohamed Gad
+Tool: ChatGPT
+Branch / Issue: feature/BLG-04-edit-and-delete-own-posts / #84 (PR #159)
+Related Requirement: BLG-04
+Prompt:
+I asked ChatGPT to help me update the existing BLG-04 PR after GEN-10 was merged into develop. I
+asked it to guide me through syncing develop into my BLG-04 branch, updating PostsService to use the
+posts, comments, and likes models, ensuring deleting a post also removes its engagement without
+turning cleanup failures into a 500 response, updating the BLG-04 tests and E2E coverage, updating
+the BLG-04 README section, and verifying the branch with the required checks.
+How the output was used:
+ChatGPT guided me step by step through merging origin/develop into the existing BLG-04 branch,
+resolving the PostsService and README conflicts, updating PostsService tests to use all three
+models, adding unit tests for engagement cleanup and cleanup failure logging, adding an E2E test
+confirming a deleted post's comment and like are also deleted, and updating the BLG-04 README. I
+then ran the required typecheck, unit tests, focused E2E tests, full E2E tests, build, formatting
+checks, and git diff --check, and committed the merge as 0efb347.
+Accepted, changed, or rejected:
+I accepted the guidance for the required BLG-04 fixes and testing approach. I made the
+implementation changes in the repository. The full E2E suite had one unrelated GEN-10
+admin-moderation pagination failure, and the root format check had an unrelated warning in
+backend/src/hotels/README.md; neither was changed because they are outside BLG-04 scope.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/BLG-04-edit-and-delete-own-posts / #84 (PR #159, finished on Maha's branch)
+Related Requirement: BLG-04 (also GEN-10)
+Prompt:
+I asked Claude Code to finish Maha's BLG-04 pull request (#159) on her branch after the team
+leader's review, with normal pushes only (no rebase, no force), so that the open blog pull requests
+#176 and #177 are not affected.
+How the output was used:
+Claude Code merged the latest develop (the difference against develop is only the 8 BLG-04 files),
+removed a duplicate ApiUnauthorizedResponse on GET /api/posts/mine, made DELETE /api/posts/:id
+answer 204 with no body (documented with ApiNoContentResponse; the two owner-delete e2e tests expect
+204), rewrote the BLG-04 README section, moved the findPublishedSummary bullet back to the list
+above it, and corrected the sentence in the GEN-10 bullet: the author's delete already calls
+removeEngagementOfPost. It updated the pull request description (Closes #84, the real results, the
+manual check and the AI usage). Checks: format, lint (0 warnings), typecheck and build passed; npm
+test 109 suites, 1491 tests; the root format:check passed. The full test:e2e --runInBand run had 42
+of 44 suites passing (771 tests passed, 25 failed, 2 todo); all blog suites passed, and the two
+failing suites (itinerary-public and auth-login) failed only with a hook timeout of 30000 ms during
+a slow Atlas connection and passed alone (24/24 and 27/27). BLG-04 does not touch either module.
+Accepted, changed, or rejected:
+Manual Swagger check on the -test database, not the shared one, with two test users that were
+deleted by id afterwards. As the author: create a draft 201, edit the title 200, publish 200
+(publishedAt set), back to draft 200 (publishedAt gone), an unknown field 400, /api/posts/abc 400.
+As the other user: PATCH and DELETE on the author's post both 403. As the author again: DELETE 204,
+and DELETE again 404. The JWT secrets in the local backend/.env are empty, so login failed with
+start:dev; random secrets were used for the local test run only and .env was not changed.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/ACC-16-suspend-users / #22 (PR #168)
+Related Requirement: ACC-16 (with GEN-01 notifications)
+Prompt:
+I gave Claude Code the review of PR #168 and asked it to fix every point in the
+same PR: notify a suspended user, end the sessions again on reactivation, share
+the status-change rules between suspend and reactivate, use one constants import,
+and update the PR checkboxes.
+How the output was used:
+Claude Code added the account_suspended notification after the status change,
+made reactivate end every session first while the account is still suspended,
+moved the shared rules into one changeStatus helper with a conditional update,
+and added unit and e2e tests (including a session that a racing login left
+alive). I ran format, lint, typecheck, the unit tests, the build and the full
+e2e suite, committed, and Claude Code pushed and updated the PR description.
+Accepted, changed, or rejected:
+Accepted all review fixes. Kept "reactivation sends no notification", because
+the user can log in again, which says it.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/GEN-09-report-content / #98 (PR #170)
+Related Requirement: GEN-09 (with ITN-21)
+Prompt:
+I gave Claude Code the GEN-09 review and asked it to fix every point in the
+same PR. After ITN-21 and BLG-05/06/07 merged, I asked it to merge develop and
+use ITN-21's visibility rule for itineraries instead of repeating it.
+How the output was used:
+Claude Code changed "Closes" to "Part of #98", removed the read before the
+insert (the unique index already gives 409), added three e2e cases (own draft
+404, own hidden itinerary 400, suspended reporter 403), and documented the
+follow-ups in the code and READMEs. After the develop merge it added
+ItinerariesService.findOwnerAndVisibilityOrThrow, which applies ITN-21's
+PUBLICLY_VISIBLE rule and reads only four fields, so search and reports agree.
+It ran the checks, the e2e files and Swagger checks on the -test database; I
+ran the full e2e suite and committed; Claude Code pushed and updated the PR.
+Accepted, changed, or rejected:
+Accepted all of it. Comment and review reports stay open under #98.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/ACC-15-suspend-moderators-providers / #21 (PR #171)
+Related Requirement: ACC-15 (with ACC-16, GEN-01)
+Prompt:
+I asked Claude Code to merge the reviewed ACC-16 branch into ACC-15 and fix
+every point of the ACC-15 review in the same PR: "Part of #21" with the
+search and booking follow-ups, failures after the change, the hotel link in the
+deactivation notice, the notice wording, and the misplaced moderator e2e test.
+How the output was used:
+Claude Code resolved the ACC-16 merge (one notification for every role), wrapped
+the moderator lookup, the notification and ending sessions in try/log so a
+completed change never answers 500, removed the hotel link, reworded the notice
+so it promises no later notice, added the "respect active" rule to the hotels
+and flights READMEs, removed a duplicate moderator e2e test, and added unit
+tests for the failure cases. It ran the checks and the admin e2e files; I ran
+the full e2e suite and committed; Claude Code pushed and updated the PR.
+Accepted, changed, or rejected:
+Accepted all fixes. Rejected a findActiveEntityOrThrow helper with no caller
+yet, and one shared setActive in common/ (each module writes its own data).
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/GEN-07-audit-log / #96 (PR #172)
+Related Requirement: GEN-07 (records ACC-07a, ACC-13, ACC-15, ACC-16 actions)
+Prompt:
+After ACC-15 and ACC-16 merged, I asked Claude Code to update GEN-07: merge
+develop, resolve the conflicts, and record the suspend, reactivate and provider
+deactivate/reactivate actions. Then I gave it the re-review and asked it to fix
+those points too.
+How the output was used:
+Claude Code merged develop (both sides kept in the admin module, service, spec
+and README), added audit records for the four ACC-15/16 actions after each
+change succeeds (note: the role or the provider name), added audit cleanup to
+the ACC-15/16 e2e files, and made the ACC-13 e2e use a unique airline code
+after a full run failed on a fixed code in the shared test database. For the
+re-review it logs a password reset right after the password changes (before
+ending sessions), cuts notes longer than 500 characters instead of losing the
+record, and changed the PR to "Part of #96". It added unit and e2e tests and
+ran Swagger checks on the -test database; I ran the full e2e suite and
+committed; Claude Code pushed and updated the PR.
+Accepted, changed, or rejected:
+Accepted all of it. Left the indexes as they are (the log is small and
+admin-only), with the reason in the audit README.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: feature/GEN-10-report-moderation / #99 (PR #173)
+Related Requirement: GEN-10 (with GEN-09, GEN-07, BLG-05, BLG-06, ITN-21)
+Prompt:
+I asked Claude Code (with a subagent for the first build) to implement GEN-10
+on top of GEN-09: the admin report list, resolving a report by dismiss, hide or
+delete, and direct hide, show and delete of posts and itineraries. Later I asked
+it to merge develop and GEN-09 as they changed, add the GEN-07 audit records,
+and fix every point of the re-review.
+How the output was used:
+Claude Code reviewed the subagent's build, kept it in its own admin files,
+merged develop and GEN-09 several times and resolved the conflicts, and added
+audit records for dismiss_report, hide_content, show_content (a new value) and
+delete_content. For the re-review it made comments and likes refuse hidden
+posts with one shared filter, made an admin post delete remove that post's
+comments and likes (a helper BLG-04 can reuse), skipped the audit record when
+the content was already gone, closed the report as deleted when the author
+deletes the content during a hide, and changed the PR to "Part of #99". It
+added unit and e2e tests and ran Swagger checks on the -test database; I ran
+the full e2e suite and committed; Claude Code pushed and updated the PR.
+Accepted, changed, or rejected:
+Accepted all of it. Left two follow-ups under #99: an admin read route to see
+hidden content, and moderating comments and reviews. No author notification
+(no fitting notification type).
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Omar Hossam
+Tool: Claude Code (VS Code extension), models Claude Fable 5.1 and Claude Opus 5.5
+Branch / Issue: feature/ACC-11-restrict-bookings-and-private / #17 (PR #174)
+Related Requirement: ACC-11
+Prompt:
+I asked Claude Code to finish ACC-11 from code written earlier that had never been run: run the full
+verification, fix real defects, review the diff, commit and open the pull request.
+How the output was used:
+Claude Code added GET /api/users/me (the account always comes from the login cookie;
+ProfileService.getMyProfile repeats AuthService.me on purpose, because auth depends on users and
+users cannot import AuthService without a circular import), test/owner-access.e2e-spec.ts (the five
+itinerary routes run as the owner, another user, an administrator and both moderator types, on
+private and public itineraries, with a check that nothing changed after a refused request) and a
+section in the auth README on the ownership rules for the booking pull requests. No production code
+of itineraries changed. It ran format, lint (0 warnings), typecheck, the unit tests (58 suites, 779
+tests), the end-to-end tests (24 suites, 414 passed, 2 todo) and the build. A reviewer agent then
+reviewed the diff.
+Accepted, changed, or rejected:
+Accepted: the route, the service method, the unit tests, the end-to-end suite and both README
+sections as written; everything passed on the first run. Changed after the reviewer agent: a
+stricter test that there is no route to read another user's account by id (it also runs as an
+administrator), explicit timeouts on four request-heavy tests, and clearer wording in the users
+README. The booking half of ACC-11 cannot be tested before the booking modules exist, so the
+end-to-end file has two it.todo lines and issue #17 stays open on purpose. The manual Swagger check
+was left to the reviewer.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Omar Hossam
+Tool: Claude Code (VS Code extension), model Claude Opus 5.5
+Branch / Issue: feature/FLT-09-flight-cancellation-tiers / #31 (PR #175)
+Related Requirement: FLT-09
+Prompt:
+I asked Claude Code to implement FLT-09 (airline cancellation tiers and the refund rule) in the
+flights module, with unit and end-to-end tests and a README section, without touching the shared
+layer.
+How the output was used:
+Claude Code added PUT /api/airlines/:id/cancellation-policy (the airline moderator assigned to the
+airline sets the tiers; the list replaces the old one, is stored with the highest threshold first
+and has at most 20 tiers), an embedded policy sub-document on the airline, cancellationTiers in
+AirlineResponseDto, the pure function refundPercentFor(tiers, daysRemaining) for the later booking
+cancellation, the DTOs, their specs, airlines.controller.spec.ts and
+test/airlines-cancellation-policy.e2e-spec.ts (22 tests). It ran format, lint (0 warnings),
+typecheck, the unit tests (62 suites, 873 tests), the end-to-end tests (26 suites, 453 tests) and
+the build. A reviewer agent then reviewed the diff.
+Accepted, changed, or rejected:
+Accepted: the schema, DTOs, service method, route, refund function, tests and README. Changed after
+the reviewer agent: custom list validators instead of ArrayMaxSize and ArrayUnique, an object check
+per tier (a tier sent as a list got past the DTO), stricter DTO tests, and Swagger bounds on the
+response tier. The limit of 20 tiers is an engineering safeguard; the workbook sets none. The manual
+Swagger check was left to the reviewer.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: fix/ITN-21-regex-search (PR #178)
+Related Requirement: ITN-21
+Prompt:
+The full e2e run kept failing on ITN-21's keyword search test with a timeout
+and ECONNRESET. I asked Claude Code to find the cause and make a separate fix
+PR, not inside GEN-10.
+How the output was used:
+Claude Code traced it to the known Atlas stall with a RegExp object (i flag)
+inside $or, the same problem ACC-14 had, and switched the public search to the
+$regex string form. Results are unchanged: the keyword is still escaped and
+case-insensitive. It updated the unit tests and the itineraries README, then
+ran the ITN-21 e2e twice (24/24, before the fix it timed out) and a Swagger
+check of every keyword path on the -test database. I committed; Claude Code
+pushed and opened the PR.
+Accepted, changed, or rejected:
+Accepted. Kept the change to the pattern form only, so ITN-21's behaviour does
+not change.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Ali Ghayesh
+Tool: Claude (claude.ai chat, with access to my copy of the repository and my laptop)
+Branch / Issue: fix/ITN-controller-specs / no own issue (PR #184, review fixes)
+Related Requirement: FLT-01, GEN-10, ITN-21
+Prompt:
+I gave Claude Omar's two review comments on #184: fix the Swagger texts of PATCH /airlines/:id
+(404 "Airline not found", "a field is null", "null is refused"), and make the moderation
+description true for public search and public view, with the same sentence in the README and one
+assertion each for search and findPublic. Add new commits only, no rebase or force-push, and do
+not touch AI_PROMPTS.txt.
+How the output was used:
+Claude made the changes as two new commits (Swagger texts in airlines.controller.ts; the
+moderation description in itinerary-response.dto.ts, the README sentence and the two assertions
+in public-itineraries.service.spec.ts) and read the diff. I applied them on my laptop with a
+script and pushed them to #184.
+Accepted, changed, or rejected:
+Accepted all of it. Checked by me on my laptop: format (no changes), lint (0 warnings and 0
+errors), typecheck, npm test (104 suites, 1371 tests) and build passed. npm run test:e2e with
+--runInBand --no-cache passed 42 of 43 suites; the setup of itinerary-days.e2e-spec.ts got no
+answer from the Atlas test database within 30 s, and that suite passed on its own (14 tests) when
+run again. The root format:check reports only backend/src/hotels/README.md, which is already
+unformatted on develop. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Omar Hossam
+Tool: Claude
+Branch / Issue: refactor/shared-cancellation-tiers (no issue; follow-up to #175 and #148) (PR #187)
+Related Requirement: FLT-09, HTL-10
+Prompt:
+I asked Claude to remove the duplicated refund-by-days rule (refundPercentFor in flights,
+selectRefundPercent in hotels) by putting one shared copy in common/, as its own shared-layer pull
+request with no feature code, and to remove the two old copies in two separate follow-up pull
+requests, one per module.
+How the output was used:
+Claude wrote backend/src/common/cancellation-tiers.ts with refundPercentFor(tiers, daysRemaining),
+sortTiersByDaysBefore(tiers) and the CancellationTierRule type, and cancellation-tiers.spec.ts (20
+cases, the union of the flights and hotels specs). The logic is exactly the flights version. Nothing
+in flights/ or hotels/ changed in this pull request. Checks: format, lint (0 warnings), typecheck,
+the unit tests (102 suites, 1370 tests) and the build. A full parallel end-to-end run had four
+suites fail from Atlas connection errors (SSL alert 80, one hook timeout) and one paging test
+disturbed by a parallel suite; the same four suites passed with --runInBand (141 tests), and CI is
+the reference run.
+Accepted, changed, or rejected:
+Accepted: the shared file and its spec as written. The two old copies were removed in separate pull
+requests, hotels by Ahmed Rashad (#191) and flights by me (#192), so that each pull request stays
+inside one module.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Ali Ahmed
+Tool: Claude Code
+Branch / Issue: fix/GEN-09-GEN-10-comment-reports-and-moderation / GEN-09, GEN-10 (issues closed) (PR #188)
+Related Requirement: GEN-09, GEN-10 (also BLG-05, BLG-07, GEN-01, GEN-07, HTL-01)
+Prompt:
+Fix everything left in my merged PRs: comments can be reported and moderated, commentCount
+counts visible comments only, remove the stacked doc comment, add the notifications
+controller spec, self-audit the 17 merged PRs, tests, READMEs, all checks.
+How the output was used:
+Claude wrote the code, unit and e2e tests and README updates, audited the merged PRs, ran
+format, lint, typecheck, test, test:e2e, build and format:check, and a Swagger check on the
+-test database (direct API calls and Swagger UI); I reviewed and committed.
+Accepted, changed, or rejected:
+Accepted. The self-audit also added GET /api/admin/content/:type/:id (admins see hidden
+content, as GEN-10 says) and a hotels controller spec. Itinerary moderation in the owner's
+answer was left to the open PR #184, which already adds it.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Omar Hossam
+Tool: Claude
+Branch / Issue: fix/HTL-03-hotels-controller-spec (no issue; follow-up to #157 and #158) (PR #189)
+Related Requirement: HTL-01, HTL-03, HTL-04
+Prompt:
+I asked Claude to write a unit spec for all routes of HotelsController, in the style of the existing
+controller specs, as the follow-up to #157 and #158.
+How the output was used:
+Claude wrote backend/src/hotels/hotels.controller.spec.ts (16 tests) for the six routes: POST
+/api/hotels, PATCH /api/hotels/:id, POST /api/hotels/:id/rooms, POST
+/api/hotels/:id/rooms/:roomId/availability, POST /api/hotels/:id/photos and DELETE
+/api/hotels/:id/photos/:filename. For each handler it checks that the ids, body, logged-in user and
+files reach the service in the order the service expects and that the service's answer is returned.
+A table checks the method, path and role of every route and that no route is public; the two photo
+routes answer 200, not 201. removePhoto has its own check because the controller takes (id,
+filename, user) and the service takes (id, user, filename). No source file changed. Checks: format,
+lint (0 warnings), typecheck, the unit tests (103 suites, 1386 tests), the end-to-end tests with
+--runInBand (43 suites, 764 passed, 2 todo) and the build.
+Accepted, changed, or rejected:
+Accepted: the spec, after running every check and reading each line. Changed: nothing.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Omar Hossam
+Tool: Claude Code (VS Code extension), model Claude Opus 5.5
+Branch / Issue: fix/FLT-09-use-shared-refund-rule (no issue; follow-up to #175 and #187) (PR #192)
+Related Requirement: FLT-09 (the refund rule is shared with HTL-10)
+Prompt:
+I asked Claude Code to replace the flights copy of the refund rule with the shared one in
+common/cancellation-tiers.ts, delete the copy and its spec, and update the flights README.
+How the output was used:
+airlines.service.ts now imports sortTiersByDaysBefore from common/cancellation-tiers.ts. Claude Code
+deleted flights/cancellation-policy.ts and its spec, because the shared spec has every case of the
+deleted one, and pointed the flights README to the shared file. The pull request changes 4 files (3
+insertions, 123 deletions) and no behavior. Checks: format, lint (0 warnings), typecheck, the unit
+tests (106 suites, 1446 tests), the full end-to-end suite with --runInBand on the -test database (43
+suites, 782 passed, 2 todo) and the build; no reference to the old file is left. A manual Swagger
+check does not apply because no route, DTO or Swagger text changed.
+Accepted, changed, or rejected:
+Accepted: all changes, after checking that the shared code is identical to the deleted copy, that
+the shared spec has every deleted case, and that nothing else refers to the old file. Changed:
+nothing.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Omar Hossam
+Tool: Claude (Claude app, with access to the repository, GitHub and my laptop's folders)
+Branch / Issue: fix/ITN-registered-users-only (no issue); reviews of pull requests #159, #179, #191
+Related Requirement: ITN-01, ITN-21, ACC-11, GEN-08, GEN-12; BLG-04, BLG-10; HTL-02, HTL-09, HTL-10
+Prompt:
+Over the day I asked Claude to review the fix pull requests of Ahmed Rashad (#191) and Maha (#159)
+against the points of my earlier review and to say whether each could be merged, then to review my
+own #179 (BLG-10), then to check the whole of develop and list every member's issues as a checklist,
+and last whether develop needed any fix before we went back to the issues. After the answer I asked
+for one pull request that finishes the fixing.
+How the output was used:
+Claude read each pull request through the GitHub API (files, diffs, CI logs, mergeability) and tried
+the merges in a scratch copy of the repository. #191: merge. #159, first version: do not merge, and
+Claude wrote a fix prompt for Maha's AI tool; after Ali Ahmed's fixes: merge. #179: do not merge
+until I update it (conflicts in blog/README.md and blog.module.ts, an outdated description, no full
+green end-to-end run, manual Swagger check not done). I merged #191 and #159 on those verdicts. For
+develop (18274cf) Claude read the CI run (lint, typecheck, build, 1491 unit tests, 796 end-to-end
+tests), compared all 68 routes with section 8 of the project description and found one gap: the
+itinerary routes had no @Roles(Role.User), although the project description gives itineraries to the
+registered user, so an administrator or a moderator could create and clone itineraries. For this
+pull request Claude added @Roles(Role.User) to the itineraries, activities and transport costs
+controllers and to the clone route, updated the four controller specs, rewrote three tests in
+owner-access.e2e-spec.ts that treated an administrator or a moderator like another user (they now
+get 403 from the role before the lookup), added the new 403 checks, and wrote README.md files for
+the seed and uploads modules and a design note in the itineraries README. Claude could not install
+packages or run the tests in its own workspace, so it only checked the syntax of the changed files
+and their formatting with Prettier 3.8 (the repository locks 3.9); CI then passed on the pull
+request (1492 unit tests; 799 end-to-end tests with 2 todo, the same in two runs) and I merged it
+(#197).
+Accepted, changed, or rejected:
+Accepted: the merge verdicts for #191 and #159, the "do not merge yet" verdict for #179, and the
+itinerary role fix with its tests and READMEs. Rejected: a finding about airlines.service.ts, which
+differs only under the global Prettier version and not in the locked one. Changed: nothing.
 ================================================

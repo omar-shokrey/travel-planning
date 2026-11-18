@@ -7,6 +7,8 @@ import {
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/enums/audit-action.enum';
 import { AuditTargetType } from '../audit/enums/audit-target-type.enum';
+import { CommentsService } from '../blog/comments.service';
+import { CommentModeration } from '../blog/models/comment-moderation.enum';
 import { PostsService } from '../blog/posts.service';
 import {
   paginate,
@@ -29,6 +31,7 @@ import {
   REPORT_ALREADY_RESOLVED_MESSAGE,
   reportedContentGoneMessage,
 } from './admin-moderation.constants';
+import type { AdminContentResponseDto } from './dto/admin-content-response.dto';
 import type { ContentModerationResponseDto } from './dto/content-moderation-response.dto';
 import type { ListReportsQueryDto } from './dto/list-reports-query.dto';
 import { ContentModeration } from './enums/content-moderation.enum';
@@ -37,13 +40,14 @@ import { ContentModeration } from './enums/content-moderation.enum';
 const CONTENT_AUDIT_TARGET: Record<ReportTargetType, AuditTargetType> = {
   [ReportTargetType.Post]: AuditTargetType.Post,
   [ReportTargetType.Itinerary]: AuditTargetType.Itinerary,
+  [ReportTargetType.Comment]: AuditTargetType.Comment,
 };
 
 /**
  * GEN-10: the admin's report queue and content moderation. The reports belong
- * to `ReportsService`, the posts to `PostsService` and the itineraries to
- * `ItinerariesService`; this service only decides what happens, in which
- * order, and maps the answers.
+ * to `ReportsService`, the posts to `PostsService`, the comments to
+ * `CommentsService` and the itineraries to `ItinerariesService`; this service
+ * only decides what happens, in which order, and maps the answers.
  */
 @Injectable()
 export class AdminModerationService {
@@ -55,6 +59,7 @@ export class AdminModerationService {
     private readonly itineraries: ItinerariesService,
     private readonly uploads: UploadsService,
     private readonly audit: AuditService,
+    private readonly comments: CommentsService,
   ) {}
 
   /** GEN-10: one page of reports, open ones by default, oldest first. */
@@ -175,7 +180,32 @@ export class AdminModerationService {
   }
 
   /**
-   * GEN-10: hides a post or an itinerary directly, or shows it again. 404
+   * GEN-10: any post, comment or itinerary as the admin sees it, hidden or
+   * not ("hidden content is visible only to its author and admins"), so the
+   * admin can read reported content before resolving the report. 404 when it
+   * does not exist.
+   */
+  async viewContent(
+    type: ReportTargetType,
+    id: string,
+  ): Promise<AdminContentResponseDto> {
+    const found = await this.findContentForAdmin(type, id);
+    if (!found) {
+      throw new NotFoundException(CONTENT_NOT_FOUND_MESSAGE[type]);
+    }
+    return {
+      type,
+      id,
+      moderation: found.hidden
+        ? ContentModeration.Hidden
+        : ContentModeration.Visible,
+      ...found.content,
+    };
+  }
+
+  /**
+   * GEN-10: hides a post, a comment or an itinerary directly, or shows it
+   * again. 404
    * when it does not exist, 409 when it already has that state. Hiding also
    * resolves its open reports as `hidden`. Showing it again does not reopen
    * reports that were already resolved.
@@ -213,7 +243,8 @@ export class AdminModerationService {
   }
 
   /**
-   * GEN-10: deletes a post or an itinerary directly, with its image files.
+   * GEN-10: deletes a post, a comment or an itinerary directly, with its
+   * image files (a comment has none).
    * 404 when it does not exist. Its open reports are resolved as `deleted`;
    * every report stays in the collection as history.
    */
@@ -242,10 +273,49 @@ export class AdminModerationService {
     await this.deleteImages(images);
   }
 
+  /** The content in its own module's response shape, or null. */
+  private async findContentForAdmin(
+    type: ReportTargetType,
+    id: string,
+  ): Promise<{
+    hidden: boolean;
+    content: Pick<AdminContentResponseDto, 'post' | 'comment' | 'itinerary'>;
+  } | null> {
+    switch (type) {
+      case ReportTargetType.Post: {
+        const found = await this.posts.findForAdmin(id);
+        return found && { hidden: found.hidden, content: { post: found.post } };
+      }
+      case ReportTargetType.Comment: {
+        const comment = await this.comments.findForAdmin(id);
+        return (
+          comment && {
+            hidden: comment.moderation === CommentModeration.Hidden,
+            content: { comment },
+          }
+        );
+      }
+      case ReportTargetType.Itinerary: {
+        const found = await this.itineraries.findForAdmin(id);
+        return (
+          found && {
+            hidden: found.hidden,
+            content: { itinerary: found.itinerary },
+          }
+        );
+      }
+    }
+  }
+
   private contentExists(type: ReportTargetType, id: string): Promise<boolean> {
-    return type === ReportTargetType.Post
-      ? this.posts.existsById(id)
-      : this.itineraries.existsById(id);
+    switch (type) {
+      case ReportTargetType.Post:
+        return this.posts.existsById(id);
+      case ReportTargetType.Comment:
+        return this.comments.existsById(id);
+      case ReportTargetType.Itinerary:
+        return this.itineraries.existsById(id);
+    }
   }
 
   /** False when nothing changed: missing, or already in that state. */
@@ -254,19 +324,31 @@ export class AdminModerationService {
     id: string,
     hidden: boolean,
   ): Promise<boolean> {
-    return type === ReportTargetType.Post
-      ? this.posts.setHidden(id, hidden)
-      : this.itineraries.setHidden(id, hidden);
+    switch (type) {
+      case ReportTargetType.Post:
+        return this.posts.setHidden(id, hidden);
+      case ReportTargetType.Comment:
+        // Also keeps the post's `commentCount` to its visible comments.
+        return this.comments.setHidden(id, hidden);
+      case ReportTargetType.Itinerary:
+        return this.itineraries.setHidden(id, hidden);
+    }
   }
 
   /** The image files to delete, or null when the content did not exist. */
-  private removeContent(
+  private async removeContent(
     type: ReportTargetType,
     id: string,
   ): Promise<string[] | null> {
-    return type === ReportTargetType.Post
-      ? this.posts.removeByAdmin(id)
-      : this.itineraries.removeByAdmin(id);
+    switch (type) {
+      case ReportTargetType.Post:
+        return this.posts.removeByAdmin(id);
+      case ReportTargetType.Comment:
+        // A comment has no images.
+        return (await this.comments.removeByAdmin(id)) ? [] : null;
+      case ReportTargetType.Itinerary:
+        return this.itineraries.removeByAdmin(id);
+    }
   }
 
   /**

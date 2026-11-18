@@ -4,6 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Types } from 'mongoose';
+import type { CommentsService } from '../blog/comments.service';
+import { CommentModeration } from '../blog/models/comment-moderation.enum';
 import { PostModeration } from '../blog/models/post-moderation.enum';
 import type { PostsService } from '../blog/posts.service';
 import type { ItinerariesService } from '../itineraries/itineraries.service';
@@ -19,6 +21,7 @@ import {
 const REPORTER = new Types.ObjectId().toString();
 const AUTHOR = new Types.ObjectId().toString();
 const TARGET = new Types.ObjectId().toString();
+const POST_OF_COMMENT = new Types.ObjectId().toString();
 const CREATED_AT = new Date('2026-11-16T10:00:00.000Z');
 
 function setup() {
@@ -38,6 +41,14 @@ function setup() {
       authorId: AUTHOR,
       moderation: PostModeration.Visible,
     }),
+    isVisibleTo: jest.fn().mockResolvedValue(true),
+  };
+  const comments = {
+    findSummary: jest.fn().mockResolvedValue({
+      authorId: AUTHOR,
+      postId: POST_OF_COMMENT,
+      moderation: CommentModeration.Visible,
+    }),
   };
   // The itineraries module applies ITN-21's "publicly visible" rule.
   const itineraries = {
@@ -49,8 +60,9 @@ function setup() {
     reports as never,
     posts as unknown as PostsService,
     itineraries as unknown as ItinerariesService,
+    comments as unknown as CommentsService,
   );
-  return { service, reports, posts, itineraries, reportId };
+  return { service, reports, posts, itineraries, comments, reportId };
 }
 
 const postDto = {
@@ -59,6 +71,7 @@ const postDto = {
   reason: 'Spam links',
 };
 const itineraryDto = { ...postDto, targetType: ReportTargetType.Itinerary };
+const commentDto = { ...postDto, targetType: ReportTargetType.Comment };
 
 describe('ReportsService (GEN-09)', () => {
   describe('a report that is saved', () => {
@@ -97,6 +110,22 @@ describe('ReportsService (GEN-09)', () => {
         expect.objectContaining({ targetType: ReportTargetType.Itinerary }),
       );
       expect(result.targetType).toBe('itinerary');
+    });
+
+    it('reports a visible comment of someone else on a post the reporter can see', async () => {
+      const { service, reports, posts, comments } = setup();
+
+      const result = await service.create(commentDto, REPORTER);
+
+      expect(comments.findSummary).toHaveBeenCalledWith(TARGET);
+      expect(posts.isVisibleTo).toHaveBeenCalledWith(POST_OF_COMMENT, REPORTER);
+      expect(reports.create).toHaveBeenCalledWith({
+        reporterId: new Types.ObjectId(REPORTER),
+        targetType: ReportTargetType.Comment,
+        targetId: new Types.ObjectId(TARGET),
+        reason: 'Spam links',
+      });
+      expect(result).toMatchObject({ targetType: 'comment', status: 'open' });
     });
 
     it('saves the reporter, the target and the reason, with no read first', async () => {
@@ -162,7 +191,57 @@ describe('ReportsService (GEN-09)', () => {
     });
   });
 
+  describe('a comment that is not visible', () => {
+    it('answers 404 for a missing comment', async () => {
+      const { service, reports, comments } = setup();
+      comments.findSummary.mockResolvedValue(null);
+
+      await expect(service.create(commentDto, REPORTER)).rejects.toThrow(
+        new NotFoundException('Comment not found'),
+      );
+      expect(reports.create).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for a comment of someone else that an admin hid (GEN-10)', async () => {
+      const { service, reports, comments } = setup();
+      comments.findSummary.mockResolvedValue({
+        authorId: AUTHOR,
+        postId: POST_OF_COMMENT,
+        moderation: CommentModeration.Hidden,
+      });
+
+      await expect(service.create(commentDto, REPORTER)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(reports.create).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the post of the comment is a draft, missing or hidden', async () => {
+      const { service, reports, posts } = setup();
+      posts.isVisibleTo.mockResolvedValue(false);
+
+      await expect(service.create(commentDto, REPORTER)).rejects.toThrow(
+        new NotFoundException('Comment not found'),
+      );
+      expect(reports.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('own content', () => {
+    it('refuses my own comment with 400, even a hidden one: its author still sees it', async () => {
+      const { service, reports, comments } = setup();
+      comments.findSummary.mockResolvedValue({
+        authorId: REPORTER,
+        postId: POST_OF_COMMENT,
+        moderation: CommentModeration.Hidden,
+      });
+
+      await expect(service.create(commentDto, REPORTER)).rejects.toThrow(
+        new BadRequestException(OWN_CONTENT_MESSAGE),
+      );
+      expect(reports.create).not.toHaveBeenCalled();
+    });
+
     it('refuses my own published post with 400', async () => {
       const { service, posts, reports } = setup();
       posts.findPublishedSummary.mockResolvedValue({
@@ -242,6 +321,7 @@ describe('ReportsService, admin methods (GEN-10)', () => {
       model as never,
       {} as unknown as PostsService,
       {} as unknown as ItinerariesService,
+      {} as unknown as CommentsService,
     );
   }
 

@@ -1,4 +1,5 @@
 import { Mongoose, Types } from 'mongoose';
+import { ItineraryModeration } from '../enums/itinerary-moderation.enum';
 import { ItineraryVisibility } from '../enums/itinerary-visibility.enum';
 import {
   Itinerary,
@@ -43,8 +44,18 @@ describe('toItineraryResponse', () => {
       countries: ['EG', 'AE'],
       startDate: '2026-12-20',
       visibility: ItineraryVisibility.Private,
+      moderation: ItineraryModeration.Visible,
       dayCount: 0,
     });
+  });
+
+  it('shows the owner that an admin hid the itinerary (GEN-10)', () => {
+    const itinerary = stored();
+    itinerary.moderation = ItineraryModeration.Hidden;
+
+    expect(toItineraryResponse(itinerary).moderation).toBe(
+      ItineraryModeration.Hidden,
+    );
   });
 
   it('keeps the start date as a YYYY-MM-DD string', () => {
@@ -63,7 +74,6 @@ describe('toItineraryResponse', () => {
     const response = toItineraryResponse(stored());
 
     expect(response).not.toHaveProperty('_id');
-    expect(response).not.toHaveProperty('moderation');
     expect(response).not.toHaveProperty('authorDeactivated');
   });
 });

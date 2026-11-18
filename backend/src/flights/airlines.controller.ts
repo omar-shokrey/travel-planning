@@ -168,20 +168,21 @@ export class AirlinesController {
   @ApiOperation({
     summary: 'Update an assigned airline profile',
     description:
-      'FLT-01. The airline moderator assigned to this airline edits its name, code or logo. Send only the fields that change. A new logo replaces the old one.',
+      'FLT-01. The airline moderator assigned to this airline edits its name, code or logo. Send only the fields that change; null is refused. A new logo replaces the old one.',
   })
   @ApiOkResponse({
     type: AirlineResponseDto,
     description: 'Airline profile updated successfully',
   })
   @ApiBadRequestResponse({
-    description: 'The airline ID, profile fields, or logo are invalid',
+    description:
+      'The airline ID, profile fields, or logo are invalid, or a field is null',
   })
   @ApiUnauthorizedResponse({ description: 'Authentication is required' })
   @ApiForbiddenResponse({
     description: 'Only the assigned airline moderator can update this profile',
   })
-  @ApiNotFoundResponse({ description: 'Airline or user not found' })
+  @ApiNotFoundResponse({ description: 'Airline not found' })
   @ApiConflictResponse({
     description: 'An airline with this code already exists',
   })
