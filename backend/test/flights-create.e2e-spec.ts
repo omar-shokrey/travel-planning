@@ -272,6 +272,7 @@ describe('POST /api/flights (e2e, FLT-03)', () => {
         arrivalAt: utcOf(sent.arrivalLocal, ZONES.arrival),
         departureDateLocal: sent.departureLocal.slice(0, 10),
         status: 'scheduled',
+        cabins: [],
         createdAt: expect.stringMatching(/Z$/),
         updatedAt: expect.stringMatching(/Z$/),
       });
@@ -625,6 +626,7 @@ describe('POST /api/flights (e2e, FLT-03)', () => {
       'airlineId',
       'arrivalAirport',
       'arrivalAt',
+      'cabins',
       'createdAt',
       'departureAirport',
       'departureAt',

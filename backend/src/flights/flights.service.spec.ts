@@ -121,6 +121,8 @@ describe('FlightsService.create (FLT-03)', () => {
       arrivalAt: '2027-06-15T22:30:00.000Z',
       departureDateLocal: '2027-06-15',
       status: 'scheduled',
+      // A new flight has no cabin yet (FLT-04).
+      cabins: [],
       createdAt: NOW.toISOString(),
       updatedAt: NOW.toISOString(),
     });

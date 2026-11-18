@@ -1,7 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { CabinClass } from '../models/cabin-class.enum';
 import { FlightStatus } from '../models/flight-status.enum';
+import { CabinResponseDto } from './cabin-response.dto';
 
-/** Public fields of a flight (FLT-03). Times are UTC; `departureDateLocal` is the local date. */
+/** Public fields of a flight (FLT-03) with its cabins (FLT-04). Times are UTC; `departureDateLocal` is the local date. */
 export class FlightResponseDto {
   @ApiProperty({
     example: '6740f1c2a4b5c6d7e8f90456',
@@ -58,6 +60,25 @@ export class FlightResponseDto {
     description: 'Set by the server: a new flight is scheduled',
   })
   status: FlightStatus;
+
+  @ApiProperty({
+    type: [CabinResponseDto],
+    example: [
+      {
+        id: '6740f1c2a4b5c6d7e8f90789',
+        cabin: CabinClass.Economy,
+        totalSeats: 180,
+        availableSeats: 180,
+        price: 25000,
+        currency: 'USD',
+        freeBags: 1,
+        maxBagKg: 23,
+      },
+    ],
+    description:
+      'The cabin categories of the flight (FLT-04), each at most once. Empty until the moderator adds one.',
+  })
+  cabins: CabinResponseDto[];
 
   @ApiProperty({
     example: '2026-11-18T10:00:00.000Z',
