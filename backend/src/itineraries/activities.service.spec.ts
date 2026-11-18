@@ -9,6 +9,7 @@ import { Test } from '@nestjs/testing';
 import { Error as MongooseError, Mongoose, Types } from 'mongoose';
 import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
+import { UploadsService } from '../uploads/uploads.service';
 import { ActivitiesService } from './activities.service';
 import { ITINERARY_CHANGED_MESSAGE } from './itineraries.constants';
 import { ItinerariesService } from './itineraries.service';
@@ -29,6 +30,8 @@ const otherUserId = new Types.ObjectId().toString();
 const SUPPORTED = ['EGP', 'USD'];
 
 describe('ActivitiesService', () => {
+  // UploadsService: only deleteImage is used by these services (ITN-12).
+  const uploads = { deleteImage: jest.fn().mockResolvedValue(undefined) };
   let service: ActivitiesService;
 
   /**
@@ -88,6 +91,7 @@ describe('ActivitiesService', () => {
           },
         },
         { provide: getModelToken(City.name), useValue: {} },
+        { provide: UploadsService, useValue: uploads },
       ],
     }).compile();
     service = moduleRef.get(ActivitiesService);
@@ -115,6 +119,7 @@ describe('ActivitiesService', () => {
           time: '08:00',
           cost: 30000,
           currency: 'EGP',
+          images: [],
         },
       ]);
       expect(response.days[1].activities).toHaveLength(1);
@@ -132,7 +137,7 @@ describe('ActivitiesService', () => {
       );
 
       expect(response.days[0].activities).toEqual([
-        { id: expect.any(String), name: 'Walk' },
+        { id: expect.any(String), name: 'Walk', images: [] },
       ]);
     });
 
@@ -228,6 +233,7 @@ describe('ActivitiesService', () => {
         time: '09:30',
         cost: 20000,
         currency: 'EGP',
+        images: [],
       });
     });
 
@@ -362,6 +368,63 @@ describe('ActivitiesService', () => {
         ForbiddenException,
       );
       expect(itinerary.save).not.toHaveBeenCalled();
+    });
+
+    describe('image files (ITN-12)', () => {
+      /** The rest of the database, as unusedImageNames reads it. */
+      const otherListings = (images: string[]) =>
+        jest.spyOn(ItineraryModel, 'find').mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          lean: jest.fn().mockReturnThis(),
+          exec: jest
+            .fn()
+            .mockResolvedValue(
+              images.length > 0
+                ? [{ days: [{ activities: [{ images }] }] }]
+                : [],
+            ),
+        } as never);
+
+      beforeEach(() => {
+        uploads.deleteImage.mockReset().mockResolvedValue(undefined);
+      });
+
+      it('deletes the files no other activity lists, after the save', async () => {
+        const { itinerary, activityId } = stored();
+        itinerary.days[1].activities[0].images.push('a.jpg', 'b.jpg');
+        // A clone (ITN-21) still lists b.jpg.
+        otherListings(['b.jpg']);
+
+        await service.remove(activityId, ownerId);
+
+        expect(uploads.deleteImage.mock.calls).toEqual([['a.jpg']]);
+        expect(
+          (itinerary.save as jest.Mock).mock.invocationCallOrder[0],
+        ).toBeLessThan(uploads.deleteImage.mock.invocationCallOrder[0]);
+      });
+
+      it('saves with the version check, so a stale read answers 409 and no file is touched', async () => {
+        const { itinerary, activityId } = stored();
+        itinerary.days[1].activities[0].images.push('a.jpg');
+        (itinerary.save as jest.Mock).mockRejectedValue(
+          new MongooseError.VersionError(itinerary, 0, ['days']),
+        );
+
+        await expect(service.remove(activityId, ownerId)).rejects.toThrow(
+          ConflictException,
+        );
+        expect(uploads.deleteImage).not.toHaveBeenCalled();
+      });
+
+      it('makes no query and no file call for an activity without images', async () => {
+        const { activityId } = stored();
+        const findSpy = jest.spyOn(ItineraryModel, 'find');
+
+        await service.remove(activityId, ownerId);
+
+        expect(findSpy).not.toHaveBeenCalled();
+        expect(uploads.deleteImage).not.toHaveBeenCalled();
+      });
     });
   });
 });

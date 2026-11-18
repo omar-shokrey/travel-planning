@@ -68,6 +68,13 @@ hotel, so callers cannot choose a mismatched country.
   `pricePerNight`. It trims the text fields and requires positive whole-number
   beds, occupancy and price (minor units). The server sets `hotelId` and
   `active`.
+- The price per night is capped at `ROOM_PRICE_MAX` (1,000,000,000 minor
+  units, 10,000,000.00) in the DTO and the schema; a higher price answers 400.
+  The workbook gives no limit. It is an engineering limit: a reservation
+  (HTL-16) multiplies the price by nights and rooms, and
+  `ROOM_PRICE_MAX` x 366 nights x 1000 rooms = 3.66e14 stays below
+  `Number.MAX_SAFE_INTEGER` (about 9.007e15), so totals stay exact whole
+  numbers.
 - The real-AppModule e2e coverage is in `hotels-rooms.e2e-spec.ts`; it creates
   its own hotels and users, explicitly awaits the room indexes before testing
   hotel-scoped uniqueness, and removes its fixtures at the end.
@@ -85,3 +92,26 @@ hotel, so callers cannot choose a mismatched country.
   cannot both add overlapping ranges.
 - Past ranges are accepted because HTL-04 sets no limit; bookings are checked
   against dates later (HTL-11/HTL-18).
+
+## Editing a room (HTL-05)
+
+- `PATCH /api/hotels/:id/rooms/:roomId` changes `beds`, `maxOccupancy` and `pricePerNight`, and `PATCH /api/hotels/:id/rooms/:roomId/availability` changes the availability, as in the endpoint table. Both are for the moderator assigned to the hotel, checked through `HotelsService.findManagedEntityOrThrow`. A room of another hotel answers 404, because the room is looked up inside the hotel of the route.
+- The code is in its own `HotelRoomsService` and `HotelRoomsController`, so it does not collide with the room creation and availability code of HTL-03 and HTL-04 in `HotelsService`.
+- `UpdateRoomDto` lists only the three fields HTL-05 names. The room number and type are not editable here, and a body with only unknown fields or no field answers 400. A field sent as `null` answers 400, because every room field is required.
+- A new price applies to new reservations only. A reservation stores the price it was made at, so changing the room's price changes nothing that already exists.
+- The new price has the same cap as in HTL-03: at most `ROOM_PRICE_MAX` (1,000,000,000 minor units), or the request answers 400. The workbook gives no limit; it is an engineering limit so that a reservation total stays exact: `ROOM_PRICE_MAX` x 366 nights x 1000 rooms = 3.66e14, below `Number.MAX_SAFE_INTEGER` (about 9.007e15).
+- The availability route takes the complete new list of ranges and replaces the old one. The HTL-04 route only adds a range; HTL-05 asks to edit availability, which also means shortening or removing ranges, and one list is the simplest way to do all three. Overlapping ranges answer 400; ranges that only touch are allowed, as in HTL-04. At most 100 ranges (`ROOM_AVAILABILITY_RANGES_MAX_COUNT`), a limit I chose because the workbook gives none.
+- "Availability cannot be removed for dates with confirmed reservations": before saving, the service reads the room's nights in `room_nights` that are `booked`, or `held` with a hold that has not expired, and answers 409 if one of them would fall outside the new ranges. A held night counts too, because its reservation may still be paid and confirmed. A `blocked` night does not count: it is the moderator's own block (HTL-06).
+- `room_nights` is the collection of the data model in the spec. I added its schema (`RoomNight`, with the unique (`roomId`, `date`) index) because HTL-05 needs to read it. Nothing writes to it yet: the holds and reservations of HTL-16 and HTL-18 will. Until then no night is reserved, so the 409 can only be reached by the end-to-end test, which creates nights itself.
+- The check and the save are two steps. A reservation made between them could end up outside the availability; the hold of HTL-18 must therefore check the availability again when it inserts its nights.
+
+## Blocking dates, deactivating and deleting a room (HTL-06)
+
+- Blocking uses the same `PATCH /api/hotels/:id/rooms/:roomId/availability` as HTL-05, because the endpoint table gives that route to both. The body now has two optional lists, `availability` (HTL-05) and `blocked` (HTL-06). Each list that is sent replaces the old one; a list that is left out stays as it is; a body with neither answers 400.
+- A blocked night is a `room_nights` document with the state `blocked` and no reservation. The unique (`roomId`, `date`) index means a blocked night and a reserved night can never exist together, so a hold made at the same moment as a block cannot both succeed. If the insert of the blocks hits a night that a reservation took after the check, the request removes only the nights it inserted itself, found by the ids it chose, and answers 409.
+- Blocking a night that a reservation has booked or holds answers 409 before anything is written. A hold whose time has passed no longer counts and is removed before the night is blocked, as the spec says for every new hold.
+- The response of both room routes is `ManagedRoomResponseDto`: the HTL-03 room plus `blocked`, the blocked nights joined into date ranges. `RoomResponseDto` and its mapper are unchanged.
+- One request can block at most 366 nights (`ROOM_BLOCK_MAX_NIGHTS`), one document per night. The workbook gives no limit.
+- Deactivating and reactivating use `PATCH /api/hotels/:id/rooms/:roomId/deactivate` and `/reactivate`. The endpoint table has no route for them; the names follow the provider routes of ACC-15. A room with a reserved night from today (UTC) on cannot be deactivated; past stays do not count. A deactivated room keeps its blocks and availability. HTL-11 (search) and HTL-16 (reservation) must leave out rooms whose `active` is false.
+- `DELETE /api/hotels/:id/rooms/:roomId` deletes a room only if no `room_nights` document with a reservation (`bookingId`) was ever stored for it, and removes its blocks with it. When the reservations of HTL-16 exist, the check should also look at `hotel_bookings`, because an expired hold may have been cleaned up.
+- The checks and the writes of deactivation and deletion are separate steps. A hold inserted between them could end up on a deactivated or deleted room; the hold of HTL-18 must therefore check that the room still exists and is active.

@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ActivityImageResponseDto } from './activity-image-response.dto';
 
-/** ITN-10: an activity of a day, as the API returns it. */
+/** ITN-10, ITN-12: an activity of a day, as the API returns it. */
 export class ActivityResponseDto {
   @ApiProperty({ example: '6741c0ffee0ddba11ad0a0a0' })
   id: string;
@@ -22,4 +23,11 @@ export class ActivityResponseDto {
 
   @ApiPropertyOptional({ example: 'EGP' })
   currency?: string;
+
+  @ApiProperty({
+    type: [ActivityImageResponseDto],
+    description:
+      'ITN-12: up to 5 JPG or PNG images (GEN-08), in the order they were added. Always a list, empty when there are none.',
+  })
+  images: ActivityImageResponseDto[];
 }

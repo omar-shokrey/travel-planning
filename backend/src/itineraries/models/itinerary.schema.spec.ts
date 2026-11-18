@@ -2,7 +2,7 @@ import { Mongoose, Types } from 'mongoose';
 import { BudgetCategory } from '../enums/budget-category.enum';
 import { ItineraryModeration } from '../enums/itinerary-moderation.enum';
 import { ItineraryVisibility } from '../enums/itinerary-visibility.enum';
-import { ITINERARY_MAX_DAYS } from '../itineraries.constants';
+import { ITINERARY_MAX_DAYS, MONEY_AMOUNT_MAX } from '../itineraries.constants';
 import { Itinerary, ItinerarySchema } from './itinerary.schema';
 
 const mongoose = new Mongoose();
@@ -181,6 +181,38 @@ describe('Itinerary model', () => {
       'days.0.transportCosts.0.fromCityId',
       'days.0.transportCosts.0.toCityId',
     ]);
+  });
+
+  it('caps every amount at MONEY_AMOUNT_MAX, so no total can lose precision (ITN-14)', async () => {
+    const money = (amount: number) => ({
+      ...valid,
+      days: [
+        day({
+          activities: [{ name: 'Museum', cost: amount, currency: 'EGP' }],
+          budgetEntries: [
+            { category: BudgetCategory.Food, amount, currency: 'EGP' },
+          ],
+          transportCosts: [
+            {
+              mode: 'train',
+              fromCityId: 'cairo',
+              toCityId: 'luxor',
+              amount,
+              currency: 'EGP',
+            },
+          ],
+        }),
+      ],
+    });
+
+    expect(await invalidFields(money(MONEY_AMOUNT_MAX))).toEqual([]);
+    for (const tooLarge of [MONEY_AMOUNT_MAX + 1, 1e300]) {
+      expect(await invalidFields(money(tooLarge))).toEqual([
+        'days.0.activities.0.cost',
+        'days.0.budgetEntries.0.amount',
+        'days.0.transportCosts.0.amount',
+      ]);
+    }
   });
 
   it('keeps the original author on a clone', async () => {

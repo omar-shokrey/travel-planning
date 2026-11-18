@@ -136,6 +136,19 @@ describe('App setup (e2e)', () => {
     expect(response.headers['access-control-allow-credentials']).toBe('true');
   });
 
+  it('does not let Swagger UI persist the authorization in the browser (ACC-19)', async () => {
+    // Nest writes the Swagger UI options into this script. With
+    // persistAuthorization, Swagger UI would keep what is typed into
+    // Authorize in localStorage and as a cookie JavaScript can read.
+    const response = await request(app.getHttpServer())
+      .get('/api/docs/swagger-ui-init.js')
+      .expect(200);
+
+    expect(response.text).toContain('SwaggerUIBundle(swaggerOptions)');
+    expect(response.text).toContain('"customOptions"');
+    expect(response.text).not.toContain('persistAuthorization');
+  });
+
   it('publishes the Swagger document with cookie authentication', async () => {
     const response = await request(app.getHttpServer())
       .get('/api/docs-json')

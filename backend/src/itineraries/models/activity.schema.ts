@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import type { Types } from 'mongoose';
 import { TIME_OF_DAY_PATTERN } from '../itineraries.constants';
-import { currencyCode, wholeMinorUnits } from './money.validators';
+import { currencyCode, moneyAmount } from './money.validators';
 
 /** ITN-10, ITN-12: something to do on a day. Embedded in the day. */
 @Schema()
@@ -19,7 +19,7 @@ export class Activity {
   time?: string;
 
   /** Optional cost in minor units. It counts under Activities in the budget (ITN-14). */
-  @Prop({ min: 0, validate: wholeMinorUnits })
+  @Prop({ ...moneyAmount })
   cost?: number;
 
   @Prop(currencyCode)

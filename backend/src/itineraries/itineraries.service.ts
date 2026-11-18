@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -14,6 +15,7 @@ import {
 import type { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
+import { UploadsService } from '../uploads/uploads.service';
 import { ItineraryModeration } from './enums/itinerary-moderation.enum';
 import type { AddDayDto } from './dto/add-day.dto';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto';
@@ -37,11 +39,14 @@ import { Itinerary, type ItineraryDocument } from './models/itinerary.schema';
 
 @Injectable()
 export class ItinerariesService {
+  private readonly logger = new Logger(ItinerariesService.name);
+
   constructor(
     @InjectModel(Itinerary.name)
     private readonly itineraries: Model<Itinerary>,
     @InjectModel(Country.name) private readonly countries: Model<Country>,
     @InjectModel(City.name) private readonly cities: Model<City>,
+    private readonly uploads: UploadsService,
   ) {}
 
   /** ITN-01: create an itinerary. The owner is the logged-in user and it starts private. */
@@ -126,10 +131,24 @@ export class ItinerariesService {
   /**
    * ITN-01: delete your own itinerary. The document is removed, so it leaves
    * public search at once. A clone is a separate document and is not touched.
+   *
+   * ITN-12: then the image files of its activities, except those another
+   * itinerary still lists (a clone shares them, ITN-21). The names come from
+   * the document the delete returns, so an image added after the ownership
+   * check is not missed.
    */
   async remove(id: string, userId: string): Promise<void> {
     const itinerary = await this.findOwnedOrThrow(id, userId);
-    await itinerary.deleteOne();
+    const deleted = await this.itineraries
+      .findOneAndDelete({ _id: itinerary._id, ownerId: itinerary.ownerId })
+      .select('days.activities.images')
+      .lean()
+      .exec();
+    if (!deleted) {
+      // Deleted by another request in the meantime.
+      throw new NotFoundException('Itinerary not found');
+    }
+    await this.deleteUnusedImageFiles(activityImages(deleted));
   }
 
   /**
@@ -203,6 +222,9 @@ export class ItinerariesService {
    * equals the number of days and a day added or moved in the meantime is
    * never lost. The update bumps the version, so any save that still holds
    * the old positions is refused too.
+   *
+   * ITN-12: then the image files of the day's activities that no activity
+   * lists any more.
    */
   async removeDay(
     id: string,
@@ -210,12 +232,16 @@ export class ItinerariesService {
     userId: string,
   ): Promise<ItineraryDetailResponseDto> {
     const itinerary = await this.findOwnedOrThrow(id, userId);
-    this.findDayOrThrow(itinerary, dayId);
+    const day = this.findDayOrThrow(itinerary, dayId);
+    // Current at the version read: every image write bumps the version
+    // (ITN-12), so if one happened in between, writeDays answers 409.
+    const images = day.activities.flatMap((activity) => activity.images);
 
     const remaining = this.daysAsObjects(itinerary).filter(
-      (day) => day._id.toString() !== dayId,
+      (candidate) => candidate._id.toString() !== dayId,
     );
     const updated = await this.writeDays(itinerary, remaining);
+    await this.deleteUnusedImageFiles(images);
     return toItineraryDetailResponse(updated);
   }
 
@@ -467,17 +493,69 @@ export class ItinerariesService {
     if (!itinerary) {
       return null;
     }
-    const images = activityImages(itinerary);
-    if (images.length === 0) {
+    return this.unusedImageNames(activityImages(itinerary));
+  }
+
+  /**
+   * ITN-12, the one rule for shared image files: of these file names, the
+   * ones that no activity in any itinerary lists any more, so their files may
+   * be deleted. A clone lists the same names as its source (ITN-21), so a
+   * file stays while one activity still shows it. Call it after the database
+   * write that dropped the names. No names: no query.
+   */
+  async unusedImageNames(candidates: readonly string[]): Promise<string[]> {
+    const names = [...new Set(candidates)];
+    if (names.length === 0) {
       return [];
     }
-    const others = await this.itineraries
-      .find({ 'days.activities.images': { $in: images } })
+    const stillListing = await this.itineraries
+      .find({ 'days.activities.images': { $in: names } })
       .select('days.activities.images')
       .lean()
       .exec();
-    const stillUsed = new Set(others.flatMap(activityImages));
-    return images.filter((image) => !stillUsed.has(image));
+    const stillUsed = new Set(stillListing.flatMap(activityImages));
+    return names.filter((name) => !stillUsed.has(name));
+  }
+
+  /**
+   * ITN-12: deletes the files of these image names that no activity lists
+   * any more (`unusedImageNames`). It runs after the database delete and
+   * never throws: the delete is done, so a check or a file that fails is
+   * logged instead of turning it into a 500. No names: no query, no file call.
+   */
+  async deleteUnusedImageFiles(candidates: readonly string[]): Promise<void> {
+    if (candidates.length === 0) {
+      return;
+    }
+    let unused: string[];
+    try {
+      unused = await this.unusedImageNames(candidates);
+    } catch (error) {
+      this.logger.error(
+        `Could not check whether ${candidates.length} activity image file(s) are still used; they are kept`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      return;
+    }
+    await this.deleteImageFiles(unused);
+  }
+
+  /**
+   * ITN-12: deletes these files. Every file is tried, and one that cannot be
+   * deleted is logged, never thrown.
+   */
+  async deleteImageFiles(names: readonly string[]): Promise<void> {
+    const results = await Promise.allSettled(
+      names.map((name) => this.uploads.deleteImage(name)),
+    );
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        this.logger.error(
+          `Could not delete the activity image file ${names[index]}`,
+          result.reason instanceof Error ? result.reason.stack : undefined,
+        );
+      }
+    });
   }
 }
 

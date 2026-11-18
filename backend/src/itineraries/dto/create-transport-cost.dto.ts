@@ -6,11 +6,13 @@ import {
   IsNotEmpty,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
 import {
   CURRENCY_CODE_PATTERN,
+  MONEY_AMOUNT_MAX,
   TRANSPORT_MODE_MAX,
 } from '../itineraries.constants';
 
@@ -55,12 +57,14 @@ export class CreateTransportCostDto {
   toCityId: string;
 
   @ApiProperty({
-    description: 'Whole minor units (cents), 0 or more',
+    description: `Whole minor units (cents), 0 to ${MONEY_AMOUNT_MAX}`,
     example: 90000,
     minimum: 0,
+    maximum: MONEY_AMOUNT_MAX,
   })
   @IsInt({ message: 'amount must be a whole number of minor units' })
   @Min(0)
+  @Max(MONEY_AMOUNT_MAX)
   amount: number;
 
   @ApiProperty({

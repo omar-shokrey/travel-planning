@@ -1,12 +1,19 @@
 import { DateTime } from 'luxon';
+import { imageUrl } from '../../uploads/uploads.constants';
 import type { ActivityResponseDto } from '../dto/activity-response.dto';
+import type { BudgetEntryResponseDto } from '../dto/budget-entry-response.dto';
 import type { CityGroupResponseDto } from '../dto/city-group-response.dto';
 import type { ItineraryDayResponseDto } from '../dto/itinerary-day-response.dto';
 import type { ItineraryDetailResponseDto } from '../dto/itinerary-detail-response.dto';
 import type { ItineraryResponseDto } from '../dto/itinerary-response.dto';
 import type { MoneyResponseDto } from '../dto/money-response.dto';
 import type { TransportCostResponseDto } from '../dto/transport-cost-response.dto';
+import {
+  BudgetSummaryCategory,
+  SUMMARY_CATEGORY_OF,
+} from '../enums/budget-summary-category.enum';
 import type { Activity } from '../models/activity.schema';
+import type { BudgetEntry } from '../models/budget-entry.schema';
 import type { ItineraryDay } from '../models/itinerary-day.schema';
 import type { TransportCost } from '../models/transport-cost.schema';
 import type { ItineraryDocument } from '../models/itinerary.schema';
@@ -51,7 +58,20 @@ export function toItineraryDayResponse(
     cityId: day.cityId,
     ...(day.notes ? { notes: day.notes } : {}),
     activities: (day.activities ?? []).map(toActivityResponse),
+    budgetEntries: (day.budgetEntries ?? []).map(toBudgetEntryResponse),
     transportCosts: (day.transportCosts ?? []).map(toTransportCostResponse),
+  };
+}
+
+/** ITN-14: a budget entry with its id. */
+export function toBudgetEntryResponse(
+  entry: BudgetEntry,
+): BudgetEntryResponseDto {
+  return {
+    id: entry._id.toString(),
+    category: entry.category,
+    amount: entry.amount,
+    currency: entry.currency,
   };
 }
 
@@ -69,7 +89,10 @@ export function toTransportCostResponse(
   };
 }
 
-/** ITN-10: an activity with only the fields it has. */
+/**
+ * ITN-10: an activity with only the optional fields it has. ITN-12: its
+ * images, always as a list, each with the URL it is served at.
+ */
 export function toActivityResponse(activity: Activity): ActivityResponseDto {
   return {
     id: activity._id.toString(),
@@ -78,28 +101,59 @@ export function toActivityResponse(activity: Activity): ActivityResponseDto {
     ...(activity.time ? { time: activity.time } : {}),
     ...(activity.cost != null ? { cost: activity.cost } : {}),
     ...(activity.currency ? { currency: activity.currency } : {}),
+    images: (activity.images ?? []).map((filename) => ({
+      filename,
+      url: imageUrl(filename),
+    })),
   };
 }
 
+/** One cost of a day, with the line of the budget summary it counts under (ITN-14). */
+export interface CostLine extends MoneyResponseDto {
+  category: BudgetSummaryCategory;
+}
+
 /**
- * Everything a day costs, as amounts with their currency: activity costs
- * (ITN-10, counted under Activities in ITN-14), budget entries (ITN-14) and
- * transport costs (ITN-16). An activity without a cost adds nothing.
+ * Everything a day costs, each with its summary line (ITN-14): activity costs
+ * (ITN-10) under activities, budget entries under their own category, and
+ * transport costs (ITN-16) under intercity transport. An activity without a
+ * cost adds nothing. The one source for the city-group subtotals (ITN-09) and
+ * the budget summary (ITN-14), so they can never disagree.
  */
-export function dayCosts(day: ItineraryDay): MoneyResponseDto[] {
-  const costs: MoneyResponseDto[] = [];
+export function dayCostLines(day: ItineraryDay): CostLine[] {
+  const lines: CostLine[] = [];
   for (const activity of day.activities ?? []) {
     if (activity.cost != null && activity.currency) {
-      costs.push({ amount: activity.cost, currency: activity.currency });
+      lines.push({
+        category: BudgetSummaryCategory.Activities,
+        amount: activity.cost,
+        currency: activity.currency,
+      });
     }
   }
   for (const entry of day.budgetEntries ?? []) {
-    costs.push({ amount: entry.amount, currency: entry.currency });
+    lines.push({
+      category: SUMMARY_CATEGORY_OF[entry.category],
+      amount: entry.amount,
+      currency: entry.currency,
+    });
   }
   for (const transport of day.transportCosts ?? []) {
-    costs.push({ amount: transport.amount, currency: transport.currency });
+    lines.push({
+      category: BudgetSummaryCategory.IntercityTransport,
+      amount: transport.amount,
+      currency: transport.currency,
+    });
   }
-  return costs;
+  return lines;
+}
+
+/** Everything a day costs, as amounts with their currency (see dayCostLines). */
+export function dayCosts(day: ItineraryDay): MoneyResponseDto[] {
+  return dayCostLines(day).map(({ amount, currency }) => ({
+    amount,
+    currency,
+  }));
 }
 
 /** Adds amounts up per currency, sorted by currency code. */

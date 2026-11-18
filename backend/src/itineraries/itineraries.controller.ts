@@ -32,7 +32,9 @@ import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Role } from '../common/enums/role.enum';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { AddDayDto } from './dto/add-day.dto';
+import { BudgetSummaryResponseDto } from './dto/budget-summary-response.dto';
 import { CreateActivityDto } from './dto/create-activity.dto';
+import { CreateBudgetEntryDto } from './dto/create-budget-entry.dto';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { CreateTransportCostDto } from './dto/create-transport-cost.dto';
 import { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
@@ -41,6 +43,7 @@ import { MoveDayDto } from './dto/move-day.dto';
 import { UpdateDayDto } from './dto/update-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { ActivitiesService } from './activities.service';
+import { BudgetsService } from './budgets.service';
 import { ItinerariesService } from './itineraries.service';
 import { TransportCostsService } from './transport-costs.service';
 
@@ -58,6 +61,7 @@ export class ItinerariesController {
     private readonly itineraries: ItinerariesService,
     private readonly activities: ActivitiesService,
     private readonly transportCosts: TransportCostsService,
+    private readonly budgets: BudgetsService,
   ) {}
 
   @Post()
@@ -343,5 +347,59 @@ export class ItinerariesController {
     @CurrentUser('id') userId: string,
   ): Promise<ItineraryDetailResponseDto> {
     return this.transportCosts.add(id, dto, userId);
+  }
+
+  @Post(':id/days/:dayId/budgets')
+  @ApiOperation({
+    summary: 'Add a budget entry to a day',
+    description:
+      'ITN-14. Add a budget entry to a day of your own itinerary: a category (food, accommodation, local_transport or activities), an amount in whole minor units and its currency. Intercity transport is a transport cost (ITN-16), not a category. A day has at most 50 entries. Returns the itinerary with its days.',
+  })
+  @ApiParam({ name: 'id', description: 'Itinerary id' })
+  @ApiParam({ name: 'dayId', description: 'Day id' })
+  @ApiCreatedResponse({ type: ItineraryDetailResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'An id or a field is invalid, an unknown field was sent, the category is not one of the four, the amount is negative, not whole or too large, or the currency is not supported',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
+  })
+  @ApiNotFoundResponse({
+    description: 'No itinerary has this id, or it has no day with this id',
+  })
+  @ApiConflictResponse({
+    description:
+      'The day already has 50 budget entries, or the itinerary kept being changed by other requests at the same time',
+  })
+  addBudgetEntry(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Param('dayId', ParseObjectIdPipe) dayId: string,
+    @Body() dto: CreateBudgetEntryDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    return this.budgets.add(id, dayId, dto, userId);
+  }
+
+  @Get(':id/budget-summary')
+  @ApiOperation({
+    summary: 'Budget summary of an itinerary',
+    description:
+      'ITN-14. The total budget of your own itinerary, by category and by day. Totals include budget entries, activity costs (under activities) and transport costs (under intercity_transport), each as one amount per currency. Nothing is converted (ITN-18).',
+  })
+  @ApiParam({ name: 'id', description: 'Itinerary id' })
+  @ApiOkResponse({ type: BudgetSummaryResponseDto })
+  @ApiBadRequestResponse({ description: 'The id is not a valid id' })
+  @ApiForbiddenResponse({
+    description:
+      'The itinerary belongs to another user, public or not, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
+  })
+  @ApiNotFoundResponse({ description: 'No itinerary has this id' })
+  budgetSummary(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<BudgetSummaryResponseDto> {
+    return this.budgets.summary(id, userId);
   }
 }

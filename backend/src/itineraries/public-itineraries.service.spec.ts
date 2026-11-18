@@ -28,6 +28,8 @@ mongoose.set('autoCreate', false);
 const ItineraryModel = mongoose.model(Itinerary.name, ItinerarySchema);
 
 const authorId = new Types.ObjectId();
+/** A stored activity image (ITN-12). */
+const IMAGE = 'c0d0a8a0-95ab-4bfc-b635-4f98b95a6b0c.jpg';
 const readerId = new Types.ObjectId().toString();
 
 /** Replaces find().select().lean() on a small collection. */
@@ -56,7 +58,14 @@ describe('PublicItinerariesService', () => {
         {
           cityId: 'cairo',
           notes: 'Arrive late',
-          activities: [{ name: 'Museum', cost: 2000, currency: 'EGP' }],
+          activities: [
+            {
+              name: 'Museum',
+              cost: 2000,
+              currency: 'EGP',
+              images: [IMAGE],
+            },
+          ],
           budgetEntries: [
             { category: BudgetCategory.Food, amount: 500, currency: 'EGP' },
           ],
@@ -235,6 +244,9 @@ describe('PublicItinerariesService', () => {
       });
       expect(response.moderation).toBe(ItineraryModeration.Visible);
       expect(response.days[0].activities[0].name).toBe('Museum');
+      expect(response.days[0].activities[0].images).toEqual([
+        { filename: IMAGE, url: `/api/uploads/${IMAGE}` },
+      ]);
       expect(response.cityGroups[0].budgetSubtotal).toEqual([
         { amount: 11500, currency: 'EGP' },
       ]);
@@ -287,7 +299,14 @@ describe('PublicItinerariesService', () => {
       expect(day).toMatchObject({ cityId: 'cairo', notes: 'Arrive late' });
       expect(day.id).not.toBe(sourceDay._id.toString());
       expect(day.activities).toEqual([
-        { id: expect.any(String), name: 'Museum', cost: 2000, currency: 'EGP' },
+        {
+          id: expect.any(String),
+          name: 'Museum',
+          cost: 2000,
+          currency: 'EGP',
+          // ITN-12: the clone lists the same file (see the README).
+          images: [{ filename: IMAGE, url: `/api/uploads/${IMAGE}` }],
+        },
       ]);
       expect(day.activities[0].id).not.toBe(
         sourceDay.activities[0]._id.toString(),
