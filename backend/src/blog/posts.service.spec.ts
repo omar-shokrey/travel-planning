@@ -13,11 +13,17 @@ const engagement = (count = 0) => ({
   })),
 });
 
-const createService = (posts: unknown) =>
+/** An UploadsService whose deleteImage resolves (BLG-10). */
+const uploadsStub = () => ({
+  deleteImage: jest.fn().mockResolvedValue(undefined),
+});
+
+const createService = (posts: unknown, uploads: unknown = uploadsStub()) =>
   new PostsService(
     posts as never,
     engagement() as never,
     engagement() as never,
+    uploads as never,
   );
 
 describe('PostsService', () => {
@@ -34,6 +40,7 @@ describe('PostsService', () => {
           posts as never,
           engagement() as never,
           engagement() as never,
+          uploadsStub() as never,
         ),
         posts,
         query,
@@ -95,6 +102,7 @@ describe('PostsService', () => {
           posts as never,
           comments as never,
           likes as never,
+          uploadsStub() as never,
         ),
         posts,
         query,
@@ -297,6 +305,7 @@ describe('PostsService', () => {
       posts as never,
       engagement() as never,
       engagement() as never,
+      uploadsStub() as never,
     );
 
     const result = await service.create(
@@ -356,6 +365,7 @@ describe('PostsService', () => {
       posts as never,
       engagement() as never,
       engagement() as never,
+      uploadsStub() as never,
     );
 
     const result = await service.create(
@@ -422,6 +432,7 @@ describe('PostsService', () => {
         posts as never,
         engagement() as never,
         engagement() as never,
+        uploadsStub() as never,
       );
       return { posts, sort, skip, limit, service };
     }
@@ -720,7 +731,7 @@ describe('PostsService', () => {
     });
   });
 
-  describe('remove (BLG-04)', () => {
+  describe('remove (BLG-04, BLG-10)', () => {
     const userId = '507f1f77bcf86cd799439011';
     const postId = '6740f1c2a4b5c6d7e8f90abc';
 
@@ -728,15 +739,25 @@ describe('PostsService', () => {
       return {
         _id: { toString: () => postId },
         authorId: { toString: () => authorId },
-        deleteOne: jest.fn().mockResolvedValue(undefined),
+      };
+    }
+
+    /** A posts model: the owner check finds `post`, the delete returns `deleted`. */
+    function postsModel(post: unknown, deleted: unknown = { images: [] }) {
+      const query = {
+        select: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue(deleted),
+      };
+      return {
+        findById: jest.fn().mockResolvedValue(post),
+        findByIdAndDelete: jest.fn().mockReturnValue(query),
+        query,
       };
     }
 
     it('allows the owner to delete their post and removes its engagement', async () => {
-      const post = createPost();
-      const posts = {
-        findById: jest.fn().mockResolvedValue(post),
-      };
+      const posts = postsModel(createPost());
       const comments = engagement();
       const likes = engagement();
 
@@ -744,12 +765,15 @@ describe('PostsService', () => {
         posts as never,
         comments as never,
         likes as never,
+        uploadsStub() as never,
       );
 
       await service.remove(postId, userId);
 
       expect(posts.findById).toHaveBeenCalledWith(postId);
-      expect(post.deleteOne).toHaveBeenCalledTimes(1);
+      expect(posts.findByIdAndDelete).toHaveBeenCalledTimes(1);
+      expect(posts.findByIdAndDelete).toHaveBeenCalledWith(postId);
+      expect(posts.query.select).toHaveBeenCalledWith('images');
       expect(comments.deleteMany).toHaveBeenCalledWith({
         postId: new Types.ObjectId(postId),
       });
@@ -758,11 +782,73 @@ describe('PostsService', () => {
       });
     });
 
-    it('logs engagement cleanup failure without throwing after the post is deleted', async () => {
-      const post = createPost();
-      const posts = {
-        findById: jest.fn().mockResolvedValue(post),
-      };
+    it('deletes the image files of the deleted post, by the names it stored (BLG-10)', async () => {
+      const posts = postsModel(createPost(), { images: ['a.jpg', 'b.png'] });
+      const uploads = uploadsStub();
+      const service = createService(posts, uploads);
+
+      await service.remove(postId, userId);
+
+      expect(uploads.deleteImage).toHaveBeenCalledTimes(2);
+      expect(uploads.deleteImage).toHaveBeenCalledWith('a.jpg');
+      expect(uploads.deleteImage).toHaveBeenCalledWith('b.png');
+      // The files go only after the post itself is deleted.
+      expect(posts.findByIdAndDelete.mock.invocationCallOrder[0]).toBeLessThan(
+        uploads.deleteImage.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('still resolves, tries every file and logs each one that cannot be deleted', async () => {
+      const posts = postsModel(createPost(), { images: ['a.jpg', 'b.png'] });
+      const uploads = uploadsStub();
+      uploads.deleteImage
+        .mockRejectedValueOnce(new Error('disk error'))
+        .mockResolvedValueOnce(undefined);
+      const logError = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation();
+      const service = createService(posts, uploads);
+
+      await expect(service.remove(postId, userId)).resolves.toBeUndefined();
+
+      expect(uploads.deleteImage).toHaveBeenCalledTimes(2);
+      expect(logError).toHaveBeenCalledTimes(1);
+      expect(logError.mock.calls[0][0]).toContain('a.jpg');
+
+      logError.mockRestore();
+    });
+
+    it('deletes no file when the post has no images', async () => {
+      const posts = postsModel(createPost(), { images: [] });
+      const uploads = uploadsStub();
+      const service = createService(posts, uploads);
+
+      await service.remove(postId, userId);
+
+      expect(uploads.deleteImage).not.toHaveBeenCalled();
+    });
+
+    it('does no cleanup when another request deleted the post in the meantime', async () => {
+      const posts = postsModel(createPost(), null);
+      const comments = engagement();
+      const likes = engagement();
+      const uploads = uploadsStub();
+      const service = new PostsService(
+        posts as never,
+        comments as never,
+        likes as never,
+        uploads as never,
+      );
+
+      await expect(service.remove(postId, userId)).resolves.toBeUndefined();
+
+      expect(comments.deleteMany).not.toHaveBeenCalled();
+      expect(likes.deleteMany).not.toHaveBeenCalled();
+      expect(uploads.deleteImage).not.toHaveBeenCalled();
+    });
+
+    it('logs engagement cleanup failure without throwing after the post is deleted, and still deletes the files', async () => {
+      const posts = postsModel(createPost(), { images: ['a.jpg'] });
       const comments = engagement();
 
       comments.deleteMany.mockImplementation(() => ({
@@ -770,6 +856,7 @@ describe('PostsService', () => {
       }));
 
       const likes = engagement();
+      const uploads = uploadsStub();
       const logError = jest
         .spyOn(Logger.prototype, 'error')
         .mockImplementation();
@@ -778,42 +865,45 @@ describe('PostsService', () => {
         posts as never,
         comments as never,
         likes as never,
+        uploads as never,
       );
 
       await expect(service.remove(postId, userId)).resolves.toBeUndefined();
 
-      expect(post.deleteOne).toHaveBeenCalledTimes(1);
+      expect(posts.findByIdAndDelete).toHaveBeenCalledTimes(1);
       expect(logError).toHaveBeenCalledTimes(1);
+      expect(uploads.deleteImage).toHaveBeenCalledWith('a.jpg');
 
       logError.mockRestore();
     });
 
     it('rejects deleting a post that does not exist', async () => {
-      const posts = {
-        findById: jest.fn().mockResolvedValue(null),
-      };
+      const posts = postsModel(null);
+      const uploads = uploadsStub();
 
-      const service = createService(posts);
+      const service = createService(posts, uploads);
 
       await expect(service.remove(postId, userId)).rejects.toThrow(
         'Post not found',
       );
+      expect(posts.findByIdAndDelete).not.toHaveBeenCalled();
+      expect(uploads.deleteImage).not.toHaveBeenCalled();
     });
 
     it('rejects deleting another user’s post', async () => {
-      const post = createPost('507f191e810c19729de860ea');
+      const posts = postsModel(createPost('507f191e810c19729de860ea'), {
+        images: ['a.jpg'],
+      });
+      const uploads = uploadsStub();
 
-      const posts = {
-        findById: jest.fn().mockResolvedValue(post),
-      };
-
-      const service = createService(posts);
+      const service = createService(posts, uploads);
 
       await expect(service.remove(postId, userId)).rejects.toThrow(
         'You can only change your own posts',
       );
 
-      expect(post.deleteOne).not.toHaveBeenCalled();
+      expect(posts.findByIdAndDelete).not.toHaveBeenCalled();
+      expect(uploads.deleteImage).not.toHaveBeenCalled();
     });
   });
 });

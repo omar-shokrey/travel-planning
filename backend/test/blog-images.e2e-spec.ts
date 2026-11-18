@@ -328,6 +328,44 @@ describe('Post images (e2e, BLG-10)', () => {
     });
   });
 
+  describe('deleting the post (BLG-04)', () => {
+    const deletePost = (postId: string, who: string) =>
+      http()
+        .delete(`/api/posts/${postId}`)
+        .set('Cookie', cookies.get(who) ?? '');
+
+    it('deletes the image files with the post', async () => {
+      const postId = await createPost();
+      const added = await upload(postId, 'author', pngFiles(2)).expect(200);
+      const names = added.body.images as string[];
+      expect(names).toHaveLength(2);
+
+      const response = await deletePost(postId, 'author');
+
+      expect(response.status).toBe(204);
+      expect(await posts.exists({ _id: postId })).toBeNull();
+      for (const name of names) {
+        expect(fileExists(name)).toBe(false);
+        await http().get(`/api/uploads/${name}`).expect(404);
+      }
+    });
+
+    it('refuses another user with 403 and keeps the post and its files', async () => {
+      const postId = await createPost();
+      const added = await upload(postId, 'author', pngFiles(2)).expect(200);
+      const names = added.body.images as string[];
+
+      const response = await deletePost(postId, 'other');
+
+      expect(response.status).toBe(403);
+      expect(await storedImages(postId)).toEqual(names);
+      for (const name of names) {
+        expect(fileExists(name)).toBe(true);
+        await http().get(`/api/uploads/${name}`).expect(200);
+      }
+    });
+  });
+
   it('documents both routes in Swagger, with the upload answers', async () => {
     const response = await http().get('/api/docs-json').expect(200);
     const add = response.body.paths['/api/posts/{id}/images'].post as {
