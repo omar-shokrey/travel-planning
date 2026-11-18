@@ -17,7 +17,7 @@ import type { ItineraryDay } from './models/itinerary-day.schema';
 import { Itinerary, type ItineraryDocument } from './models/itinerary.schema';
 
 /** Where an activity sits: its itinerary, its day and the activity itself. */
-interface ActivityLocation {
+export interface ActivityLocation {
   itinerary: ItineraryDocument;
   day: ItineraryDay;
   activity: Activity;
@@ -104,26 +104,37 @@ export class ActivitiesService {
     return toItineraryDetailResponse(itinerary);
   }
 
-  /** ITN-10: delete an activity of your own itinerary. */
+  /**
+   * ITN-10: delete an activity of your own itinerary. ITN-12: then its image
+   * files that no other activity lists (a clone shares them, ITN-21).
+   */
   async remove(
     activityId: string,
     userId: string,
   ): Promise<ItineraryDetailResponseDto> {
-    const { itinerary, day } = await this.findOwnedActivityOrThrow(
+    const { itinerary, day, activity } = await this.findOwnedActivityOrThrow(
       activityId,
       userId,
     );
+    // Current at the version read: every image write bumps the version
+    // (ITN-12), so if one happened in between, saveOrConflict answers 409.
+    const images = [...activity.images];
 
     // A new array is written with $set, so the day loses exactly this one.
+    // Replacing an array makes Mongoose check and bump the version.
     day.activities = day.activities.filter(
       (candidate) => candidate._id.toString() !== activityId,
     );
     await this.itinerariesService.saveOrConflict(itinerary);
+    await this.itinerariesService.deleteUnusedImageFiles(images);
     return toItineraryDetailResponse(itinerary);
   }
 
-  /** Finds the itinerary that holds this activity: 404, then 403 if it is not yours. */
-  private async findOwnedActivityOrThrow(
+  /**
+   * Finds the itinerary that holds this activity: 404, then 403 if it is not
+   * yours. Also used by `ActivityImagesService` (ITN-12).
+   */
+  async findOwnedActivityOrThrow(
     activityId: string,
     userId: string,
   ): Promise<ActivityLocation> {

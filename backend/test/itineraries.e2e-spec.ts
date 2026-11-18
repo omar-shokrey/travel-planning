@@ -3,7 +3,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { Types, type Model } from 'mongoose';
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
@@ -18,8 +18,11 @@ import { sessionCookieFor } from './support/session-cookie';
  * A country code that is not in countries.csv (codes starting with X are
  * never given to a real country). The test database may have no reference
  * data at all, so the tests add this one country and remove it at the end.
+ * It is claimed in `beforeAll` like the shared fixture does: a code another
+ * test file holds at the same moment is never shared, because that file
+ * deletes it when it ends.
  */
-const TEST_COUNTRY = `X${String.fromCharCode(65 + Math.floor(Math.random() * 26))}`;
+let TEST_COUNTRY = '';
 const TEST_COUNTRY_NAME = 'Itineraries e2e test country';
 
 /** Two cities of that country, with ids that no real city has. */
@@ -103,11 +106,21 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
     cities = app.get<Model<City>>(getModelToken(City.name));
     itineraries = app.get<Model<Itinerary>>(getModelToken(Itinerary.name));
 
-    await countries.updateOne(
-      { _id: TEST_COUNTRY },
-      { $setOnInsert: { name: TEST_COUNTRY_NAME, currency: 'USD' } },
-      { upsert: true },
-    );
+    // A code taken by another test file in between is tried again.
+    for (;;) {
+      const code = `X${String.fromCharCode(65 + randomInt(26))}`;
+      try {
+        await countries.create({
+          _id: code,
+          name: TEST_COUNTRY_NAME,
+          currency: 'USD',
+        });
+        TEST_COUNTRY = code;
+        break;
+      } catch (error) {
+        if ((error as { code?: number }).code !== 11000) throw error;
+      }
+    }
     for (const cityId of [CITY_A, CITY_B]) {
       await cities.create({
         _id: cityId,
@@ -661,6 +674,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           cityId: CITY_A,
           notes: 'Arrive late',
           activities: [],
+          budgetEntries: [],
           transportCosts: [],
         },
         {
@@ -669,6 +683,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           date: '2026-12-21',
           cityId: CITY_A,
           activities: [],
+          budgetEntries: [],
           transportCosts: [],
         },
         {
@@ -677,6 +692,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           date: '2026-12-22',
           cityId: CITY_B,
           activities: [],
+          budgetEntries: [],
           transportCosts: [],
         },
       ]);
@@ -817,6 +833,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           cityId: CITY_A,
           notes: 'Original notes',
           activities: [],
+          budgetEntries: [],
           transportCosts: [],
         },
         {
@@ -826,6 +843,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           cityId: CITY_B,
           notes: 'New notes',
           activities: [],
+          budgetEntries: [],
           transportCosts: [],
         },
       ]);

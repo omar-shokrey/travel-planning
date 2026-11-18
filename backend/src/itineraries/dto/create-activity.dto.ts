@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
   ValidateIf,
@@ -14,6 +15,7 @@ import {
   ACTIVITY_DESCRIPTION_MAX,
   ACTIVITY_NAME_MAX,
   CURRENCY_CODE_PATTERN,
+  MONEY_AMOUNT_MAX,
 } from '../itineraries.constants';
 
 const trim = ({ value }: { value: unknown }) =>
@@ -54,10 +56,10 @@ export class CreateActivityDto {
   time?: string;
 
   @ApiPropertyOptional({
-    description:
-      'Cost in whole minor units (cents), 0 or more. Sent together with currency',
+    description: `Cost in whole minor units (cents), 0 to ${MONEY_AMOUNT_MAX}. Sent together with currency`,
     example: 20000,
     minimum: 0,
+    maximum: MONEY_AMOUNT_MAX,
   })
   @ValidateIf(
     (dto: CreateActivityDto) =>
@@ -68,6 +70,7 @@ export class CreateActivityDto {
       'cost must be a whole number of minor units, sent together with currency',
   })
   @Min(0)
+  @Max(MONEY_AMOUNT_MAX)
   cost?: number;
 
   @ApiPropertyOptional({

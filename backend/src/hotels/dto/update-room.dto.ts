@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, Min, ValidateIf } from 'class-validator';
+import { IsInt, Max, Min, ValidateIf } from 'class-validator';
+import { ROOM_PRICE_MAX } from '../hotels.constants';
 
 /**
  * Validate a field whenever it was sent. `@IsOptional()` would also skip
@@ -28,13 +29,16 @@ export class UpdateRoomDto {
   @ApiPropertyOptional({
     example: 15000,
     minimum: 1,
-    description:
-      'Price per night in minor units. It applies to new reservations only.',
+    maximum: ROOM_PRICE_MAX,
+    description: `Price per night in minor units, at most ${ROOM_PRICE_MAX}. It applies to new reservations only.`,
   })
   @ValidateIf(whenSent)
   @IsInt({
     message: 'pricePerNight must be a whole number of minor units',
   })
   @Min(1, { message: 'pricePerNight must be more than 0' })
+  @Max(ROOM_PRICE_MAX, {
+    message: `pricePerNight must be at most ${ROOM_PRICE_MAX}`,
+  })
   pricePerNight?: number;
 }

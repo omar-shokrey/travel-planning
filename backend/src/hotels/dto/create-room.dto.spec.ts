@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import type { FieldError } from '../../common/interfaces/error-response.interface';
 import { validationExceptionFactory } from '../../common/pipes/validation-exception.factory';
+import { ROOM_PRICE_MAX } from '../hotels.constants';
 import { CreateRoomDto } from './create-room.dto';
 
 const pipe = new ValidationPipe({
@@ -78,6 +79,24 @@ describe('CreateRoomDto (HTL-03)', () => {
       (await errorsOf({ ...valid, [field]: value })).map(({ field }) => field),
     ).toContain(field);
   });
+
+  it('accepts the highest price, ROOM_PRICE_MAX', async () => {
+    const dto = await parse({ ...valid, pricePerNight: ROOM_PRICE_MAX });
+
+    expect(dto.pricePerNight).toBe(ROOM_PRICE_MAX);
+  });
+
+  it.each([ROOM_PRICE_MAX + 1, 1e300])(
+    'rejects the price %s, above ROOM_PRICE_MAX',
+    async (pricePerNight) => {
+      expect(await errorsOf({ ...valid, pricePerNight })).toEqual([
+        {
+          field: 'pricePerNight',
+          messages: [`pricePerNight must be at most ${ROOM_PRICE_MAX}`],
+        },
+      ]);
+    },
+  );
 
   it.each(['hotelId', 'active'])(
     'does not accept server-controlled field %s',

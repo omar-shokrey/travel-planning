@@ -1,4 +1,5 @@
 import { Mongoose, Types } from 'mongoose';
+import { ROOM_PRICE_MAX } from '../hotels.constants';
 import { Room, RoomSchema } from './room.schema';
 
 const mongoose = new Mongoose();
@@ -79,6 +80,21 @@ describe('Room model (HTL-03, HTL-04)', () => {
   ])('rejects invalid %s value %s', async (field, value) => {
     expect(await invalidFields({ ...valid, [field]: value })).toContain(field);
   });
+
+  it('accepts the highest price, ROOM_PRICE_MAX', async () => {
+    expect(
+      await invalidFields({ ...valid, pricePerNight: ROOM_PRICE_MAX }),
+    ).toEqual([]);
+  });
+
+  it.each([ROOM_PRICE_MAX + 1, 1e300])(
+    'rejects the price %s, above ROOM_PRICE_MAX',
+    async (pricePerNight) => {
+      expect(await invalidFields({ ...valid, pricePerNight })).toEqual([
+        'pricePerNight',
+      ]);
+    },
+  );
 
   it('requires the hotel and room details', async () => {
     expect(await invalidFields({})).toEqual([

@@ -4,6 +4,8 @@ import { ROLES_KEY } from '../common/decorators/roles.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Role } from '../common/enums/role.enum';
 import type { ActivitiesService } from './activities.service';
+import type { BudgetsService } from './budgets.service';
+import { BudgetCategory } from './enums/budget-category.enum';
 import { ItinerariesController } from './itineraries.controller';
 import type { TransportCostsService } from './transport-costs.service';
 import type { ItinerariesService } from './itineraries.service';
@@ -28,10 +30,12 @@ describe('ItinerariesController', () => {
   };
   const activities = { add: jest.fn() };
   const transportCosts = { add: jest.fn() };
+  const budgets = { add: jest.fn(), summary: jest.fn() };
   const controller = new ItinerariesController(
     service as unknown as ItinerariesService,
     activities as unknown as ActivitiesService,
     transportCosts as unknown as TransportCostsService,
+    budgets as unknown as BudgetsService,
   );
 
   beforeEach(() => {
@@ -109,6 +113,29 @@ describe('ItinerariesController', () => {
     await controller.addTransportCost(id, cost, userId);
 
     expect(transportCosts.add).toHaveBeenCalledWith(id, cost, userId);
+  });
+
+  it('passes a new budget entry, the ids and the logged-in user to the budgets service (ITN-14)', async () => {
+    const dayId = '6741c0ffee0ddba11ad0d0d0';
+    const entry = {
+      category: BudgetCategory.Food,
+      amount: 45000,
+      currency: 'EGP',
+    };
+    budgets.add.mockResolvedValue({ id, days: [] });
+
+    await expect(
+      controller.addBudgetEntry(id, dayId, entry, userId),
+    ).resolves.toEqual({ id, days: [] });
+    expect(budgets.add).toHaveBeenCalledWith(id, dayId, entry, userId);
+  });
+
+  it('passes the itinerary id and the logged-in user to the budget summary (ITN-14)', async () => {
+    const summary = { itineraryId: id, total: [], byCategory: [], byDay: [] };
+    budgets.summary.mockResolvedValue(summary);
+
+    await expect(controller.budgetSummary(id, userId)).resolves.toBe(summary);
+    expect(budgets.summary).toHaveBeenCalledWith(id, userId);
   });
 
   it('is for registered users only (ITN-01): the class needs a login and Role.User, and no route changes that', () => {

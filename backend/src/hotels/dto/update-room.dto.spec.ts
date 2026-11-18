@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { ROOM_PRICE_MAX } from '../hotels.constants';
 import { UpdateRoomDto } from './update-room.dto';
 
 const messages = async (body: Record<string, unknown>) =>
@@ -38,6 +39,19 @@ describe('UpdateRoomDto (HTL-05)', () => {
       'pricePerNight must be more than 0',
     ]);
   });
+
+  it('accepts the highest price, ROOM_PRICE_MAX', async () => {
+    expect(await messages({ pricePerNight: ROOM_PRICE_MAX })).toEqual([]);
+  });
+
+  it.each([ROOM_PRICE_MAX + 1, 1e300])(
+    'rejects the price %s, above ROOM_PRICE_MAX',
+    async (pricePerNight) => {
+      expect(await messages({ pricePerNight })).toEqual([
+        `pricePerNight must be at most ${ROOM_PRICE_MAX}`,
+      ]);
+    },
+  );
 
   it('rejects a price that is not a whole number of minor units', async () => {
     expect(await messages({ pricePerNight: 125.5 })).toEqual([

@@ -1,9 +1,13 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceModule } from '../reference/reference.module';
+import { UploadsModule } from '../uploads/uploads.module';
 import { UsersModule } from '../users/users.module';
 import { ActivitiesController } from './activities.controller';
 import { ActivitiesService } from './activities.service';
+import { ActivityImagesService } from './activity-images.service';
+import { BudgetsController } from './budgets.controller';
+import { BudgetsService } from './budgets.service';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
 import { PublicItinerariesController } from './public-itineraries.controller';
@@ -19,16 +23,21 @@ import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
     ]),
     ReferenceModule,
     UsersModule,
+    // UploadsService: activity images (ITN-12, GEN-08).
+    UploadsModule,
   ],
   controllers: [
     ItinerariesController,
     ActivitiesController,
+    BudgetsController,
     TransportCostsController,
     PublicItinerariesController,
   ],
   providers: [
     ItinerariesService,
     ActivitiesService,
+    ActivityImagesService,
+    BudgetsService,
     TransportCostsService,
     PublicItinerariesService,
   ],

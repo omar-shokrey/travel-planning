@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
@@ -10,6 +11,7 @@ import { Error as MongooseError, Mongoose, Types } from 'mongoose';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { City } from '../reference/models/city.schema';
 import { Country } from '../reference/models/country.schema';
+import { UploadsService } from '../uploads/uploads.service';
 import { ItineraryModeration } from './enums/itinerary-moderation.enum';
 import { ItineraryVisibility } from './enums/itinerary-visibility.enum';
 import { ITINERARY_CHANGED_MESSAGE } from './itineraries.constants';
@@ -39,6 +41,8 @@ const createDto = {
 };
 
 describe('ItinerariesService', () => {
+  // UploadsService: only deleteImage is used by these services (ITN-12).
+  const uploads = { deleteImage: jest.fn().mockResolvedValue(undefined) };
   let service: ItinerariesService;
   let createSpy: jest.SpiedFunction<typeof ItineraryModel.create>;
   let findByIdSpy: jest.SpiedFunction<typeof ItineraryModel.findById>;
@@ -96,6 +100,7 @@ describe('ItinerariesService', () => {
           useValue: { find: countryFind },
         },
         { provide: getModelToken(City.name), useValue: { exists: cityExists } },
+        { provide: UploadsService, useValue: uploads },
       ],
     }).compile();
     service = moduleRef.get(ItinerariesService);
@@ -553,14 +558,94 @@ describe('ItinerariesService', () => {
     });
   });
 
+  /** A query whose chain (select, lean, exec) ends in `result`. */
+  const chainOf = (result: unknown) => ({
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockReturnThis(),
+    exec: jest.fn().mockResolvedValue(result),
+  });
+
   describe('remove', () => {
-    it('deletes the itinerary of the logged-in user', async () => {
+    /** Replaces findOneAndDelete: it "deletes" and returns these days. */
+    const withDelete = (days: unknown[] | null) =>
+      jest
+        .spyOn(ItineraryModel, 'findOneAndDelete')
+        .mockReturnValue(chainOf(days && { days }) as never);
+
+    beforeEach(() => {
+      uploads.deleteImage.mockReset().mockResolvedValue(undefined);
+    });
+
+    it('deletes the itinerary of the logged-in user, by id and owner', async () => {
       const itinerary = stored();
+      const deleteSpy = withDelete([{ activities: [] }]);
 
       await service.remove(itinerary.id as string, ownerId);
 
       expect(findByIdSpy).toHaveBeenCalledWith(itinerary.id);
-      expect(itinerary.deleteOne).toHaveBeenCalledTimes(1);
+      expect(deleteSpy).toHaveBeenCalledWith({
+        _id: itinerary._id,
+        ownerId: itinerary.ownerId,
+      });
+    });
+
+    it('makes no query and no file call when no activity has images (ITN-12)', async () => {
+      const itinerary = stored();
+      withDelete([{ activities: [{ images: [] }] }]);
+      const findSpy = jest.spyOn(ItineraryModel, 'find');
+
+      await service.remove(itinerary.id as string, ownerId);
+
+      expect(findSpy).not.toHaveBeenCalled();
+      expect(uploads.deleteImage).not.toHaveBeenCalled();
+    });
+
+    it('deletes the image files that no other itinerary lists, after the document (ITN-12)', async () => {
+      const itinerary = stored();
+      const deleteSpy = withDelete([
+        { activities: [{ images: ['a.jpg', 'b.jpg'] }] },
+        { activities: [{ images: ['c.png'] }] },
+      ]);
+      // A clone (ITN-21) still lists b.jpg.
+      const findSpy = jest
+        .spyOn(ItineraryModel, 'find')
+        .mockReturnValue(
+          chainOf([
+            { days: [{ activities: [{ images: ['b.jpg'] }] }] },
+          ]) as never,
+        );
+
+      await service.remove(itinerary.id as string, ownerId);
+
+      expect(findSpy).toHaveBeenCalledWith({
+        'days.activities.images': { $in: ['a.jpg', 'b.jpg', 'c.png'] },
+      });
+      expect(uploads.deleteImage.mock.calls).toEqual([['a.jpg'], ['c.png']]);
+      expect(deleteSpy.mock.invocationCallOrder[0]).toBeLessThan(
+        uploads.deleteImage.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('logs a file that cannot be deleted and still finishes the delete (ITN-12)', async () => {
+      const itinerary = stored();
+      withDelete([{ activities: [{ images: ['a.jpg', 'b.jpg'] }] }]);
+      jest.spyOn(ItineraryModel, 'find').mockReturnValue(chainOf([]) as never);
+      uploads.deleteImage
+        .mockRejectedValueOnce(new Error('EACCES'))
+        .mockResolvedValueOnce(undefined);
+      const logged = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+
+      await expect(
+        service.remove(itinerary.id as string, ownerId),
+      ).resolves.toBeUndefined();
+
+      expect(uploads.deleteImage.mock.calls).toEqual([['a.jpg'], ['b.jpg']]);
+      expect(logged).toHaveBeenCalledWith(
+        'Could not delete the activity image file a.jpg',
+        expect.any(String),
+      );
     });
 
     it('answers 404 when the itinerary does not exist', async () => {
@@ -569,13 +654,98 @@ describe('ItinerariesService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
+    it('answers 404 and touches no file when another request deleted it in the meantime', async () => {
+      const itinerary = stored();
+      withDelete(null);
+
+      await expect(
+        service.remove(itinerary.id as string, ownerId),
+      ).rejects.toThrow(new NotFoundException('Itinerary not found'));
+      expect(uploads.deleteImage).not.toHaveBeenCalled();
+    });
+
     it('answers 403 for an itinerary of another user and deletes nothing', async () => {
       const itinerary = stored(otherUserId);
+      const deleteSpy = withDelete([]);
 
       await expect(
         service.remove(itinerary.id as string, ownerId),
       ).rejects.toThrow(ForbiddenException);
-      expect(itinerary.deleteOne).not.toHaveBeenCalled();
+      expect(deleteSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the shared image file rule (ITN-12)', () => {
+    beforeEach(() => {
+      uploads.deleteImage.mockReset().mockResolvedValue(undefined);
+    });
+
+    it('unusedImageNames: no names, no query', async () => {
+      const findSpy = jest.spyOn(ItineraryModel, 'find');
+
+      expect(await service.unusedImageNames([])).toEqual([]);
+      expect(findSpy).not.toHaveBeenCalled();
+    });
+
+    it('unusedImageNames: asks once for each name and keeps those that no activity lists', async () => {
+      const findSpy = jest
+        .spyOn(ItineraryModel, 'find')
+        .mockReturnValue(
+          chainOf([
+            { days: [{ activities: [{ images: ['b.jpg', 'z.jpg'] }] }] },
+            { days: [{ activities: [{}, { images: ['c.png'] }] }] },
+          ]) as never,
+        );
+
+      expect(
+        await service.unusedImageNames(['a.jpg', 'b.jpg', 'a.jpg', 'c.png']),
+      ).toEqual(['a.jpg']);
+      expect(findSpy).toHaveBeenCalledWith({
+        'days.activities.images': { $in: ['a.jpg', 'b.jpg', 'c.png'] },
+      });
+    });
+
+    it('deleteUnusedImageFiles: no names, no query and no file call', async () => {
+      const findSpy = jest.spyOn(ItineraryModel, 'find');
+
+      await service.deleteUnusedImageFiles([]);
+
+      expect(findSpy).not.toHaveBeenCalled();
+      expect(uploads.deleteImage).not.toHaveBeenCalled();
+    });
+
+    it('deleteUnusedImageFiles: keeps every file and logs when the check fails, never throws', async () => {
+      jest.spyOn(ItineraryModel, 'find').mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockRejectedValue(new Error('connection lost')),
+      } as never);
+      const logged = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+
+      await expect(
+        service.deleteUnusedImageFiles(['a.jpg']),
+      ).resolves.toBeUndefined();
+
+      expect(uploads.deleteImage).not.toHaveBeenCalled();
+      expect(logged).toHaveBeenCalledTimes(1);
+    });
+
+    it('removeByAdmin uses the same rule and leaves the files to the admin module', async () => {
+      jest
+        .spyOn(ItineraryModel, 'findByIdAndDelete')
+        .mockReturnValue(
+          chainOf({ days: [{ activities: [{ images: ['a.jpg'] }] }] }) as never,
+        );
+      jest.spyOn(ItineraryModel, 'find').mockReturnValue(chainOf([]) as never);
+      const rule = jest.spyOn(service, 'unusedImageNames');
+
+      expect(
+        await service.removeByAdmin(new Types.ObjectId().toString()),
+      ).toEqual(['a.jpg']);
+      expect(rule).toHaveBeenCalledWith(['a.jpg']);
+      expect(uploads.deleteImage).not.toHaveBeenCalled();
     });
   });
 
@@ -619,6 +789,7 @@ describe('ItinerariesService', () => {
           cityId: 'dubai',
           notes: 'Fly in the morning',
           activities: [],
+          budgetEntries: [],
           transportCosts: [],
         },
       ]);
@@ -847,6 +1018,58 @@ describe('ItinerariesService', () => {
         }
         return Promise.resolve(itinerary);
       }) as never);
+
+    it("deletes the unused image files of the day's activities after writing the days (ITN-12)", async () => {
+      uploads.deleteImage.mockReset().mockResolvedValue(undefined);
+      const { itinerary, dayIds } = withThreeDays();
+      itinerary.days[1].activities.push(
+        { name: 'Museum', images: ['a.jpg', 'b.jpg'] } as never,
+        { name: 'Walk', images: [] } as never,
+      );
+      itinerary.days[2].activities.push({
+        name: 'Souk',
+        images: ['c.png'],
+      } as never);
+      const updateSpy = withUpdate(itinerary);
+      jest.spyOn(ItineraryModel, 'find').mockReturnValue(
+        // A clone (ITN-21) still lists b.jpg.
+        chainOf([{ days: [{ activities: [{ images: ['b.jpg'] }] }] }]) as never,
+      );
+
+      await service.removeDay(itinerary.id as string, dayIds[1], ownerId);
+
+      expect(uploads.deleteImage.mock.calls).toEqual([['a.jpg']]);
+      expect(updateSpy.mock.invocationCallOrder[0]).toBeLessThan(
+        uploads.deleteImage.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('touches no file when the day changed in the meantime (409), so no listed image loses its file (ITN-12)', async () => {
+      uploads.deleteImage.mockReset().mockResolvedValue(undefined);
+      const { itinerary, dayIds } = withThreeDays();
+      itinerary.days[0].activities.push({
+        name: 'Museum',
+        images: ['a.jpg'],
+      } as never);
+      withUpdate(null);
+
+      await expect(
+        service.removeDay(itinerary.id as string, dayIds[0], ownerId),
+      ).rejects.toThrow(ConflictException);
+      expect(uploads.deleteImage).not.toHaveBeenCalled();
+    });
+
+    it('makes no query and no file call for a day without images (ITN-12)', async () => {
+      uploads.deleteImage.mockReset().mockResolvedValue(undefined);
+      const { itinerary, dayIds } = withThreeDays();
+      withUpdate(itinerary);
+      const findSpy = jest.spyOn(ItineraryModel, 'find');
+
+      await service.removeDay(itinerary.id as string, dayIds[0], ownerId);
+
+      expect(findSpy).not.toHaveBeenCalled();
+      expect(uploads.deleteImage).not.toHaveBeenCalled();
+    });
 
     it('removes the day and renumbers and redates the days after it', async () => {
       const { itinerary, dayIds } = withThreeDays();
