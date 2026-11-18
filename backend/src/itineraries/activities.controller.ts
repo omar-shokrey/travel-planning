@@ -12,6 +12,8 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
+import { Role } from '../common/enums/role.enum';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { ActivitiesService } from './activities.service';
 import { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
@@ -21,6 +23,11 @@ import { UpdateActivityDto } from './dto/update-activity.dto';
 @ApiTags('Itineraries')
 @ApiCookieAuth()
 @ApiUnauthorizedResponse({ description: 'Not logged in' })
+@ApiForbiddenResponse({
+  description:
+    'Not a registered user: administrators and moderators cannot use itineraries',
+})
+@Roles(Role.User)
 @Controller('activities')
 export class ActivitiesController {
   constructor(private readonly activities: ActivitiesService) {}
@@ -38,7 +45,8 @@ export class ActivitiesController {
       'The id or a field is invalid, a field is null, an unknown field was sent, a cost has no currency, or the currency is not supported',
   })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({ description: 'No activity has this id' })
   @ApiConflictResponse({
@@ -63,7 +71,8 @@ export class ActivitiesController {
   @ApiOkResponse({ type: ItineraryDetailResponseDto })
   @ApiBadRequestResponse({ description: 'The id is not a valid id' })
   @ApiForbiddenResponse({
-    description: 'The itinerary belongs to another user',
+    description:
+      'The itinerary belongs to another user, or the caller is not a registered user (administrators and moderators cannot use itineraries)',
   })
   @ApiNotFoundResponse({ description: 'No activity has this id' })
   @ApiConflictResponse({

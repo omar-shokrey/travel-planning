@@ -9,10 +9,29 @@ import {
   Matches,
   Max,
   Min,
+  ValidateBy,
   ValidateNested,
 } from 'class-validator';
 import { HOTEL_CANCELLATION_TIERS_MAX_COUNT } from '../hotels.constants';
 import { TIME_OF_DAY_PATTERN } from '../models/hotel-policy.schema';
+
+const isTierObject = (tier: unknown): boolean =>
+  typeof tier === 'object' && tier !== null && !Array.isArray(tier);
+
+/**
+ * Each tier is an object. Without this, `ValidateNested` walks into a tier
+ * sent as a list (`[[...]]` or `[[]]`) and lets it through, and the save
+ * then fails with a 500 instead of a 400.
+ */
+const TiersAreObjects = () =>
+  ValidateBy({
+    name: 'tiersAreObjects',
+    validator: {
+      validate: (value: unknown): boolean =>
+        !Array.isArray(value) || value.every(isTierObject),
+      defaultMessage: () => 'Each cancellation tier must be an object',
+    },
+  });
 
 /** One cancellation tier as the hotel moderator sends it (HTL-10). */
 export class CancellationTierDto {
@@ -85,6 +104,7 @@ export class SetHotelPoliciesDto {
   @ArrayUnique((tier: CancellationTierDto) => tier?.daysBefore, {
     message: 'Each cancellation tier must have a different daysBefore',
   })
+  @TiersAreObjects()
   @ValidateNested({ each: true })
   @Type(() => CancellationTierDto)
   cancellationTiers: CancellationTierDto[];
