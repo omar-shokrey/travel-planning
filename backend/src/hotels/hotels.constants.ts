@@ -25,3 +25,6 @@ export const ROOM_AVAILABILITY_RANGES_MAX_COUNT = 100;
 
 /** HTL-06: one request can block at most this many nights of a room. */
 export const ROOM_BLOCK_MAX_NIGHTS = 366;
+
+/** HTL-08 and HTL-15: a date range in a query spans at most this many nights. */
+export const ROOM_QUERY_MAX_NIGHTS = 366;
