@@ -114,7 +114,6 @@ export class AirlinesService {
       daysBefore: tier.daysBefore,
       refundPercent: tier.refundPercent,
     }));
-
     const updated = await this.airlineModel
       .findByIdAndUpdate(
         id,
@@ -122,11 +121,9 @@ export class AirlinesService {
         { returnDocument: 'after', runValidators: true },
       )
       .exec();
-
     if (!updated) {
       throw new NotFoundException('Airline not found');
     }
-
     return toAirlineResponse(updated);
   }
 
@@ -141,7 +138,6 @@ export class AirlinesService {
     message = 'You can only change the policy of your assigned airline',
   ): Promise<void> {
     const user = await this.usersService.findEntityById(userId);
-
     if (
       user?.assignment?.providerType !== ProviderType.Airline ||
       user.assignment.providerId.toString() !== airline._id.toString()
@@ -161,7 +157,6 @@ export class AirlinesService {
     const nullFields = (['name', 'code'] as const).filter(
       (field) => dto[field] === null,
     );
-
     if (nullFields.length > 0) {
       throw new BadRequestException({
         message: 'Validation failed',
@@ -173,7 +168,6 @@ export class AirlinesService {
     }
 
     const airline = await this.findEntityOrThrow(id);
-
     await this.assertAssignedModerator(
       airline,
       userId,

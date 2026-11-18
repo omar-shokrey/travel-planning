@@ -177,6 +177,7 @@ describe('AirlinesService', () => {
       expect(model.findById).toHaveBeenCalledWith(AIRLINE_ID);
     });
   });
+
   describe('setCancellationPolicy (FLT-09)', () => {
     const tiers = [
       { daysBefore: 7, refundPercent: 50 },
