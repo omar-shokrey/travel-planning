@@ -14,6 +14,18 @@ describe('BlogPostSchema, tag page index (BLG-08, GEN-10)', () => {
   });
 });
 
+describe('BlogPostSchema, author page index (BLG-12, GEN-10)', () => {
+  it('covers the author, the public filter (status, moderation) and the newest-first sort', () => {
+    expect(BlogPostSchema.indexes().map(([fields]) => fields)).toContainEqual({
+      authorId: 1,
+      status: 1,
+      moderation: 1,
+      publishedAt: -1,
+      _id: -1,
+    });
+  });
+});
+
 describe('BlogPostSchema, moderation (GEN-10)', () => {
   it('is visible or hidden, required, and visible by default', () => {
     expect(BlogPostSchema.path('moderation').options).toMatchObject({
