@@ -6,6 +6,8 @@ import { UsersModule } from '../users/users.module';
 import { ActivitiesController } from './activities.controller';
 import { ActivitiesService } from './activities.service';
 import { ActivityImagesService } from './activity-images.service';
+import { BudgetsController } from './budgets.controller';
+import { BudgetsService } from './budgets.service';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
 import { PublicItinerariesController } from './public-itineraries.controller';
@@ -27,6 +29,7 @@ import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
   controllers: [
     ItinerariesController,
     ActivitiesController,
+    BudgetsController,
     TransportCostsController,
     PublicItinerariesController,
   ],
@@ -34,6 +37,7 @@ import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
     ItinerariesService,
     ActivitiesService,
     ActivityImagesService,
+    BudgetsService,
     TransportCostsService,
     PublicItinerariesService,
   ],
