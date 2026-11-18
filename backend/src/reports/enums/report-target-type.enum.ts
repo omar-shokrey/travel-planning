@@ -1,8 +1,9 @@
 /**
- * GEN-09: what a user can report. Comments (BLG-05) and hotel reviews are
- * added by a later PR, when those features exist.
+ * GEN-09: what a user can report. Hotel reviews are added with HTL-23, when
+ * reviews exist.
  */
 export enum ReportTargetType {
   Post = 'post',
   Itinerary = 'itinerary',
+  Comment = 'comment',
 }

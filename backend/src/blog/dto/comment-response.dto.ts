@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { CommentModeration } from '../models/comment-moderation.enum';
 
 /** A comment as the API returns it (BLG-05). */
 export class CommentResponseDto {
@@ -19,6 +20,15 @@ export class CommentResponseDto {
 
   @ApiProperty({ example: 'Great tips, I am going to Cairo next month!' })
   body: string;
+
+  @ApiProperty({
+    enum: CommentModeration,
+    enumName: 'CommentModeration',
+    description:
+      'GEN-10: `hidden` when an admin hid the comment. A hidden comment is left out of the comment list; only its author still gets it, when editing it (BLG-07).',
+    example: CommentModeration.Visible,
+  })
+  moderation: CommentModeration;
 
   @ApiProperty({ format: 'date-time', example: '2026-11-15T10:00:00.000Z' })
   createdAt: string;

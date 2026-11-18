@@ -1,5 +1,5 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { sortCancellationTiers } from './cancellation-tiers';
+import { sortTiersByDaysBefore } from '../common/cancellation-tiers';
 import type { HotelPolicyResponseDto } from './dto/hotel-policy-response.dto';
 import type { SetHotelPoliciesDto } from './dto/set-hotel-policies.dto';
 import { HotelsService } from './hotels.service';
@@ -29,7 +29,7 @@ export class HotelPoliciesService {
     hotel.policy = {
       checkInTime: dto.checkInTime,
       checkOutTime: dto.checkOutTime,
-      cancellationTiers: sortCancellationTiers(dto.cancellationTiers).map(
+      cancellationTiers: sortTiersByDaysBefore(dto.cancellationTiers).map(
         (tier) => ({
           daysBefore: tier.daysBefore,
           refundPercent: tier.refundPercent,

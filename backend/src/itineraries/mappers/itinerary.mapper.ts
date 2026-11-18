@@ -22,6 +22,7 @@ export function toItineraryResponse(
     countries: [...itinerary.countries],
     startDate: itinerary.startDate,
     visibility: itinerary.visibility,
+    moderation: itinerary.moderation,
     dayCount: itinerary.dayCount,
   };
 }
