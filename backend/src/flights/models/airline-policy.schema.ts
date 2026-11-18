@@ -38,7 +38,8 @@ export const CancellationTierSchema =
 /**
  * The policy of one airline, embedded in the airline document (see the
  * Flights data model). For now it holds only the cancellation tiers; the
- * baggage fields (`extraBagPrice`, `maxExtraBags`) come with FLT-04 and FLT-08.
+ * extra-bag fields (`extraBagPrice`, `maxExtraBags`) come with FLT-08. The free
+ * baggage allowance is not part of the policy: it is on each cabin (FLT-04).
  */
 @Schema({ _id: false })
 export class AirlinePolicy {
