@@ -220,6 +220,11 @@ export class PostsService {
       post.body = dto.body;
     }
 
+    // BLG-08: the tags sent replace the old ones; [] clears them.
+    if (dto.tags !== undefined) {
+      post.tags = dto.tags;
+    }
+
     if (dto.status !== undefined) {
       post.status = dto.status;
 
