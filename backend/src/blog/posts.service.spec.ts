@@ -1,6 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { Types } from 'mongoose';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { PostModeration } from './models/post-moderation.enum';
+import { PostStatus } from './models/post-status.enum';
 import { PostsService } from './posts.service';
+import { visiblePublishedPost } from './visible-post.filter';
 
 /** A comments or likes model whose deleteMany removes `count` records. */
 const engagement = (count = 0) => ({
@@ -8,9 +12,13 @@ const engagement = (count = 0) => ({
     exec: () => Promise.resolve({ deletedCount: count }),
   })),
 });
-import { PostModeration } from './models/post-moderation.enum';
-import { PostStatus } from './models/post-status.enum';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+
+const createService = (posts: unknown) =>
+  new PostsService(
+    posts as never,
+    engagement() as never,
+    engagement() as never,
+  );
 
 describe('PostsService', () => {
   describe('findPublishedSummary (GEN-09, GEN-10)', () => {
@@ -103,6 +111,75 @@ describe('PostsService', () => {
 
       expect(await service.existsById('post-1')).toBe(expected);
       expect(posts.countDocuments).toHaveBeenCalledWith({ _id: 'post-1' });
+    });
+
+    it.each([
+      [1, true],
+      [0, false],
+    ])(
+      'isVisibleTo (GEN-09): a count of %p is %p, by the visiblePublishedPost rule',
+      async (count, expected) => {
+        const { service, posts } = model(count);
+        const postId = '507f1f77bcf86cd799439012';
+        const viewerId = '507f1f77bcf86cd799439011';
+
+        expect(await service.isVisibleTo(postId, viewerId)).toBe(expected);
+        expect(posts.countDocuments).toHaveBeenCalledWith(
+          visiblePublishedPost(postId, viewerId),
+        );
+      },
+    );
+
+    it.each([
+      [PostModeration.Hidden, true],
+      [PostModeration.Visible, false],
+    ])(
+      'findForAdmin: any post, moderation %p is hidden=%p',
+      async (moderation, hidden) => {
+        const postId = new Types.ObjectId();
+        const authorId = new Types.ObjectId();
+        const { service } = model(null);
+        const posts = {
+          findById: jest.fn().mockReturnValue({
+            exec: () =>
+              Promise.resolve({
+                _id: postId,
+                authorId,
+                title: 'Draft',
+                body: 'Body',
+                status: PostStatus.Draft,
+                moderation,
+                tags: [],
+                images: [],
+                createdAt: new Date('2026-11-17T10:00:00.000Z'),
+                updatedAt: new Date('2026-11-17T10:00:00.000Z'),
+              }),
+          }),
+        };
+        Object.assign(service, { posts });
+
+        const found = await service.findForAdmin(postId.toString());
+
+        expect(posts.findById).toHaveBeenCalledWith(postId.toString());
+        expect(found).toEqual({
+          hidden,
+          post: expect.objectContaining({
+            id: postId.toString(),
+            authorId: authorId.toString(),
+            status: PostStatus.Draft,
+            createdAt: '2026-11-17T10:00:00.000Z',
+          }),
+        });
+      },
+    );
+
+    it('findForAdmin: null when there is no such post', async () => {
+      const { service } = model(null);
+      Object.assign(service, {
+        posts: { findById: () => ({ exec: () => Promise.resolve(null) }) },
+      });
+
+      expect(await service.findForAdmin('507f1f77bcf86cd799439012')).toBeNull();
     });
 
     it('hides a post that is not hidden yet, in one conditional update', async () => {
@@ -407,6 +484,103 @@ describe('PostsService', () => {
         items: [],
         meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
       });
+    });
+  });
+
+  describe('remove (BLG-04)', () => {
+    const userId = '507f1f77bcf86cd799439011';
+    const postId = '6740f1c2a4b5c6d7e8f90abc';
+
+    function createPost(authorId = userId) {
+      return {
+        _id: { toString: () => postId },
+        authorId: { toString: () => authorId },
+        deleteOne: jest.fn().mockResolvedValue(undefined),
+      };
+    }
+
+    it('allows the owner to delete their post and removes its engagement', async () => {
+      const post = createPost();
+      const posts = {
+        findById: jest.fn().mockResolvedValue(post),
+      };
+      const comments = engagement();
+      const likes = engagement();
+
+      const service = new PostsService(
+        posts as never,
+        comments as never,
+        likes as never,
+      );
+
+      await service.remove(postId, userId);
+
+      expect(posts.findById).toHaveBeenCalledWith(postId);
+      expect(post.deleteOne).toHaveBeenCalledTimes(1);
+      expect(comments.deleteMany).toHaveBeenCalledWith({
+        postId: new Types.ObjectId(postId),
+      });
+      expect(likes.deleteMany).toHaveBeenCalledWith({
+        postId: new Types.ObjectId(postId),
+      });
+    });
+
+    it('logs engagement cleanup failure without throwing after the post is deleted', async () => {
+      const post = createPost();
+      const posts = {
+        findById: jest.fn().mockResolvedValue(post),
+      };
+      const comments = engagement();
+
+      comments.deleteMany.mockImplementation(() => ({
+        exec: () => Promise.reject(new Error('database down')),
+      }));
+
+      const likes = engagement();
+      const logError = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation();
+
+      const service = new PostsService(
+        posts as never,
+        comments as never,
+        likes as never,
+      );
+
+      await expect(service.remove(postId, userId)).resolves.toBeUndefined();
+
+      expect(post.deleteOne).toHaveBeenCalledTimes(1);
+      expect(logError).toHaveBeenCalledTimes(1);
+
+      logError.mockRestore();
+    });
+
+    it('rejects deleting a post that does not exist', async () => {
+      const posts = {
+        findById: jest.fn().mockResolvedValue(null),
+      };
+
+      const service = createService(posts);
+
+      await expect(service.remove(postId, userId)).rejects.toThrow(
+        'Post not found',
+      );
+    });
+
+    it('rejects deleting another user’s post', async () => {
+      const post = createPost('507f191e810c19729de860ea');
+
+      const posts = {
+        findById: jest.fn().mockResolvedValue(post),
+      };
+
+      const service = createService(posts);
+
+      await expect(service.remove(postId, userId)).rejects.toThrow(
+        'You can only change your own posts',
+      );
+
+      expect(post.deleteOne).not.toHaveBeenCalled();
     });
   });
 });

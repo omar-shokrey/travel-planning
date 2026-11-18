@@ -1,4 +1,4 @@
-import { sortCancellationTiers } from '../cancellation-tiers';
+import { sortTiersByDaysBefore } from '../../common/cancellation-tiers';
 import type { HotelDetailsResponseDto } from '../dto/hotel-details-response.dto';
 import type { HotelPolicyResponseDto } from '../dto/hotel-policy-response.dto';
 import type { HotelPolicy } from '../models/hotel-policy.schema';
@@ -22,7 +22,7 @@ export function toHotelPolicyResponse(
   return {
     checkInTime: policy.checkInTime,
     checkOutTime: policy.checkOutTime,
-    cancellationTiers: sortCancellationTiers(
+    cancellationTiers: sortTiersByDaysBefore(
       policy.cancellationTiers ?? [],
     ).map((tier) => ({
       daysBefore: tier.daysBefore,

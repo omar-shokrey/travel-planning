@@ -399,7 +399,7 @@ describe('POST /api/reports (e2e, GEN-09)', () => {
 
     it.each([
       ['targetType', null],
-      ['targetType', 'comment'],
+      ['targetType', 'review'],
       ['targetType', undefined],
       ['targetId', null],
       ['targetId', 'abc'],
@@ -493,7 +493,11 @@ describe('POST /api/reports (e2e, GEN-09)', () => {
       expect(schema.required).toEqual(
         expect.arrayContaining(['targetType', 'targetId', 'reason']),
       );
-      expect(schema.properties.targetType.enum).toEqual(['post', 'itinerary']);
+      expect(schema.properties.targetType.enum).toEqual([
+        'post',
+        'itinerary',
+        'comment',
+      ]);
       expect(
         response.body.components.schemas.ReportResponseDto.properties,
       ).not.toHaveProperty('reporterId');
