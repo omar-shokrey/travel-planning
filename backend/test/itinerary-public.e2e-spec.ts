@@ -323,7 +323,7 @@ describe('Public itineraries (e2e, ITN-21)', () => {
         fixture.cityB,
       ]);
       expect(copy.days[0].activities).toEqual([
-        { id: expect.any(String), name: 'Market', time: '09:30' },
+        { id: expect.any(String), name: 'Market', time: '09:30', images: [] },
       ]);
       expect(copy.days[0].transportCosts).toEqual([
         expect.objectContaining({ mode: 'bus', amount: 700 }),

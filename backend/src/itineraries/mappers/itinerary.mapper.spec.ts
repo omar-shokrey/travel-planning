@@ -296,7 +296,7 @@ describe('dayCosts and totalPerCurrency', () => {
   });
 });
 
-describe('toActivityResponse (ITN-10)', () => {
+describe('toActivityResponse (ITN-10, ITN-12)', () => {
   it('returns every field an activity has, with its id', () => {
     const [day] = stored({
       days: [
@@ -322,10 +322,11 @@ describe('toActivityResponse (ITN-10)', () => {
       time: '09:30',
       cost: 20000,
       currency: 'EGP',
+      images: [],
     });
   });
 
-  it('leaves out the fields an activity does not have, and the images', () => {
+  it('leaves out the optional fields an activity does not have, and lists no images', () => {
     const [day] = stored({
       days: [{ cityId: 'cairo', activities: [{ name: 'Walk' }] }],
     }).days;
@@ -333,7 +334,24 @@ describe('toActivityResponse (ITN-10)', () => {
     expect(toActivityResponse(day.activities[0])).toEqual({
       id: day.activities[0]._id.toString(),
       name: 'Walk',
+      images: [],
     });
+  });
+
+  it('lists the images in order, each with the URL it is served at (ITN-12)', () => {
+    const [day] = stored({
+      days: [
+        {
+          cityId: 'cairo',
+          activities: [{ name: 'Walk', images: ['a1.jpg', 'b2.png'] }],
+        },
+      ],
+    }).days;
+
+    expect(toActivityResponse(day.activities[0]).images).toEqual([
+      { filename: 'a1.jpg', url: '/api/uploads/a1.jpg' },
+      { filename: 'b2.png', url: '/api/uploads/b2.png' },
+    ]);
   });
 
   it('keeps a cost of 0', () => {

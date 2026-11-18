@@ -104,6 +104,7 @@ describe('Activities (e2e, ITN-10)', () => {
           time: '08:00',
           cost: 3000,
           currency: FIXTURE_CURRENCY,
+          images: [],
         },
       ]);
       expect(response.body.cityGroups[0].budgetSubtotal).toEqual([
@@ -126,6 +127,7 @@ describe('Activities (e2e, ITN-10)', () => {
       expect(response.body.days[0].activities[1]).toEqual({
         id: expect.any(String),
         name: 'Walk',
+        images: [],
       });
     });
 
@@ -216,6 +218,7 @@ describe('Activities (e2e, ITN-10)', () => {
         name: 'Museum',
         cost: 2000,
         currency: FIXTURE_CURRENCY,
+        images: [],
       });
     });
 
