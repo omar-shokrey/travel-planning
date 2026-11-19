@@ -1,3 +1,5 @@
+import { HttpStatus } from '@nestjs/common';
+import { HTTP_CODE_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
 import { ROLES_KEY } from '../common/decorators/roles.decorator';
@@ -40,5 +42,48 @@ describe('FlightBookingsController (FLT-22, FLT-19)', () => {
         FlightBookingsController,
       ]),
     ).toBeUndefined();
+  });
+});
+
+describe('FlightBookingsController.summarise (FLT-21)', () => {
+  const dto = {
+    flightId: '6740f1c2a4b5c6d7e8f90456',
+    cabin: CabinClass.Economy,
+    passengers: [
+      {
+        fullName: 'Sara Ahmed',
+        dateOfBirth: '1990-05-14',
+        passportNumber: 'A12345678',
+      },
+    ],
+  };
+
+  it('passes the body to summarise and returns its answer', async () => {
+    const answer = { total: 25000 };
+    const service = { summarise: jest.fn().mockResolvedValue(answer) };
+    const controller = new FlightBookingsController(
+      service as unknown as FlightBookingsService,
+    );
+
+    await expect(controller.summarise(dto)).resolves.toBe(answer);
+    expect(service.summarise).toHaveBeenCalledWith(dto);
+  });
+
+  it('is for registered users only, needs a login, and answers 200', () => {
+    const reflector = new Reflector();
+    const handler = FlightBookingsController.prototype.summarise;
+
+    expect(reflector.get(ROLES_KEY, handler)).toEqual([Role.User]);
+    expect(
+      reflector.getAllAndOverride(IS_PUBLIC_KEY, [
+        handler,
+        FlightBookingsController,
+      ]),
+    ).toBeUndefined();
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(
+      HttpStatus.OK,
+    );
+    // POST /api/flight-bookings: the controller path with no route of its own.
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('/');
   });
 });

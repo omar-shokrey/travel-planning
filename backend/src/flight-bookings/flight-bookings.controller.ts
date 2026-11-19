@@ -7,6 +7,7 @@ import {
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
@@ -23,6 +24,7 @@ import {
 import { FLIGHT_NOT_FOUND_MESSAGE } from '../flights/flights.constants';
 import { CabinClass } from '../flights/models/cabin-class.enum';
 import { FlightBookingResponseDto } from './dto/flight-booking-response.dto';
+import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import {
   ADULT_MIN_AGE,
@@ -33,12 +35,69 @@ import {
 } from './flight-bookings.constants';
 import { FlightBookingsService } from './flight-bookings.service';
 
-/** Flight bookings of registered users (FLT-22, FLT-19). */
+/** Flight bookings of registered users (FLT-22, FLT-19, FLT-21). */
 @ApiTags('Flight bookings')
 @ApiCookieAuth()
 @Controller('flight-bookings')
 export class FlightBookingsController {
   constructor(private readonly flightBookings: FlightBookingsService) {}
+
+  @Post()
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.User)
+  @ApiOperation({
+    summary: 'Show the booking summary before payment (FLT-21)',
+    description: [
+      'Registered users only (a guest gets 401 and logs in first, ACC-10). The body is exactly the body of `POST /api/flight-bookings/hold`: the flight, the cabin and every passenger with their optional extra bags. It is a POST so that names, dates of birth and passport numbers never go into a URL.',
+      `The answer is the summary of what would be booked: the flight with its local times (GEN-06), the airline, each passenger with the type derived from the date of birth, their fare (infants 10%) and bag fee, the baggage allowance of the cabin and the airline's extra-bag rule, and \`fareTotal\`, \`baggageTotal\` and \`total\` in ${PLATFORM_CURRENCY} cents. The checks, their order, their messages and the prices are those of the hold, so both give the same totals for the same input and the same cabin price.`,
+      '**Nothing is held and nothing is saved** (200, not 201). 409 "Not enough seats left" is only informative here: the hold checks the seats again atomically, and the seats or the price can still change before it. Call `/hold` to proceed to payment.',
+    ].join('\n\n'),
+  })
+  @ApiBody({
+    type: HoldFlightBookingDto,
+    examples: {
+      oneAdult: {
+        summary: 'One adult, no extra bags',
+        value: {
+          flightId: '6740f1c2a4b5c6d7e8f90456',
+          cabin: CabinClass.Economy,
+          passengers: [
+            {
+              fullName: 'Sara Ahmed',
+              dateOfBirth: '1990-05-14',
+              passportNumber: 'A12345678',
+            },
+          ],
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    type: FlightBookingSummaryResponseDto,
+    description: 'The summary. Nothing was held or saved.',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'The same 400 as the hold: a field is missing, invalid or not allowed (`errors` lists each field path); no adult, more infants than adults or more than 9 seats on the departure date; extra bags the airline does not sell, above its maximum or too heavy; or a server-controlled field such as `type` or `price`.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Not logged in, or the access token is invalid or expired',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Only a registered user (role `user`) can book; administrators and moderators cannot',
+  })
+  @ApiNotFoundResponse({
+    description: `"${FLIGHT_NOT_FOUND_MESSAGE}" (also for a flight of a deactivated airline), or "${cabinNotOnFlightMessage(CabinClass.Business)}" (the cabin sent is named)`,
+  })
+  @ApiConflictResponse({
+    description: `"${FLIGHT_NOT_BOOKABLE_MESSAGE}" (cancelled or departed, or its departure time has passed), or "${NOT_ENOUGH_SEATS_MESSAGE}" right now. Nothing is held.`,
+  })
+  summarise(
+    @Body() dto: HoldFlightBookingDto,
+  ): Promise<FlightBookingSummaryResponseDto> {
+    return this.flightBookings.summarise(dto);
+  }
 
   @Post('hold')
   @HttpCode(HttpStatus.CREATED)
