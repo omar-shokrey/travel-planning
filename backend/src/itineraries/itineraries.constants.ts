@@ -40,3 +40,15 @@ export const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/;
 /** The answer when an itinerary changed under a request that edits it by position. */
 export const ITINERARY_CHANGED_MESSAGE =
   'The itinerary was changed by another request. Reload it and try again.';
+
+/** ITN-26: the answers of the flights of an itinerary. */
+export const NO_DAYS_FOR_FLIGHTS_MESSAGE =
+  'This itinerary has no days yet, so it has no first city: add a day to search flights';
+export const NO_AIRPORT_IN_FIRST_CITY_MESSAGE =
+  "The city of the itinerary's first day has no airport in the airports list";
+export const unknownOriginMessage = (code: string): string =>
+  `originAirport ${code} is not in the airports list`;
+export const ORIGIN_IN_FIRST_CITY_MESSAGE =
+  "originAirport is in the city of the itinerary's first day: choose an airport you fly from";
+export const RETURN_DATE_ONE_WAY_MESSAGE =
+  'returnDate is only for a round trip (tripType round_trip)';
