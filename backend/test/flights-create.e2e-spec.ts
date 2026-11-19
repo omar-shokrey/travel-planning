@@ -73,6 +73,10 @@ const localAt = (days: number, hour: number, minute = 0): string =>
 const utcOf = (local: string, zone: string): string =>
   DateTime.fromISO(local, { zone }).toUTC().toISO() as string;
 
+/** The UTC offset of `zone` at a local time, `+HH:MM` (GEN-06): it depends on the season. */
+const offsetOf = (local: string, zone: string): string =>
+  DateTime.fromISO(local, { zone }).toFormat('ZZ');
+
 /**
  * The first future day whose 02:30 does not exist in `zone`: the clocks
  * jump from 02:00 to 03:00 (luxon then gives 03:30). Searched with luxon, so
@@ -270,6 +274,13 @@ describe('POST /api/flights (e2e, FLT-03)', () => {
         arrivalAirport: codes.arrival,
         departureAt: utcOf(sent.departureLocal, ZONES.departure),
         arrivalAt: utcOf(sent.arrivalLocal, ZONES.arrival),
+        // GEN-06: each time at its own airport, as it was typed.
+        departureLocal: sent.departureLocal,
+        departureTimeZone: ZONES.departure,
+        departureUtcOffset: offsetOf(sent.departureLocal, ZONES.departure),
+        arrivalLocal: sent.arrivalLocal,
+        arrivalTimeZone: ZONES.arrival,
+        arrivalUtcOffset: offsetOf(sent.arrivalLocal, ZONES.arrival),
         departureDateLocal: sent.departureLocal.slice(0, 10),
         status: 'scheduled',
         cabins: [],
@@ -626,11 +637,17 @@ describe('POST /api/flights (e2e, FLT-03)', () => {
       'airlineId',
       'arrivalAirport',
       'arrivalAt',
+      'arrivalLocal',
+      'arrivalTimeZone',
+      'arrivalUtcOffset',
       'cabins',
       'createdAt',
       'departureAirport',
       'departureAt',
       'departureDateLocal',
+      'departureLocal',
+      'departureTimeZone',
+      'departureUtcOffset',
       'flightNumber',
       'id',
       'status',
