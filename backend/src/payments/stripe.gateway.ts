@@ -25,7 +25,20 @@ export interface GatewayIntent {
   currency: string;
 }
 
-/** A verified webhook event. `intent` is set for the `payment_intent.*` events. */
+/** A refund as the rest of the module sees it (PAY-03). */
+export interface GatewayRefund {
+  id: string;
+  /** Stripe's own status: `pending`, `requires_action`, `succeeded`, `failed` or `canceled`. */
+  status: string;
+  amount: number;
+  currency: string;
+  paymentIntentId: string | null;
+}
+
+/**
+ * A verified webhook event. `intent` is set for the `payment_intent.*` events,
+ * `refund` for the `refund.*` events (PAY-03); both are `null` otherwise.
+ */
 export interface GatewayEvent {
   id: string;
   type: string;
@@ -35,6 +48,18 @@ export interface GatewayEvent {
     amountReceived: number;
     currency: string;
   } | null;
+  refund: {
+    id: string;
+    status: string;
+    paymentIntentId: string | null;
+  } | null;
+}
+
+export interface NewRefund {
+  paymentIntentId: string;
+  /** Minor units, never more than the payment. */
+  amount: number;
+  metadata: { bookingType: string; bookingId: string };
 }
 
 export interface NewPaymentIntent {
@@ -103,6 +128,29 @@ export class StripeGateway {
   }
 
   /**
+   * PAY-03: refunds a payment through its PaymentIntent (never a card). The
+   * idempotency key makes a retried refund of the same booking reach Stripe
+   * once, for 24 hours.
+   */
+  createRefund(
+    refund: NewRefund,
+    idempotencyKey: string,
+  ): Promise<GatewayRefund> {
+    return this.call('create the refund', async (stripe) =>
+      toGatewayRefund(
+        await stripe.refunds.create(
+          {
+            payment_intent: refund.paymentIntentId,
+            amount: refund.amount,
+            metadata: refund.metadata,
+          },
+          { idempotencyKey },
+        ),
+      ),
+    );
+  }
+
+  /**
    * Checks the signature of a webhook call against the raw request body and
    * returns the event. 400 for a body or signature that does not match; 503
    * when the webhook secret is not set.
@@ -131,6 +179,10 @@ export class StripeGateway {
       type: event.type,
       intent: event.type.startsWith('payment_intent.')
         ? toEventIntent(event.data.object as unknown as Stripe.PaymentIntent)
+        : null,
+      // refund.created, refund.updated, refund.failed (PAY-03).
+      refund: event.type.startsWith('refund.')
+        ? toEventRefund(event.data.object as unknown as Stripe.Refund)
         : null,
     };
   }
@@ -179,5 +231,30 @@ function toEventIntent(intent: Stripe.PaymentIntent): GatewayEvent['intent'] {
     amount: intent.amount,
     amountReceived: intent.amount_received,
     currency: intent.currency,
+  };
+}
+
+/** The PaymentIntent of a refund is an id, or the expanded object. */
+function paymentIntentIdOf(refund: Stripe.Refund): string | null {
+  const intent = refund.payment_intent;
+  if (!intent) return null;
+  return typeof intent === 'string' ? intent : intent.id;
+}
+
+function toGatewayRefund(refund: Stripe.Refund): GatewayRefund {
+  return {
+    id: refund.id,
+    status: refund.status ?? 'pending',
+    amount: refund.amount,
+    currency: refund.currency,
+    paymentIntentId: paymentIntentIdOf(refund),
+  };
+}
+
+function toEventRefund(refund: Stripe.Refund): GatewayEvent['refund'] {
+  return {
+    id: refund.id,
+    status: refund.status ?? 'pending',
+    paymentIntentId: paymentIntentIdOf(refund),
   };
 }

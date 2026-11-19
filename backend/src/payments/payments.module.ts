@@ -17,7 +17,7 @@ import { StripeEvent, StripeEventSchema } from './models/stripe-event.schema';
 import { PaymentExpiryService } from './payment-expiry.service';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
-import { StripeGateway } from './stripe.gateway';
+import { StripeModule } from './stripe.module';
 import { StripeWebhookController } from './stripe-webhook.controller';
 import { StripeWebhookService } from './stripe-webhook.service';
 
@@ -31,6 +31,8 @@ import { StripeWebhookService } from './stripe-webhook.service';
     // module, so there is no cycle.
     FlightBookingsModule,
     HotelBookingsModule,
+    // The one StripeGateway, shared with the refunds (PAY-03).
+    StripeModule,
   ],
   controllers: [
     BookingPoliciesController,
@@ -42,7 +44,6 @@ import { StripeWebhookService } from './stripe-webhook.service';
     PaymentsService,
     StripeWebhookService,
     PaymentExpiryService,
-    StripeGateway,
     {
       // PAY-01 -> FLT-23, HTL-17: who confirms a booking once its payment
       // succeeded. A booking service is a handler as soon as it has

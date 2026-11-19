@@ -35,6 +35,7 @@ const event = (
   type: string,
   intent: Partial<NonNullable<GatewayEvent['intent']>> | null = {},
 ): GatewayEvent => ({
+  refund: null,
   id: `evt_${type}`,
   type,
   intent: intent && {
