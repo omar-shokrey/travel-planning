@@ -95,7 +95,7 @@ export class FlightCabinsController {
     description: `"${FLIGHT_NOT_FOUND_MESSAGE}", or "Airline not found": the moderator's assignment names an airline that no longer exists`,
   })
   @ApiConflictResponse({
-    description: `"${FLIGHT_NOT_SCHEDULED_MESSAGE}" (cancelled or departed), "${duplicateCabinMessage(CabinClass.Economy)}" (the class sent is named), or "${FLIGHT_CHANGED_MESSAGE}" (the flight changed at the same moment)`,
+    description: `"${FLIGHT_NOT_SCHEDULED_MESSAGE}" (cancelled or departed, or its departure time has passed), "${duplicateCabinMessage(CabinClass.Economy)}" (the class sent is named), or "${FLIGHT_CHANGED_MESSAGE}" (the flight changed at the same moment)`,
   })
   addCabin(
     @Param('id', ParseObjectIdPipe) flightId: string,
@@ -128,7 +128,7 @@ export class FlightCabinsController {
     description: `"${FLIGHT_NOT_FOUND_MESSAGE}", "${CABIN_NOT_FOUND_MESSAGE}", or "Airline not found": the moderator's assignment names an airline that no longer exists`,
   })
   @ApiConflictResponse({
-    description: `"${FLIGHT_NOT_SCHEDULED_MESSAGE}" (cancelled or departed), or "${CABIN_CHANGED_MESSAGE}" (the cabin's seats or the flight changed between the read and the write ${CABIN_UPDATE_ATTEMPTS} times in a row, for example because of bookings)`,
+    description: `"${FLIGHT_NOT_SCHEDULED_MESSAGE}" (cancelled or departed, or its departure time has passed), or "${CABIN_CHANGED_MESSAGE}" (the cabin's seats or the flight changed between the read and the write ${CABIN_UPDATE_ATTEMPTS} times in a row, for example because of bookings)`,
   })
   updateCabin(
     @Param('id', ParseObjectIdPipe) flightId: string,

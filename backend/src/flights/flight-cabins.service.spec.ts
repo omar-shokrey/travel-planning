@@ -28,6 +28,19 @@ const FLIGHT_ID = '6740f1c2a4b5c6d7e8f90456';
 const CABIN_ID = new Types.ObjectId('6740f1c2a4b5c6d7e8f90789');
 const UNKNOWN_CABIN_ID = '6740f1c2a4b5c6d7e8f90000';
 
+/** "Now" for every test (FLT-30): the stored flight below departs months later. */
+const NOW = new Date('2027-01-10T00:00:00.000Z');
+/** A departure that has passed at NOW, for a flight still stored as scheduled. */
+const PAST = new Date('2027-01-09T23:59:59.999Z');
+
+beforeEach(() => {
+  jest.useFakeTimers({ now: NOW });
+});
+
+afterEach(() => {
+  jest.useRealTimers();
+});
+
 const dto = (fields: Partial<CreateCabinDto> = {}): CreateCabinDto => ({
   cabin: CabinClass.Business,
   totalSeats: 30,
@@ -148,7 +161,9 @@ describe('FlightCabinsService.addCabin (FLT-04)', () => {
       {
         _id: FLIGHT_ID,
         airlineId: AIRLINE_ID,
+        // scheduledFlightFilter(now) (FLT-30), in the write itself.
         status: FlightStatus.Scheduled,
+        departureAt: { $gt: NOW },
         'cabins.cabin': { $ne: CabinClass.Business },
       },
       {
@@ -244,6 +259,18 @@ describe('FlightCabinsService.addCabin (FLT-04)', () => {
         FLIGHT_NOT_SCHEDULED_MESSAGE,
       ],
       [
+        'the departure time has passed, the stored status is still scheduled (FLT-30)',
+        stored({ departureAt: PAST }),
+        ConflictException,
+        FLIGHT_NOT_SCHEDULED_MESSAGE,
+      ],
+      [
+        'the flight departs at this very instant (FLT-30)',
+        stored({ departureAt: NOW }),
+        ConflictException,
+        FLIGHT_NOT_SCHEDULED_MESSAGE,
+      ],
+      [
         'the flight already has this class',
         stored({ cabins: [economy({ cabin: CabinClass.Business })] }),
         ConflictException,
@@ -269,7 +296,7 @@ describe('FlightCabinsService.addCabin (FLT-04)', () => {
       // One read, of the fields the checks need; no second write.
       expect(flights.findById).toHaveBeenCalledTimes(1);
       expect(flights.findById).toHaveBeenCalledWith(FLIGHT_ID);
-      expect(selects).toEqual(['airlineId status cabins']);
+      expect(selects).toEqual(['airlineId status departureAt cabins']);
       expect(flights.updateOne).toHaveBeenCalledTimes(1);
     });
 
@@ -283,6 +310,15 @@ describe('FlightCabinsService.addCabin (FLT-04)', () => {
         }),
         ForbiddenException,
         FOREIGN_FLIGHT_MESSAGE,
+      ],
+      [
+        'a passed departure before the class (FLT-30)',
+        stored({
+          departureAt: PAST,
+          cabins: [economy({ cabin: CabinClass.Business })],
+        }),
+        ConflictException,
+        FLIGHT_NOT_SCHEDULED_MESSAGE,
       ],
       [
         'not scheduled before the class',
@@ -367,7 +403,9 @@ describe('FlightCabinsService.updateCabin (FLT-04, FLT-05)', () => {
       {
         _id: FLIGHT_ID,
         airlineId: AIRLINE_ID,
+        // scheduledFlightFilter(now) (FLT-30), in the write itself.
         status: FlightStatus.Scheduled,
+        departureAt: { $gt: NOW },
         cabins: {
           $elemMatch: { _id: CABIN_ID, bookedSeats: 10, heldSeats: 5 },
         },
@@ -495,6 +533,12 @@ describe('FlightCabinsService.updateCabin (FLT-04, FLT-05)', () => {
     [
       'the flight is departed',
       stored({ status: FlightStatus.Departed }),
+      ConflictException,
+      FLIGHT_NOT_SCHEDULED_MESSAGE,
+    ],
+    [
+      'the departure time has passed, the stored status is still scheduled (FLT-30)',
+      stored({ departureAt: PAST }),
       ConflictException,
       FLIGHT_NOT_SCHEDULED_MESSAGE,
     ],
@@ -634,7 +678,7 @@ describe('FlightCabinsService.updateCabin (FLT-04, FLT-05)', () => {
     await service.updateCabin(FLIGHT_ID, cabinId, { price: 1 }, 'moderator-1');
 
     expect(flights.findById).toHaveBeenNthCalledWith(1, FLIGHT_ID);
-    expect(selects).toEqual(['airlineId status cabins']);
+    expect(selects).toEqual(['airlineId status departureAt cabins']);
   });
 
   it('answers 404 if the flight is gone when it is read back after the write', async () => {
