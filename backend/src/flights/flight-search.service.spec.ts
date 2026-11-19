@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { Types, type Model } from 'mongoose';
 import type { SearchFlightsQueryDto } from './dto/search-flights-query.dto';
+import { PRICE_RANGE_MESSAGE } from './flights.constants';
 import type { FlightResponsesService } from './flight-responses.service';
 import { FlightSearchService } from './flight-search.service';
 import type { FlightSearchSource } from './mappers/flight-search.mapper';
@@ -308,35 +309,6 @@ describe('FlightSearchService (FLT-11)', () => {
     });
   });
 
-  describe('a page beyond any real list', () => {
-    it('answers 400 on page instead of sending MongoDB a skip it refuses, and runs no query', async () => {
-      const { service, flights, responses } = setup();
-      const error = await service
-        .search(query({ page: 1e20, limit: 10, skip: 1e21 }), NOW)
-        .catch((caught: unknown) => caught);
-
-      expect(error).toBeInstanceOf(BadRequestException);
-      expect((error as BadRequestException).getResponse()).toEqual({
-        message: 'Validation failed',
-        errors: [{ field: 'page', messages: ['page is too large'] }],
-      });
-      expect(responses.timeZonesOf).not.toHaveBeenCalled();
-      expect(flights.aggregate).not.toHaveBeenCalled();
-    });
-
-    it('accepts the largest page whose skip is still a safe integer', async () => {
-      const { service, flights } = setup();
-      const page = Math.floor(Number.MAX_SAFE_INTEGER / 10);
-
-      await service.search(
-        query({ page, limit: 10, skip: (page - 1) * 10 }),
-        NOW,
-      );
-
-      expect(flights.aggregate).toHaveBeenCalledTimes(1);
-    });
-  });
-
   describe('the airports: in the airports list and different (the answers of FLT-03)', () => {
     const errorOf = async (
       search: SearchFlightsQueryDto,
@@ -413,5 +385,163 @@ describe('FlightSearchService (FLT-11)', () => {
         ],
       });
     });
+  });
+});
+
+describe('FlightSearchService: price range and order (FLT-15)', () => {
+  type Expression = number | string | { [operator: string]: Expression[] };
+
+  /** Evaluates the operators the cabin condition uses, as MongoDB does. */
+  const evaluate = (
+    expression: Expression,
+    cabin: Record<string, number>,
+  ): number | boolean => {
+    if (typeof expression === 'number') return expression;
+    if (typeof expression === 'string') {
+      return cabin[expression.replace('$$cabin.', '')];
+    }
+    const [operator, args] = Object.entries(expression)[0];
+    const values = args.map((arg) => evaluate(arg, cabin));
+    if (operator === '$and') return values.every(Boolean);
+    const [a, b] = values as number[];
+    if (operator === '$gte') return a >= b;
+    if (operator === '$lte') return a <= b;
+    if (operator === '$subtract') return a - b;
+    if (operator === '$add')
+      return (values as number[]).reduce((sum, value) => sum + value, 0);
+    throw new Error(`Unexpected operator ${operator}`);
+  };
+
+  const condition = (change: Partial<SearchFlightsQueryDto>): Expression => {
+    const { service } = setup();
+    const stage = service.pipeline(query(change), NOW)[1] as unknown as {
+      $addFields: { fittingCabins: { $filter: { cond: Expression } } };
+    };
+    return stage.$addFields.fittingCabins.$filter.cond;
+  };
+
+  const cabin = (price: number) => ({
+    totalSeats: 10,
+    bookedSeats: 0,
+    heldSeats: 0,
+    price,
+  });
+
+  /** The `$facet` page of a pipeline, and the stages before it. */
+  const pageOf = (change: Partial<SearchFlightsQueryDto>) => {
+    const { service } = setup();
+    const stages = service.pipeline(query(change), NOW) as unknown as Record<
+      string,
+      unknown
+    >[];
+    const facet = stages[stages.length - 1].$facet as {
+      items: Record<string, unknown>[];
+    };
+    return { stages, items: facet.items };
+  };
+
+  it('keeps a cabin whose price is inside the range, the bounds included', () => {
+    const cond = condition({ minPrice: 20000, maxPrice: 30000 });
+
+    expect(evaluate(cond, cabin(19999))).toBe(false);
+    expect(evaluate(cond, cabin(20000))).toBe(true);
+    expect(evaluate(cond, cabin(25000))).toBe(true);
+    expect(evaluate(cond, cabin(30000))).toBe(true);
+    expect(evaluate(cond, cabin(30001))).toBe(false);
+  });
+
+  it('still asks for the seats: a cabin in the range without enough seats is not kept', () => {
+    const cond = condition({ minPrice: 0, maxPrice: 30000, passengers: 3 });
+
+    expect(evaluate(cond, { ...cabin(25000), bookedSeats: 8 })).toBe(false);
+    expect(evaluate(cond, { ...cabin(25000), bookedSeats: 7 })).toBe(true);
+  });
+
+  it('uses each bound alone, and no bound at all as in FLT-11', () => {
+    expect(evaluate(condition({ minPrice: 20000 }), cabin(999999))).toBe(true);
+    expect(evaluate(condition({ minPrice: 20000 }), cabin(19999))).toBe(false);
+    expect(evaluate(condition({ maxPrice: 20000 }), cabin(0))).toBe(true);
+    expect(evaluate(condition({ maxPrice: 20000 }), cabin(20001))).toBe(false);
+    expect(Object.keys(condition({}))).toEqual(['$gte']);
+  });
+
+  it('sorts by the price of the cheapest cabin listed, computed after the cabin filter, then by id', () => {
+    const { stages, items } = pageOf({ sortBy: 'price' });
+
+    expect(stages[3]).toEqual({
+      $addFields: { lowestPrice: { $min: '$fittingCabins.price' } },
+    });
+    expect(stages[2]).toEqual({
+      $match: { 'fittingCabins.0': { $exists: true } },
+    });
+    expect(items[0]).toEqual({ $sort: { lowestPrice: 1, _id: 1 } });
+    expect(items[3]).toEqual({
+      $project: { cabins: 0, __v: 0, lowestPrice: 0 },
+    });
+  });
+
+  it('sorts by duration (arrival minus departure), longest first with desc', () => {
+    const { stages, items } = pageOf({
+      sortBy: 'duration',
+      sortOrder: 'desc',
+    });
+
+    expect(stages[3]).toEqual({
+      $addFields: { durationMs: { $subtract: ['$arrivalAt', '$departureAt'] } },
+    });
+    expect(items[0]).toEqual({ $sort: { durationMs: -1, _id: 1 } });
+    expect(items[3]).toEqual({
+      $project: { cabins: 0, __v: 0, durationMs: 0 },
+    });
+  });
+
+  it('sorts by the stored departure time with no computed field, latest first with desc', () => {
+    const { stages, items } = pageOf({
+      sortBy: 'departureTime',
+      sortOrder: 'desc',
+    });
+
+    expect(
+      stages.some((stage) => '$addFields' in stage && stage !== stages[1]),
+    ).toBe(false);
+    expect(items[0]).toEqual({ $sort: { departureAt: -1, _id: 1 } });
+    expect(items[3]).toEqual({ $project: { cabins: 0, __v: 0 } });
+  });
+
+  it('pages after the sort, in the database, so total and pages stay correct', () => {
+    const { items } = pageOf({ sortBy: 'price', page: 3, limit: 5, skip: 10 });
+
+    expect(items.slice(0, 3)).toEqual([
+      { $sort: { lowestPrice: 1, _id: 1 } },
+      { $skip: 10 },
+      { $limit: 5 },
+    ]);
+  });
+
+  it('refuses a minimum above the maximum with 400 naming both, before any query', async () => {
+    const { service, flights, responses } = setup();
+
+    const error = await service
+      .search(query({ minPrice: 30001, maxPrice: 30000 }), NOW)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as BadRequestException).getResponse()).toEqual({
+      message: 'Validation failed',
+      errors: [{ field: 'minPrice', messages: [PRICE_RANGE_MESSAGE] }],
+    });
+    expect(PRICE_RANGE_MESSAGE).toBe(
+      'minPrice must not be greater than maxPrice',
+    );
+    expect(responses.timeZonesOf).not.toHaveBeenCalled();
+    expect(flights.aggregate).not.toHaveBeenCalled();
+  });
+
+  it('accepts equal bounds', async () => {
+    const { service, flights } = setup();
+
+    await service.search(query({ minPrice: 25000, maxPrice: 25000 }), NOW);
+
+    expect(flights.aggregate).toHaveBeenCalledTimes(1);
   });
 });

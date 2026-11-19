@@ -2,7 +2,11 @@ import { getModelToken } from '@nestjs/mongoose';
 import { DateTime } from 'luxon';
 import type { Model } from 'mongoose';
 import { createHash, randomInt } from 'node:crypto';
-import { FLIGHT_SEARCH_PASSENGERS_MAX } from './../src/flights/flights.constants';
+import {
+  CABIN_PRICE_MAX,
+  FLIGHT_SEARCH_PASSENGERS_MAX,
+  PRICE_RANGE_MESSAGE,
+} from './../src/flights/flights.constants';
 import { CabinClass } from './../src/flights/models/cabin-class.enum';
 import { FlightStatus } from './../src/flights/models/flight-status.enum';
 import { Airport } from './../src/reference/models/airport.schema';
@@ -523,6 +527,216 @@ describe('Flight search (e2e, FLT-11)', () => {
     });
   });
 
+  describe('price range and order (FLT-15)', () => {
+    /** Four flights on one day, for 2 passengers. */
+    const ids: Record<'a' | 'b' | 'c' | 'd', string> = {
+      a: '',
+      b: '',
+      c: '',
+      d: '',
+    };
+    const day = 80;
+    const sorted = (...keys: ('b' | 'c')[]) =>
+      keys.map((key) => ids[key]).sort();
+
+    beforeAll(async () => {
+      const hours = (start: number, length: number) => ({
+        departureAt: at(day, start),
+        arrivalAt: at(day, start + length),
+      });
+      // a: economy 20000 and business 90000; 08:00, 10 h.
+      ids.a = await f.insertFlight({
+        ...hours(8, 10),
+        cabins: [
+          economy({ price: 20000 }),
+          { cabin: CabinClass.Business, price: 90000, totalSeats: 10 },
+        ],
+      });
+      // b: economy 30000; 09:00, 12 h.
+      ids.b = await f.insertFlight({
+        ...hours(9, 12),
+        cabins: [economy({ price: 30000 })],
+      });
+      // c: economy 30000 (the same price as b); 07:00, 8 h.
+      ids.c = await f.insertFlight({
+        ...hours(7, 8),
+        cabins: [economy({ price: 30000 })],
+      });
+      // d: a cheap economy that is full (1 seat left), and premium 40000; 10:00, 9 h.
+      ids.d = await f.insertFlight({
+        ...hours(10, 9),
+        cabins: [
+          economy({
+            price: 15000,
+            totalSeats: 10,
+            bookedSeats: 8,
+            heldSeats: 1,
+          }),
+          { cabin: CabinClass.PremiumEconomy, price: 40000, totalSeats: 10 },
+        ],
+      });
+    });
+
+    const find = async (extra: Record<string, string | number> = {}) =>
+      (await search(route(dateOf(day), 2, extra)).expect(200)).body as PageBody;
+
+    it('lists a flight when a cabin that fits the party is inside the range, the bounds included, with only those cabins', async () => {
+      const body = await find({ minPrice: 30000, maxPrice: 40000 });
+
+      expect(idsOf(body).sort()).toEqual([ids.b, ids.c, ids.d].sort());
+      expect(body.meta.total).toBe(3);
+      const d = body.items.find((item) => item.id === ids.d);
+      // The full economy at 15000 is neither in the range nor big enough.
+      expect(d?.cabins.map((cabin) => [cabin.cabin, cabin.price])).toEqual([
+        [CabinClass.PremiumEconomy, 40000],
+      ]);
+    });
+
+    it('lists a flight for its dearer cabin when only that one is in the range', async () => {
+      const body = await find({ minPrice: 25000 });
+      const a = body.items.find((item) => item.id === ids.a);
+
+      expect(body.meta.total).toBe(4);
+      expect(a?.cabins.map((cabin) => [cabin.cabin, cabin.price])).toEqual([
+        [CabinClass.Business, 90000],
+      ]);
+    });
+
+    it('uses a maximum alone, inclusive, and equal bounds', async () => {
+      const upTo = await find({ maxPrice: 30000 });
+      const exactly = await find({ minPrice: 30000, maxPrice: 30000 });
+
+      expect(idsOf(upTo).sort()).toEqual([ids.a, ids.b, ids.c].sort());
+      expect(idsOf(exactly).sort()).toEqual(sorted('b', 'c'));
+    });
+
+    it('finds nothing when no cabin is in the range: a 200 empty page', async () => {
+      const body = await find({ minPrice: 95000 });
+
+      expect(body).toEqual({
+        items: [],
+        meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
+      });
+    });
+
+    it('keeps the other criteria: the date, and the seats of the cabin in the range', async () => {
+      const otherDate = await search(
+        route(dateOf(day + 1), 2, { maxPrice: CABIN_PRICE_MAX }),
+      ).expect(200);
+      // d's economy at 15000 has 1 seat left: it fits 1 passenger, not 2.
+      const forTwo = await find({ maxPrice: 15000 });
+      const forOne = (
+        await search(route(dateOf(day), 1, { maxPrice: 15000 })).expect(200)
+      ).body as PageBody;
+
+      expect((otherDate.body as PageBody).items).toEqual([]);
+      expect(forTwo.meta.total).toBe(0);
+      expect(idsOf(forOne)).toEqual([ids.d]);
+    });
+
+    it('sorts by the price of the cheapest cabin listed, then id, both directions', async () => {
+      const ascending = await find({ sortBy: 'price' });
+      const descending = await find({ sortBy: 'price', sortOrder: 'desc' });
+
+      expect(idsOf(ascending)).toEqual([ids.a, ...sorted('b', 'c'), ids.d]);
+      expect(idsOf(descending)).toEqual([ids.d, ...sorted('b', 'c'), ids.a]);
+    });
+
+    it('sorts by the price inside the range: the cabin listed decides', async () => {
+      // With minPrice 25000, a is listed for its business cabin (90000).
+      const body = await find({ minPrice: 25000, sortBy: 'price' });
+
+      expect(idsOf(body)).toEqual([...sorted('b', 'c'), ids.d, ids.a]);
+    });
+
+    it('sorts by duration (arrival minus departure), both directions', async () => {
+      const ascending = await find({ sortBy: 'duration' });
+      const descending = await find({ sortBy: 'duration', sortOrder: 'desc' });
+
+      expect(idsOf(ascending)).toEqual([ids.c, ids.d, ids.a, ids.b]);
+      expect(idsOf(descending)).toEqual([ids.b, ids.a, ids.d, ids.c]);
+    });
+
+    it('sorts by departure time, the default, both directions', async () => {
+      const byDefault = await find();
+      const descending = await find({
+        sortBy: 'departureTime',
+        sortOrder: 'desc',
+      });
+
+      expect(idsOf(byDefault)).toEqual([ids.c, ids.a, ids.b, ids.d]);
+      expect(idsOf(descending)).toEqual([ids.d, ids.b, ids.a, ids.c]);
+    });
+
+    it('pages a sorted list without repeating or skipping a flight, equal prices included', async () => {
+      const all = idsOf(await find({ sortBy: 'price', sortOrder: 'desc' }));
+      const paged: string[] = [];
+
+      for (const page of [1, 2, 3, 4]) {
+        const body = await find({
+          sortBy: 'price',
+          sortOrder: 'desc',
+          page,
+          limit: 1,
+        });
+        expect(body.meta).toEqual({ page, limit: 1, total: 4, totalPages: 4 });
+        paged.push(...idsOf(body));
+      }
+      expect(paged).toEqual(all);
+    });
+
+    it('refuses a minimum above the maximum with 400 naming both fields', async () => {
+      const response = await search(
+        route(dateOf(day), 2, { minPrice: 40001, maxPrice: 40000 }),
+      ).expect(400);
+
+      expect(response.body).toMatchObject({
+        statusCode: 400,
+        message: 'Validation failed',
+        errors: [{ field: 'minPrice', messages: [PRICE_RANGE_MESSAGE] }],
+      });
+    });
+
+    it.each([
+      ['minPrice', '-1', 'minPrice must be 0 or more'],
+      ['maxPrice', '-1', 'maxPrice must be 0 or more'],
+      [
+        'minPrice',
+        '12.5',
+        'minPrice must be a whole number of minor units (cents)',
+      ],
+      [
+        'maxPrice',
+        'abc',
+        'maxPrice must be a whole number of minor units (cents)',
+      ],
+      [
+        'maxPrice',
+        '',
+        'maxPrice must be a whole number of minor units (cents)',
+      ],
+      [
+        'maxPrice',
+        `${CABIN_PRICE_MAX + 1}`,
+        `maxPrice must be at most ${CABIN_PRICE_MAX}`,
+      ],
+      [
+        'sortBy',
+        'cheapest',
+        'sortBy must be one of: price, duration, departureTime',
+      ],
+      ['sortOrder', 'down', 'sortOrder must be one of: asc, desc'],
+    ])('refuses %s %p', async (field, value, message) => {
+      const response = await search(
+        route(dateOf(day), 2, { [field]: value }),
+      ).expect(400);
+
+      expect(response.body.errors).toEqual([
+        { field, messages: expect.arrayContaining([message]) },
+      ]);
+    });
+  });
+
   describe('400 in the project error shape', () => {
     /** A well-formed code that no airport has: not official, not in the test database. */
     const unknownCode = async (): Promise<string> => {
@@ -646,7 +860,7 @@ describe('Flight search (e2e, FLT-11)', () => {
       ).toEqual(['cabin', 'skip']);
     });
 
-    it.each(['returnDate', 'cabin', 'maxPrice', 'sort'])(
+    it.each(['returnDate', 'cabin', 'sort', 'price'])(
       'refuses the parameter %s, which this search does not have',
       async (field) => {
         expect(
@@ -690,6 +904,10 @@ describe('Flight search (e2e, FLT-11)', () => {
       arrivalAirport: true,
       departureDate: true,
       passengers: true,
+      minPrice: false,
+      maxPrice: false,
+      sortBy: false,
+      sortOrder: false,
     });
     expect(Object.keys(operation.responses)).toEqual(
       expect.arrayContaining(['200', '400']),

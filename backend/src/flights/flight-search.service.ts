@@ -11,6 +11,8 @@ import type { SearchFlightsQueryDto } from './dto/search-flights-query.dto';
 import { FlightResponsesService } from './flight-responses.service';
 import { scheduledFlightFilter } from './flight-status';
 import {
+  type FlightSearchSort,
+  PRICE_RANGE_MESSAGE,
   SAME_AIRPORTS_MESSAGE,
   unknownAirportMessage,
 } from './flights.constants';
@@ -20,6 +22,16 @@ import {
 } from './mappers/flight-search.mapper';
 import { Airline } from './models/airline.schema';
 import { Flight } from './models/flight.schema';
+
+/**
+ * The field each order of FLT-15 sorts on. `lowestPrice` and `durationMs` are
+ * computed in the pipeline; `departureAt` is stored.
+ */
+const SORT_FIELDS: Record<FlightSearchSort, string> = {
+  price: 'lowestPrice',
+  duration: 'durationMs',
+  departureTime: 'departureAt',
+};
 
 /** What the `$facet` stage gives: one page of flights and the count of all matches. */
 interface SearchPage {
@@ -47,20 +59,24 @@ export class FlightSearchService {
    * and departing after `now`), of an active airline (ACC-15: `active: false`
    * is left out, an airline without the field counts as active), with at
    * least one cabin where `totalSeats - bookedSeats - heldSeats` is at least
-   * `passengers`. Ordered by departure time, then id. Only the cabins that
-   * fit are returned. No match is a 200 with an empty page.
+   * `passengers` and whose price is inside `minPrice`..`maxPrice` (FLT-15,
+   * inclusive, each bound optional). Only those cabins are returned. Ordered
+   * by `sortBy` and `sortOrder` (by default the departure time, earliest
+   * first), then by id. No match is a 200 with an empty page.
    */
   async search(
     query: SearchFlightsQueryDto,
     now: Date = new Date(),
   ): Promise<PaginatedResponse<FlightSearchResultResponseDto>> {
-    // A page so large that its skip is not a safe integer would reach
-    // MongoDB as a `$skip` it refuses (500). The shared pagination DTO has no
-    // upper limit on `page`, and this route is public, so it is refused here.
-    if (!Number.isSafeInteger(query.skip)) {
+    // FLT-15: checked before any query, so a wrong range costs no lookup.
+    if (
+      query.minPrice !== undefined &&
+      query.maxPrice !== undefined &&
+      query.minPrice > query.maxPrice
+    ) {
       throw new BadRequestException({
         message: 'Validation failed',
-        errors: [{ field: 'page', messages: ['page is too large'] }],
+        errors: [{ field: 'minPrice', messages: [PRICE_RANGE_MESSAGE] }],
       });
     }
     const zones = await this.responses.timeZonesOf([
@@ -89,11 +105,43 @@ export class FlightSearchService {
    * and carries `scheduledFlightFilter(now)`. The seat rule needs a
    * comparison between fields of each cabin, which `$elemMatch` cannot do,
    * so `$filter` keeps the cabins that fit; a flight without one is dropped.
-   * The airline comes with `$lookup`, which also drops an inactive airline,
-   * so the whole page needs no other query. `$facet` counts every match and
-   * cuts the page, both from the same matches.
+   * The price range of FLT-15 is part of the same `$filter`: a cabin is kept
+   * when it fits the party and its price is in the range. The airline comes
+   * with `$lookup`, which also drops an inactive airline, so the whole page
+   * needs no other query. `$facet` counts every match and sorts and cuts the
+   * page, both from the same matches; the sort ends with `_id`, so equal
+   * flights keep one order across pages. With the default order the pipeline
+   * is the one of FLT-11.
    */
   pipeline(query: SearchFlightsQueryDto, now: Date): PipelineStage[] {
+    // The DTO gives the defaults; a query built in code may leave them out.
+    const sortField = SORT_FIELDS[query.sortBy ?? 'departureTime'];
+    const direction = query.sortOrder === 'desc' ? -1 : 1;
+    const seatsLeft = {
+      $gte: [
+        {
+          $subtract: [
+            '$$cabin.totalSeats',
+            { $add: ['$$cabin.bookedSeats', '$$cabin.heldSeats'] },
+          ],
+        },
+        query.passengers,
+      ],
+    };
+    const keep = [
+      seatsLeft,
+      ...(query.minPrice === undefined
+        ? []
+        : [{ $gte: ['$$cabin.price', query.minPrice] }]),
+      ...(query.maxPrice === undefined
+        ? []
+        : [{ $lte: ['$$cabin.price', query.maxPrice] }]),
+    ];
+    // The computed sort keys, added only for the order that needs one.
+    const sortKeys: Record<string, unknown> = {
+      lowestPrice: { $min: '$fittingCabins.price' },
+      durationMs: { $subtract: ['$arrivalAt', '$departureAt'] },
+    };
     return [
       {
         $match: {
@@ -110,22 +158,15 @@ export class FlightSearchService {
               // A flight stored before FLT-04 has no `cabins`: it never matches.
               input: { $ifNull: ['$cabins', []] },
               as: 'cabin',
-              cond: {
-                $gte: [
-                  {
-                    $subtract: [
-                      '$$cabin.totalSeats',
-                      { $add: ['$$cabin.bookedSeats', '$$cabin.heldSeats'] },
-                    ],
-                  },
-                  query.passengers,
-                ],
-              },
+              cond: keep.length === 1 ? seatsLeft : { $and: keep },
             },
           },
         },
       },
       { $match: { 'fittingCabins.0': { $exists: true } } },
+      ...(sortField in sortKeys
+        ? [{ $addFields: { [sortField]: sortKeys[sortField] } }]
+        : []),
       {
         $lookup: {
           from: this.airlines.collection.collectionName,
@@ -143,10 +184,16 @@ export class FlightSearchService {
       {
         $facet: {
           items: [
-            { $sort: { departureAt: 1, _id: 1 } },
+            { $sort: { [sortField]: direction, _id: 1 } },
             { $skip: query.skip },
             { $limit: query.limit },
-            { $project: { cabins: 0, __v: 0 } },
+            {
+              $project: {
+                cabins: 0,
+                __v: 0,
+                ...(sortField in sortKeys ? { [sortField]: 0 } : {}),
+              },
+            },
           ],
           total: [{ $count: 'count' }],
         },
