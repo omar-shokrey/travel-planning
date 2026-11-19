@@ -21,13 +21,13 @@ function setup() {
   return { service, controller };
 }
 
-describe('PostSearchController (BLG-09)', () => {
+describe('PostSearchController (BLG-09, BLG-02)', () => {
   it('searches when a keyword is given', async () => {
     const { service, controller } = setup();
     const query = Object.assign(new SearchPostsQueryDto(), { q: 'cairo' });
 
     await expect(controller.search(query)).resolves.toBe(page);
-    expect(service.search).toHaveBeenCalledWith('cairo', query);
+    expect(service.search).toHaveBeenCalledWith('cairo', query, undefined);
     expect(service.listNewest).not.toHaveBeenCalled();
   });
 
@@ -36,8 +36,29 @@ describe('PostSearchController (BLG-09)', () => {
     const query = new SearchPostsQueryDto();
 
     await expect(controller.search(query)).resolves.toBe(page);
-    expect(service.listNewest).toHaveBeenCalledWith(query);
+    expect(service.listNewest).toHaveBeenCalledWith(query, undefined);
     expect(service.search).not.toHaveBeenCalled();
+  });
+
+  it('passes the tag to the newest-posts list when no keyword is given (BLG-02)', async () => {
+    const { service, controller } = setup();
+    const query = Object.assign(new SearchPostsQueryDto(), { tag: 'cairo' });
+
+    await expect(controller.search(query)).resolves.toBe(page);
+    expect(service.listNewest).toHaveBeenCalledWith(query, 'cairo');
+    expect(service.search).not.toHaveBeenCalled();
+  });
+
+  it('passes the tag to the search when a keyword is given too (BLG-02)', async () => {
+    const { service, controller } = setup();
+    const query = Object.assign(new SearchPostsQueryDto(), {
+      q: 'nile',
+      tag: 'cairo',
+    });
+
+    await expect(controller.search(query)).resolves.toBe(page);
+    expect(service.search).toHaveBeenCalledWith('nile', query, 'cairo');
+    expect(service.listNewest).not.toHaveBeenCalled();
   });
 
   it('is open to guests and needs no role', () => {
