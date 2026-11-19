@@ -4,6 +4,8 @@ import {
   NO_ADULT_MESSAGE,
   NO_EXTRA_BAGS_MESSAGE,
   planPassengers,
+  planReturnPassengers,
+  returnBagsWithoutReturnFlight,
   TOO_MANY_INFANTS_MESSAGE,
   TOO_MANY_SEATS_MESSAGE,
   tooHeavyMessage,
@@ -12,6 +14,10 @@ import {
 } from './booking-passengers';
 import type { PassengerDetailsDto } from './dto/hold-flight-booking.dto';
 import { PassengerType } from './enums/passenger-type.enum';
+import {
+  INFANT_ON_RETURN_MESSAGE,
+  RETURN_BAGS_WITHOUT_FLIGHT_MESSAGE,
+} from './flight-bookings.constants';
 
 const DEPARTURE = '2026-12-20';
 const SELLS: BaggageRule = {
@@ -250,5 +256,199 @@ describe('planPassengers (FLT-19, FLT-12(b))', () => {
     expect(text).not.toContain(shared.passportNumber);
     expect(text).not.toContain(shared.dateOfBirth);
     expect(text).not.toContain(shared.fullName);
+  });
+});
+
+describe('planReturnPassengers (FLT-12(a))', () => {
+  const RETURN_DATE = '2026-12-27';
+  const RETURN_RULE: BaggageRule = {
+    extraBagPrice: 4000,
+    maxExtraBags: 1,
+    maxBagKg: 32,
+  };
+  const typesOf = (passengers: PassengerDetailsDto[]) => {
+    const plan = planPassengers(passengers, DEPARTURE, SELLS).plan;
+    if (!plan) throw new Error('expected a valid outbound plan');
+    return plan.passengers.map(({ type }) => type);
+  };
+
+  it("keeps the outbound types and prices each passenger's bags at the return airline price", () => {
+    const passengers = [
+      adult({ returnExtraBags: { bags: 1, weightKg: 30 } }),
+      child(),
+      infant(),
+    ];
+
+    expect(
+      planReturnPassengers(
+        passengers,
+        typesOf(passengers),
+        RETURN_DATE,
+        RETURN_RULE,
+      ),
+    ).toEqual({
+      passengers: [
+        {
+          type: PassengerType.Adult,
+          extraBags: { bags: 1, weightKg: 30 },
+          baggageFee: 4000,
+        },
+        { type: PassengerType.Child, baggageFee: 0 },
+        { type: PassengerType.Infant, baggageFee: 0 },
+      ],
+      errors: [],
+    });
+  });
+
+  it('refuses an infant who turns 2 before the return date, on dateOfBirth', () => {
+    // 1 on 2026-12-20, 2 on 2026-12-25.
+    const passengers = [adult(), person('2024-12-25')];
+
+    expect(
+      planReturnPassengers(
+        passengers,
+        typesOf(passengers),
+        RETURN_DATE,
+        RETURN_RULE,
+      ),
+    ).toEqual({
+      passengers: null,
+      errors: [
+        {
+          field: 'passengers.1.dateOfBirth',
+          messages: [INFANT_ON_RETURN_MESSAGE],
+        },
+      ],
+    });
+  });
+
+  it('accepts an infant whose second birthday is the day after the return', () => {
+    const passengers = [adult(), person('2024-12-28')];
+
+    expect(
+      planReturnPassengers(
+        passengers,
+        typesOf(passengers),
+        RETURN_DATE,
+        RETURN_RULE,
+      ).errors,
+    ).toEqual([]);
+  });
+
+  it('refuses an infant whose second birthday is the return date itself', () => {
+    const passengers = [adult(), person('2024-12-27')];
+
+    expect(
+      planReturnPassengers(
+        passengers,
+        typesOf(passengers),
+        RETURN_DATE,
+        RETURN_RULE,
+      ).errors,
+    ).toEqual([
+      {
+        field: 'passengers.1.dateOfBirth',
+        messages: [INFANT_ON_RETURN_MESSAGE],
+      },
+    ]);
+  });
+
+  it('lets a child become an adult on the return: same seat, same fare', () => {
+    // 11 outbound, 12 on the return date.
+    const passengers = [adult(), person('2014-12-25')];
+
+    const result = planReturnPassengers(
+      passengers,
+      typesOf(passengers),
+      RETURN_DATE,
+      RETURN_RULE,
+    );
+    expect(result.errors).toEqual([]);
+    expect(result.passengers?.[1].type).toBe(PassengerType.Child);
+  });
+
+  it('checks the return bags with the return rule, on the returnExtraBags path', () => {
+    const passengers = [
+      adult({ returnExtraBags: { bags: 2, weightKg: 10 } }),
+      adult({ returnExtraBags: { bags: 1, weightKg: 33 } }),
+    ];
+
+    expect(
+      planReturnPassengers(
+        passengers,
+        typesOf(passengers),
+        RETURN_DATE,
+        RETURN_RULE,
+      ).errors,
+    ).toEqual([
+      {
+        field: 'passengers.0.returnExtraBags.bags',
+        messages: [tooManyBagsMessage(1)],
+      },
+      {
+        field: 'passengers.1.returnExtraBags.weightKg',
+        messages: [tooHeavyMessage(1, 32)],
+      },
+    ]);
+  });
+
+  it('refuses return bags when the return airline sells none (no price, or a maximum of 0)', () => {
+    const passengers = [adult({ returnExtraBags: { bags: 1, weightKg: 5 } })];
+    for (const rule of [
+      { maxExtraBags: 1, maxBagKg: 32 },
+      { extraBagPrice: 4000, maxExtraBags: 0, maxBagKg: 32 },
+    ]) {
+      expect(
+        planReturnPassengers(passengers, typesOf(passengers), RETURN_DATE, rule)
+          .errors,
+      ).toEqual([
+        {
+          field: 'passengers.0.returnExtraBags',
+          messages: [NO_EXTRA_BAGS_MESSAGE],
+        },
+      ]);
+    }
+  });
+
+  it('ignores the outbound extraBags: they belong to the outbound flight', () => {
+    const passengers = [adult({ extraBags: { bags: 2, weightKg: 40 } })];
+
+    expect(
+      planReturnPassengers(
+        passengers,
+        typesOf(passengers),
+        RETURN_DATE,
+        RETURN_RULE,
+      ),
+    ).toEqual({
+      passengers: [{ type: PassengerType.Adult, baggageFee: 0 }],
+      errors: [],
+    });
+  });
+});
+
+describe('returnBagsWithoutReturnFlight (FLT-12(a))', () => {
+  it('names each passenger who sent returnExtraBags on a one-way booking', () => {
+    expect(
+      returnBagsWithoutReturnFlight([
+        adult({ returnExtraBags: { bags: 1, weightKg: 5 } }),
+        adult(),
+        adult({ returnExtraBags: null }),
+        adult({ returnExtraBags: { bags: 1, weightKg: 5 } }),
+      ]),
+    ).toEqual([
+      {
+        field: 'passengers.0.returnExtraBags',
+        messages: [RETURN_BAGS_WITHOUT_FLIGHT_MESSAGE],
+      },
+      {
+        field: 'passengers.3.returnExtraBags',
+        messages: [RETURN_BAGS_WITHOUT_FLIGHT_MESSAGE],
+      },
+    ]);
+  });
+
+  it('finds nothing when no passenger sent them', () => {
+    expect(returnBagsWithoutReturnFlight([adult(), child()])).toEqual([]);
   });
 });

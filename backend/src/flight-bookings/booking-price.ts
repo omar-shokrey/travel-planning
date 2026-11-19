@@ -1,4 +1,4 @@
-import type { PassengerPlan } from './booking-passengers';
+import type { PassengerPlan, PlannedPassenger } from './booking-passengers';
 import { PassengerType } from './enums/passenger-type.enum';
 import { INFANT_FARE_PERCENT } from './flight-bookings.constants';
 
@@ -39,7 +39,10 @@ export interface BookingPrice {
  */
 export function priceBooking(
   fare: number,
-  plan: Pick<PassengerPlan, 'passengers' | 'seats' | 'counts'>,
+  plan: Pick<PassengerPlan, 'seats' | 'counts'> & {
+    /** What each passenger has on this flight: their type and bag fee. */
+    passengers: readonly Pick<PlannedPassenger, 'type' | 'baggageFee'>[];
+  },
 ): BookingPrice {
   const infantFare = infantFareOf(fare);
   const perPassenger = plan.passengers.map((passenger) => ({

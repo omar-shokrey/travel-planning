@@ -355,3 +355,156 @@ describe('HoldFlightBookingDto (FLT-22, FLT-19)', () => {
     }
   });
 });
+
+describe('HoldFlightBookingDto: round trip (FLT-12(a))', () => {
+  const RETURN_ID = '6740f1c2a4b5c6d7e8f90789';
+
+  it('accepts a return flight and cabin, and keeps them', async () => {
+    const dto = await parse(
+      body({ returnFlightId: RETURN_ID, returnCabin: 'business' }),
+    );
+
+    expect(dto.returnFlightId).toBe(RETURN_ID);
+    expect(dto.returnCabin).toBe(CabinClass.Business);
+  });
+
+  it('is one-way without them, also when both are null', async () => {
+    expect(await errorsOf(body())).toEqual([]);
+    expect(
+      await errorsOf(body({ returnFlightId: null, returnCabin: null })),
+    ).toEqual([]);
+  });
+
+  it('refuses a return flight without its cabin', async () => {
+    expect(
+      await onlyField(body({ returnFlightId: RETURN_ID }), 'returnCabin'),
+    ).toEqual(['returnCabin is required with returnFlightId']);
+    expect(
+      await onlyField(
+        body({ returnFlightId: RETURN_ID, returnCabin: null }),
+        'returnCabin',
+      ),
+    ).toEqual(['returnCabin is required with returnFlightId']);
+  });
+
+  it('refuses a return cabin without its flight', async () => {
+    expect(
+      await onlyField(body({ returnCabin: 'economy' }), 'returnFlightId'),
+    ).toEqual(['returnFlightId is required with returnCabin']);
+  });
+
+  it.each(['abc', '123', 42, { id: RETURN_ID }])(
+    'refuses the return flight id %p',
+    async (returnFlightId) => {
+      expect(
+        await onlyField(
+          body({ returnFlightId, returnCabin: 'economy' }),
+          'returnFlightId',
+        ),
+      ).toEqual(['returnFlightId must be a valid id']);
+    },
+  );
+
+  it.each(['Economy', 'coach', '', 3])(
+    'refuses the return cabin %p, naming every cabin',
+    async (returnCabin) => {
+      expect(
+        await onlyField(
+          body({ returnFlightId: RETURN_ID, returnCabin }),
+          'returnCabin',
+        ),
+      ).toEqual([
+        'returnCabin must be one of: economy, premium_economy, business, first',
+      ]);
+    },
+  );
+
+  describe('returnExtraBags of a passenger', () => {
+    const withReturnBags = (returnExtraBags: unknown) =>
+      body({
+        returnFlightId: RETURN_ID,
+        returnCabin: 'economy',
+        passengers: [passenger({ returnExtraBags })],
+      });
+
+    it('accepts bags and weight, and none (left out or null)', async () => {
+      const dto = await parse(withReturnBags({ bags: 2, weightKg: 30 }));
+
+      expect(dto.passengers[0].returnExtraBags).toEqual({
+        bags: 2,
+        weightKg: 30,
+      });
+      expect(await errorsOf(withReturnBags(null))).toEqual([]);
+      expect(
+        await errorsOf(
+          body({ returnFlightId: RETURN_ID, returnCabin: 'economy' }),
+        ),
+      ).toEqual([]);
+    });
+
+    it.each([['two'], [5]])(
+      'refuses %p, which is not an object',
+      async (returnExtraBags) => {
+        expect(
+          await onlyField(
+            withReturnBags(returnExtraBags),
+            'passengers.0.returnExtraBags',
+          ),
+        ).toContain('returnExtraBags must be an object');
+      },
+    );
+
+    it('refuses return bags sent as a list, as extraBags does', async () => {
+      expect(await errorsOf(withReturnBags([1]))).toContainEqual({
+        field: 'passengers.0.returnExtraBags',
+        messages: ['returnExtraBags must be an object'],
+      });
+    });
+
+    it('checks bags and weight with the rules of extraBags', async () => {
+      expect(
+        await onlyField(
+          withReturnBags({ bags: 0, weightKg: 10 }),
+          'passengers.0.returnExtraBags.bags',
+        ),
+      ).toEqual(['bags must be at least 1']);
+      expect(
+        await onlyField(
+          withReturnBags({ bags: 1, weightKg: 1.5 }),
+          'passengers.0.returnExtraBags.weightKg',
+        ),
+      ).toEqual(['weightKg must be a whole number']);
+      expect(
+        await onlyField(
+          withReturnBags({ bags: 1 }),
+          'passengers.0.returnExtraBags.weightKg',
+        ),
+      ).toContain('weightKg is required');
+    });
+
+    it('refuses a price or fee sent inside it', async () => {
+      expect(
+        await onlyField(
+          withReturnBags({ bags: 1, weightKg: 10, fee: 0 }),
+          'passengers.0.returnExtraBags.fee',
+        ),
+      ).toEqual(['property fee should not exist']);
+    });
+  });
+
+  it.each(['returnFare', 'returnSeats', 'tripType', 'segments'])(
+    'refuses %s: the server decides it',
+    async (field) => {
+      expect(
+        await onlyField(
+          body({
+            returnFlightId: RETURN_ID,
+            returnCabin: 'economy',
+            [field]: 1,
+          }),
+          field,
+        ),
+      ).toEqual([`property ${field} should not exist`]);
+    },
+  );
+});

@@ -85,6 +85,7 @@ describe('toFlightBookingResponse (FLT-22, FLT-19)', () => {
           type: 'adult',
           passportNumber: 'A12345678',
           extraBags: { bags: 1, weightKg: 20 },
+          returnExtraBags: null,
         },
         {
           fullName: 'Omar Ahmed',
@@ -92,6 +93,7 @@ describe('toFlightBookingResponse (FLT-22, FLT-19)', () => {
           type: 'adult',
           passportNumber: 'B12345678',
           extraBags: null,
+          returnExtraBags: null,
         },
         {
           fullName: 'Baby Ahmed',
@@ -99,6 +101,7 @@ describe('toFlightBookingResponse (FLT-22, FLT-19)', () => {
           type: 'infant',
           passportNumber: 'C12345678',
           extraBags: null,
+          returnExtraBags: null,
         },
       ],
       createdAt: '2026-11-19T10:00:00.000Z',
@@ -117,7 +120,7 @@ describe('toFlightBookingResponse (FLT-22, FLT-19)', () => {
     expect(response.baggageTotal).toBe(0);
   });
 
-  it('shows only the outbound extra bags (segment 0)', () => {
+  it('shows the bags of segment 0 as extraBags and of segment 1 as returnExtraBags (FLT-12)', () => {
     const response = toFlightBookingResponse(
       stored({
         passengers: [
@@ -133,6 +136,30 @@ describe('toFlightBookingResponse (FLT-22, FLT-19)', () => {
     );
 
     expect(response.passengers[0].extraBags).toBeNull();
+    expect(response.passengers[0].returnExtraBags).toEqual({
+      bags: 2,
+      weightKg: 30,
+    });
+  });
+
+  it('shows no bags for a passenger stored without a baggage list', () => {
+    const response = toFlightBookingResponse(
+      stored({
+        passengers: [
+          {
+            fullName: 'Sara Ahmed',
+            dateOfBirth: '1990-05-14',
+            passportNumber: 'A12345678',
+            type: PassengerType.Adult,
+          } as never,
+        ],
+      }),
+    );
+
+    expect(response.passengers[0]).toMatchObject({
+      extraBags: null,
+      returnExtraBags: null,
+    });
   });
 
   it('never returns the owner, the airline id or Mongo internals', () => {

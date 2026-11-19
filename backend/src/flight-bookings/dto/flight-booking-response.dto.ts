@@ -73,9 +73,18 @@ export class PassengerResponseDto {
   @ApiProperty({
     type: ExtraBagsResponseDto,
     nullable: true,
-    description: 'The extra bags of this passenger; `null` when none',
+    description:
+      'The extra bags of this passenger on the first (outbound) flight; `null` when none',
   })
   extraBags: ExtraBagsResponseDto | null;
+
+  @ApiProperty({
+    type: ExtraBagsResponseDto,
+    nullable: true,
+    description:
+      'FLT-12(a): the extra bags of this passenger on the return flight of a round trip; `null` when none, and always `null` for a one-way booking',
+  })
+  returnExtraBags: ExtraBagsResponseDto | null;
 }
 
 /** A flight booking as the API returns it to its owner (FLT-22, FLT-19). */
@@ -129,7 +138,11 @@ export class FlightBookingResponseDto {
   })
   total: number;
 
-  @ApiProperty({ type: [FlightBookingSegmentResponseDto] })
+  @ApiProperty({
+    type: [FlightBookingSegmentResponseDto],
+    description:
+      'The flights of the booking: one for a one-way booking; for a round trip (FLT-12) two, the outbound flight first and the return flight second',
+  })
   segments: FlightBookingSegmentResponseDto[];
 
   @ApiProperty({

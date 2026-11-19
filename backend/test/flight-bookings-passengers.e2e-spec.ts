@@ -192,6 +192,8 @@ describe('Passenger details and extra baggage (e2e, FLT-19)', () => {
       type: 'adult',
       passportNumber: 'AB12CD34',
       extraBags: null,
+      // FLT-12: a one-way booking has no return bags.
+      returnExtraBags: null,
     });
     expect(await heldSeatsOf(flightId)).toBe(3);
 
