@@ -126,3 +126,15 @@ hotel, so callers cannot choose a mismatched country.
 - The workbook asks for the reservation reference on a booked night. The reservations of HTL-16 and HTL-17 do not exist yet, so a booked segment shows the `bookingId` stored on the night. HTL-17 should add the `reference` next to it once `hotel_bookings` exists.
 - A range has at most 366 nights (`ROOM_QUERY_MAX_NIGHTS`). The workbook gives no limit; this one keeps a page of rooms small.
 - The status of each night is computed by the pure function `roomStatusSegments` in `room-status.ts`, so it is unit tested without a database. The service reads one page of rooms and their nights in the range with one query each.
+
+## Hotel search (HTL-11)
+
+- **Route.** `GET /api/hotels/search` is public: guests and users get the same answer. `HotelSearchController` is registered before `HotelDetailsController`, so `search` is never read as a hotel id.
+- **Where.** Exactly one of `cityId` and `countryCode`; neither or both answer 400. A city or country with no hotel gives an empty page, not 404.
+- **Dates.** `checkIn` and `checkOut` are `YYYY-MM-DD`; check-out must be after check-in, check-in cannot be before today in UTC (the module's `todayUtc`, as for availability), and a stay has at most `ROOM_QUERY_MAX_NIGHTS` (366) nights. The stay is the nights from `checkIn` up to `checkOut`, not included, as everywhere else in the module.
+- **Which rooms are free.** An active room (HTL-06) is free when every night of the stay is inside one of its availability ranges (HTL-04; ranges that touch count as one) and no night has a `room_nights` document that takes it: blocked (HTL-06), booked, or held by a hold that has not expired (HTL-18). An expired hold no longer counts, as in HTL-08. The database query only reads rooms bookable on the first night; the other nights are checked in `hotel-search.ts`, plain functions with unit tests.
+- **Which hotels are listed.** Active hotels (ACC-15) with at least `rooms` free rooms whose `rooms` largest free rooms together hold `guests`. The largest rooms are the best possible choice, so if they cannot hold the guests, no choice can. `rooms` defaults to 1. Fewer guests than rooms is allowed.
+- **Result.** The public hotel fields, `freeRooms` (how many rooms are free for the stay) and `lowestPricePerNight` with `currency` (USD, PAY-04). Price filters and sorting are HTL-12, and the list of free rooms is HTL-15.
+- **Order and pages.** By hotel name (case is ignored), then id, 10 per page (GEN-05). Every matching hotel is counted for `total`, so the hotels and their rooms of the city or country are read in one go and paged in memory. That is fine for the size of the data; a very large country would need the free-room check in the database.
+- **Limits (engineering limits, not workbook rules).** `guests` 1 to `HOTEL_SEARCH_GUESTS_MAX` (100), `rooms` 1 to `HOTEL_SEARCH_ROOMS_MAX` (20).
+- **Reading only.** The search writes nothing. A room in the results can be gone when the user books it; booking (HTL-16) takes the nights in its own concurrency-safe way.

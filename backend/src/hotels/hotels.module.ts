@@ -11,6 +11,8 @@ import { HotelRoomStatusController } from './hotel-room-status.controller';
 import { HotelRoomStatusService } from './hotel-room-status.service';
 import { HotelRoomsController } from './hotel-rooms.controller';
 import { HotelRoomsService } from './hotel-rooms.service';
+import { HotelSearchController } from './hotel-search.controller';
+import { HotelSearchService } from './hotel-search.service';
 import { HotelsController } from './hotels.controller';
 import { Hotel, HotelSchema } from './models/hotel.schema';
 import { RoomNight, RoomNightSchema } from './models/room-night.schema';
@@ -35,6 +37,7 @@ import { HotelsService } from './hotels.service';
     HotelPoliciesController,
     HotelRoomsController,
     HotelRoomStatusController,
+    HotelSearchController,
     HotelDetailsController,
   ],
   providers: [
@@ -43,6 +46,7 @@ import { HotelsService } from './hotels.service';
     HotelPoliciesService,
     HotelRoomsService,
     HotelRoomStatusService,
+    HotelSearchService,
   ],
   exports: [HotelsService],
 })
