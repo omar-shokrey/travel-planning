@@ -6,6 +6,7 @@ import { CabinClass } from '../flights/models/cabin-class.enum';
 import type { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import {
+  BOOKING_NOT_FOUND_MESSAGE,
   FlightBookingsService,
   fareTotalOf,
   infantFareOf,
@@ -320,5 +321,83 @@ describe('FlightBookingsService.hold copies the policy (PAY-02)', () => {
       CabinClass.Economy,
       3,
     );
+  });
+});
+
+describe('FlightBookingsService owner lookup and policy acceptance (PAY-02)', () => {
+  const BOOKING_ID = '6740f1c2a4b5c6d7e8f90789';
+  const OWNER_ID = '6740f1c2a4b5c6d7e8f90123';
+  const AT = new Date('2026-11-19T10:02:00.000Z');
+
+  /** A fake model whose `findOne` and `findOneAndUpdate` resolve to `found`. */
+  const ownedSetup = (found: unknown) => {
+    const query = () => ({
+      lean: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue(found),
+    });
+    const bookings = {
+      findOne: jest.fn(query),
+      findOneAndUpdate: jest.fn(query),
+    };
+    const service = new FlightBookingsService(
+      bookings as never,
+      {} as FlightSeatHoldsService,
+      {} as AirlinesService,
+    );
+    return { service, bookings };
+  };
+
+  it("finds the user's own booking by id and owner", async () => {
+    const stored = { _id: BOOKING_ID, status: 'pending_payment' };
+    const { service, bookings } = ownedSetup(stored);
+
+    await expect(
+      service.findOwnedEntityOrThrow(BOOKING_ID, OWNER_ID),
+    ).resolves.toBe(stored);
+    expect(bookings.findOne).toHaveBeenCalledWith({
+      _id: BOOKING_ID,
+      userId: new Types.ObjectId(OWNER_ID),
+    });
+  });
+
+  it("answers 404 for a missing booking or another user's, with the same message", async () => {
+    const { service } = ownedSetup(null);
+
+    const error: unknown = await service
+      .findOwnedEntityOrThrow(BOOKING_ID, OWNER_ID)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect((error as Error).message).toBe('Booking not found');
+    expect(BOOKING_NOT_FOUND_MESSAGE).toBe('Booking not found');
+  });
+
+  it('accepts with one conditional update: owner, pending, live hold, not accepted before', async () => {
+    const accepted = { _id: BOOKING_ID, policyAcceptedAt: AT };
+    const { service, bookings } = ownedSetup(accepted);
+
+    await expect(
+      service.acceptPolicies(BOOKING_ID, OWNER_ID, AT),
+    ).resolves.toBe(accepted);
+    expect(bookings.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(bookings.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: BOOKING_ID,
+        userId: new Types.ObjectId(OWNER_ID),
+        status: 'pending_payment',
+        holdExpiresAt: { $gt: AT },
+        policyAcceptedAt: { $exists: false },
+      },
+      { $set: { policyAcceptedAt: AT } },
+      { returnDocument: 'after' },
+    );
+  });
+
+  it('returns null when nothing matched', async () => {
+    const { service } = ownedSetup(null);
+
+    await expect(
+      service.acceptPolicies(BOOKING_ID, OWNER_ID, AT),
+    ).resolves.toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { PLATFORM_CURRENCY } from '../common/constants/currency';
@@ -11,7 +11,10 @@ import {
   FLIGHT_BOOKING_HOLD_MINUTES,
   INFANT_FARE_PERCENT,
 } from './flight-bookings.constants';
-import { toFlightBookingResponse } from './mappers/flight-booking.mapper';
+import {
+  type FlightBookingSource,
+  toFlightBookingResponse,
+} from './mappers/flight-booking.mapper';
 import { FlightBooking } from './models/flight-booking.schema';
 
 /** FLT-12: an infant pays 10% of the fare, rounded to a whole minor unit. */
@@ -24,6 +27,9 @@ export const fareTotalOf = (
   seats: number,
   infants: number,
 ): number => fare * seats + infants * infantFareOf(fare);
+
+/** PAY-02: a booking that does not exist or is not the caller's (ACC-11). */
+export const BOOKING_NOT_FOUND_MESSAGE = 'Booking not found';
 
 /** FLT-22: flight bookings. */
 @Injectable()
@@ -132,5 +138,54 @@ export class FlightBookingsService {
       throw error;
     }
     return toFlightBookingResponse(booking.toObject());
+  }
+
+  /**
+   * PAY-02: the user's own booking as stored, for the payments module (never
+   * through a controller). 404 "Booking not found" when it does not exist or
+   * belongs to another user, so a user never learns that someone else's
+   * booking exists (ACC-11).
+   */
+  async findOwnedEntityOrThrow(
+    id: string,
+    userId: string,
+  ): Promise<FlightBookingSource> {
+    const booking = await this.bookings
+      .findOne({ _id: id, userId: new Types.ObjectId(userId) })
+      .lean()
+      .exec();
+    if (!booking) {
+      throw new NotFoundException(BOOKING_NOT_FOUND_MESSAGE);
+    }
+    return booking;
+  }
+
+  /**
+   * PAY-02: records that the user accepted the policies, with one
+   * conditional update: only the user's own booking, still waiting for
+   * payment, whose hold has not ended at `now` and that was not accepted
+   * before, so the first timestamp is never moved. Returns the booking
+   * after the change, or `null` when nothing matched (the caller reads it
+   * to say why).
+   */
+  acceptPolicies(
+    id: string,
+    userId: string,
+    now: Date,
+  ): Promise<FlightBookingSource | null> {
+    return this.bookings
+      .findOneAndUpdate(
+        {
+          _id: id,
+          userId: new Types.ObjectId(userId),
+          status: FlightBookingStatus.PendingPayment,
+          holdExpiresAt: { $gt: now },
+          policyAcceptedAt: { $exists: false },
+        },
+        { $set: { policyAcceptedAt: now } },
+        { returnDocument: 'after' },
+      )
+      .lean()
+      .exec();
   }
 }

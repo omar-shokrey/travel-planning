@@ -20,5 +20,9 @@ import {
   controllers: [FlightBookingsController],
   // FlightBookingExpiryService: the hold-expiry job (FLT-22).
   providers: [FlightBookingsService, FlightBookingExpiryService],
+  // FlightBookingsService: the owner lookup and the policy acceptance for the
+  // payments module (PAY-02). The payments module imports this one, never the
+  // other way round.
+  exports: [FlightBookingsService],
 })
 export class FlightBookingsModule {}

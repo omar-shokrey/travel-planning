@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { PLATFORM_CURRENCY } from '../common/constants/currency';
@@ -8,8 +8,14 @@ import type { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import type { HotelBookingResponseDto } from './dto/hotel-booking-response.dto';
 import { HotelBookingStatus } from './enums/hotel-booking-status.enum';
 import { HOTEL_BOOKING_HOLD_MINUTES } from './hotel-bookings.constants';
-import { toHotelBookingResponse } from './mappers/hotel-booking.mapper';
+import {
+  type HotelBookingSource,
+  toHotelBookingResponse,
+} from './mappers/hotel-booking.mapper';
 import { HotelBooking } from './models/hotel-booking.schema';
+
+/** PAY-02: a booking that does not exist or is not the caller's (ACC-11). */
+export const BOOKING_NOT_FOUND_MESSAGE = 'Booking not found';
 
 /** HTL-16 and HTL-18: hotel reservations. */
 @Injectable()
@@ -101,5 +107,54 @@ export class HotelBookingsService {
       throw error;
     }
     return toHotelBookingResponse(booking.toObject());
+  }
+
+  /**
+   * PAY-02: the user's own reservation as stored, for the payments module (never
+   * through a controller). 404 "Booking not found" when it does not exist or
+   * belongs to another user, so a user never learns that someone else's
+   * booking exists (ACC-11).
+   */
+  async findOwnedEntityOrThrow(
+    id: string,
+    userId: string,
+  ): Promise<HotelBookingSource> {
+    const booking = await this.bookings
+      .findOne({ _id: id, userId: new Types.ObjectId(userId) })
+      .lean()
+      .exec();
+    if (!booking) {
+      throw new NotFoundException(BOOKING_NOT_FOUND_MESSAGE);
+    }
+    return booking;
+  }
+
+  /**
+   * PAY-02: records that the user accepted the policies, with one
+   * conditional update: only the user's own reservation, still waiting for
+   * payment, whose hold has not ended at `now` and that was not accepted
+   * before, so the first timestamp is never moved. Returns the reservation
+   * after the change, or `null` when nothing matched (the caller reads it
+   * to say why).
+   */
+  acceptPolicies(
+    id: string,
+    userId: string,
+    now: Date,
+  ): Promise<HotelBookingSource | null> {
+    return this.bookings
+      .findOneAndUpdate(
+        {
+          _id: id,
+          userId: new Types.ObjectId(userId),
+          status: HotelBookingStatus.PendingPayment,
+          holdExpiresAt: { $gt: now },
+          policyAcceptedAt: { $exists: false },
+        },
+        { $set: { policyAcceptedAt: now } },
+        { returnDocument: 'after' },
+      )
+      .lean()
+      .exec();
   }
 }
