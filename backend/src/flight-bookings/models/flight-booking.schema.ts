@@ -86,9 +86,10 @@ export const PassengerCountsSchema =
 /**
  * A flight booking, as in `FLIGHT_BOOKING` of the data model in
  * `specs/travel-platform.md`, with what FLT-22 needs: the seats are held for
- * 10 minutes while the payment is pending. The fields of later issues
- * (passengers and baggage FLT-19, `baggageTotal`, `policyAcceptedAt` PAY-02,
- * `cancelledAt`, `cancelledBy`, `refundPercent` FLT-26) are added by them.
+ * 10 minutes while the payment is pending. `policyAcceptedAt` is set by
+ * PAY-02. The fields of later issues (passengers and baggage FLT-19,
+ * `baggageTotal`, `cancelledAt`, `cancelledBy`, `refundPercent` FLT-26) are
+ * added by them.
  */
 @Schema({ collection: 'flight_bookings', timestamps: true })
 export class FlightBooking {
@@ -114,6 +115,13 @@ export class FlightBooking {
     },
   })
   holdExpiresAt?: Date;
+
+  /**
+   * PAY-02: when the user accepted the airline's policies, before payment.
+   * Not set until then; set once and never moved.
+   */
+  @Prop({ type: Date })
+  policyAcceptedAt?: Date;
 
   /** The platform currency (PAY-04). */
   @Prop({ type: String, required: true })

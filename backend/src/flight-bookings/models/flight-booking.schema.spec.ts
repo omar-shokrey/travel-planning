@@ -56,6 +56,24 @@ describe('FlightBooking schema (FLT-22)', () => {
     expect(doc.toObject()).not.toHaveProperty('reference');
   });
 
+  it('has no policyAcceptedAt until the policies are accepted (PAY-02)', async () => {
+    const pending = new FlightBookingModel(valid());
+
+    expect(pending.policyAcceptedAt).toBeUndefined();
+    expect(pending.toObject()).not.toHaveProperty('policyAcceptedAt');
+    expect(FlightBookingSchema.path('policyAcceptedAt').options).toMatchObject({
+      type: Date,
+    });
+    expect(FlightBookingSchema.path('policyAcceptedAt').isRequired).toBeFalsy();
+
+    const acceptedAt = new Date('2026-11-19T10:02:00.000Z');
+    const accepted = new FlightBookingModel(
+      valid({ policyAcceptedAt: acceptedAt }),
+    );
+    await expect(accepted.validate()).resolves.toBeUndefined();
+    expect(accepted.policyAcceptedAt).toEqual(acceptedAt);
+  });
+
   it('requires every field except the reference', async () => {
     expect(await invalidPaths({})).toEqual([
       'currency',

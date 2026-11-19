@@ -65,8 +65,8 @@ export const BookedRoomSchema = SchemaFactory.createForClass(BookedRoom);
  * (HTL-16). It follows the `HOTEL_BOOKING` entity of the data model in
  * `specs/travel-platform.md`. The price, the times and the cancellation tiers
  * are copies, so a later change by the hotel does not change the reservation.
- * The fields of later issues (`policyAcceptedAt`, `cancelledAt`,
- * `cancelledBy`, `refundPercent`) are added by them.
+ * `policyAcceptedAt` is set by PAY-02. The fields of later issues
+ * (`cancelledAt`, `cancelledBy`, `refundPercent`) are added by them.
  */
 @Schema({ collection: 'hotel_bookings', timestamps: true })
 export class HotelBooking {
@@ -101,6 +101,13 @@ export class HotelBooking {
   /** HTL-18: until when the rooms are held while the payment is pending. */
   @Prop({ type: Date })
   holdExpiresAt?: Date;
+
+  /**
+   * PAY-02: when the user accepted the hotel's policies, before payment.
+   * Not set until then; set once and never moved.
+   */
+  @Prop({ type: Date })
+  policyAcceptedAt?: Date;
 
   /** The platform currency (PAY-04). */
   @Prop({ type: String, required: true })

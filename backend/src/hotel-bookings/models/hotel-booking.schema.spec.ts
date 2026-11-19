@@ -45,6 +45,22 @@ describe('HotelBooking schema', () => {
     expect(doc.reference).toBeUndefined();
   });
 
+  it('has no policyAcceptedAt until the policies are accepted (PAY-02)', () => {
+    const pending = booking();
+
+    expect(pending.policyAcceptedAt).toBeUndefined();
+    expect(pending.toObject()).not.toHaveProperty('policyAcceptedAt');
+    expect(HotelBookingSchema.path('policyAcceptedAt').options).toMatchObject({
+      type: Date,
+    });
+    expect(HotelBookingSchema.path('policyAcceptedAt').isRequired).toBeFalsy();
+
+    const acceptedAt = new Date('2026-11-17T18:02:00.000Z');
+    const accepted = booking({ policyAcceptedAt: acceptedAt });
+    expect(accepted.validateSync()).toBeUndefined();
+    expect(accepted.policyAcceptedAt).toEqual(acceptedAt);
+  });
+
   it('accepts every status of GEN-11', () => {
     for (const status of Object.values(HotelBookingStatus)) {
       expect(booking({ status }).validateSync()).toBeUndefined();
