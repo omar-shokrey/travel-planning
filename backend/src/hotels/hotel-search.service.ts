@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import {
@@ -13,23 +13,15 @@ import {
   type SearchNight,
   type SearchRoom,
 } from './hotel-search';
-import { ROOM_QUERY_MAX_NIGHTS } from './hotels.constants';
 import { toHotelSearchResult } from './mappers/hotel-search-result.mapper';
 import { Hotel } from './models/hotel.schema';
 import { RoomNight } from './models/room-night.schema';
 import { Room } from './models/room.schema';
-import { nightCount, todayUtc } from './room-dates';
+import { assertStay, invalid } from './stay-rules';
 
 /** The hotel fields a search result shows (HTL-11). */
 const HOTEL_FIELDS =
   'name addressLine cityId countryCode description photos starClass amenities active ratingCount averageRating createdAt updatedAt';
-
-/** A 400 in the shape of a validation error, naming the field. */
-const invalid = (field: string, message: string) =>
-  new BadRequestException({
-    message: 'Validation failed',
-    errors: [{ field, messages: [message] }],
-  });
 
 /**
  * HTL-11: hotel search for guests and users. It reads only; booking (HTL-16)
@@ -56,15 +48,7 @@ export class HotelSearchService {
   ): Promise<PaginatedResponse<HotelSearchResultResponseDto>> {
     const place = this.placeFilter(query);
     const stay = { from: query.checkIn, to: query.checkOut };
-    if (stay.from < todayUtc()) {
-      throw invalid('checkIn', 'checkIn cannot be in the past');
-    }
-    if (nightCount(stay) > ROOM_QUERY_MAX_NIGHTS) {
-      throw invalid(
-        'checkOut',
-        `A stay can have at most ${ROOM_QUERY_MAX_NIGHTS} nights`,
-      );
-    }
+    assertStay(stay);
 
     const hotels = await this.hotels
       .find({ ...place, active: true })
