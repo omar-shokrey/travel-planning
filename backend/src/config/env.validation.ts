@@ -74,6 +74,21 @@ export class EnvironmentVariables {
 
   @IsIn(['lax', 'strict', 'none'])
   COOKIE_SAME_SITE: 'lax' | 'strict' | 'none' = 'lax';
+
+  /**
+   * FXRatesAPI key for the daily exchange rates (ITN-18). It may stay empty:
+   * the app then starts and uses the rates already cached in the database.
+   */
+  @IsString()
+  FXRATES_API_KEY: string = '';
+
+  /** FXRatesAPI address. Tests point it at a local fake server. */
+  @IsUrl({
+    require_tld: false,
+    require_protocol: true,
+    protocols: ['http', 'https'],
+  })
+  FXRATES_API_URL: string = 'https://api.fxratesapi.com';
 }
 
 /** Passed to ConfigModule as `validate`. Returns the checked values or throws. */

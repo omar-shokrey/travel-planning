@@ -22,6 +22,9 @@ const invalidCases: [Record<string, string>, RegExp][] = [
   [{ MONGODB_URI: 'localhost:27017' }, /MONGODB_URI/],
   [{ MONGODB_URI: 'http://cluster.example.com' }, /MONGODB_URI/],
   [{ MONGODB_URI: 'mongodb+srv://user:pass@host with space' }, /MONGODB_URI/],
+  [{ FXRATES_API_URL: 'not a url' }, /FXRATES_API_URL/],
+  [{ FXRATES_API_URL: 'api.fxratesapi.com' }, /FXRATES_API_URL/],
+  [{ FXRATES_API_URL: '' }, /FXRATES_API_URL/],
 ];
 
 const errorMessage = (env: Record<string, unknown>): string => {
@@ -45,6 +48,21 @@ describe('validateEnv', () => {
     expect(env.SESSION_INACTIVITY_MINUTES).toBe(30);
     expect(env.COOKIE_SECURE).toBe(true);
     expect(env.COOKIE_SAME_SITE).toBe('lax');
+    expect(env.FXRATES_API_KEY).toBe('');
+    expect(env.FXRATES_API_URL).toBe('https://api.fxratesapi.com');
+  });
+
+  it('reads the exchange-rate settings (ITN-18), and an empty key is allowed', () => {
+    const env = validateEnv({
+      ...base,
+      FXRATES_API_KEY: 'test-key',
+      FXRATES_API_URL: 'http://127.0.0.1:4010',
+    });
+    expect(env.FXRATES_API_KEY).toBe('test-key');
+    expect(env.FXRATES_API_URL).toBe('http://127.0.0.1:4010');
+    expect(validateEnv({ ...base, FXRATES_API_KEY: '' }).FXRATES_API_KEY).toBe(
+      '',
+    );
   });
 
   it('turns the PORT string into a number', () => {
