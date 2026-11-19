@@ -33,10 +33,13 @@ import { Role } from '../common/enums/role.enum';
 import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 
+import { PLATFORM_CURRENCY } from '../common/constants/currency';
 import { AirlinesService } from './airlines.service';
+import { EXTRA_BAG_PRICE_MAX, MAX_EXTRA_BAGS_MAX } from './flights.constants';
 import { AirlineResponseDto } from './dto/airline-response.dto';
 import { CreateAirlineDto } from './dto/create-airline.dto';
 import { UpdateAirlineDto } from './dto/update-airline.dto';
+import { UpdateBaggagePolicyDto } from './dto/update-baggage-policy.dto';
 import { UpdateCancellationPolicyDto } from './dto/update-cancellation-policy.dto';
 
 @ApiTags('Airlines')
@@ -144,6 +147,34 @@ export class AirlinesController {
     @CurrentUser('id') userId: string,
   ): Promise<AirlineResponseDto> {
     return this.airlinesService.setCancellationPolicy(id, userId, dto);
+  }
+
+  @Put(':id/baggage-policy')
+  @Roles(Role.AirlineModerator)
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Set the extra baggage rule of an assigned airline',
+    description: `FLT-08 (route listed under FLT-04 and FLT-08). The airline moderator assigned to this airline sets the price of one extra bag (\`extraBagPrice\`, a whole number of minor units of ${PLATFORM_CURRENCY} from 1 to ${EXTRA_BAG_PRICE_MAX}) and the most extra bags one passenger may buy (\`maxExtraBags\`, 0 to ${MAX_EXTRA_BAGS_MAX}; 0 means no extra bag is sold). Both fields are required: the rule sent replaces the previous one. Each extra bag has the same maximum weight as the free bags of the passenger's cabin, the cabin's \`maxBagKg\` (FLT-04), so no weight is set here. The free baggage allowance (\`freeBags\`, \`maxBagKg\`) stays on each cabin, and the cancellation tiers have their own route (FLT-09); this route changes neither. Existing bookings keep the extra bag price they were made under.`,
+  })
+  @ApiOkResponse({
+    type: AirlineResponseDto,
+    description: 'The rule was saved. The airline is returned with it.',
+  })
+  @ApiBadRequestResponse({
+    description: `The airline ID is invalid, \`extraBagPrice\` or \`maxExtraBags\` is missing, null, not a whole number or out of range (price 1 to ${EXTRA_BAG_PRICE_MAX}, bags 0 to ${MAX_EXTRA_BAGS_MAX}), or the body has a field that is not allowed (for example \`currency\`, \`maxBagKg\` or \`cancellationTiers\`)`,
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication is required' })
+  @ApiForbiddenResponse({
+    description:
+      'Only the airline moderator assigned to this airline can set its baggage rule',
+  })
+  @ApiNotFoundResponse({ description: 'Airline not found' })
+  setBaggagePolicy(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: UpdateBaggagePolicyDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<AirlineResponseDto> {
+    return this.airlinesService.setBaggagePolicy(id, userId, dto);
   }
 
   @Patch(':id')

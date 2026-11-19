@@ -281,6 +281,140 @@ describe('AirlinesService', () => {
     });
   });
 
+  describe('setBaggagePolicy (FLT-08)', () => {
+    const rule = { extraBagPrice: 5000, maxExtraBags: 2 };
+
+    it('sets only the two extra-bag fields of the policy, in one update, and returns the airline with them', async () => {
+      const { model, service, updateExec, usersService } = setup({
+        updatedAirline: airlineDocument({
+          policy: { cancellationTiers: [], ...rule },
+        }),
+      });
+
+      const response = await service.setBaggagePolicy(
+        AIRLINE_ID,
+        MODERATOR_ID,
+        rule,
+      );
+
+      expect(usersService.findEntityById).toHaveBeenCalledWith(MODERATOR_ID);
+      expect(model.findByIdAndUpdate).toHaveBeenCalledTimes(1);
+      // Two dotted paths, never the whole `policy`: the cancellation tiers
+      // (FLT-09) are not part of the update, so the two routes never
+      // overwrite each other.
+      expect(model.findByIdAndUpdate).toHaveBeenCalledWith(
+        AIRLINE_ID,
+        {
+          $set: {
+            'policy.extraBagPrice': 5000,
+            'policy.maxExtraBags': 2,
+          },
+        },
+        { returnDocument: 'after', runValidators: true },
+      );
+      expect(updateExec).toHaveBeenCalled();
+      expect(response.extraBagPrice).toBe(5000);
+      expect(response.maxExtraBags).toBe(2);
+    });
+
+    it('stores 0 extra bags with the price', async () => {
+      const { model, service } = setup({
+        updatedAirline: airlineDocument({
+          policy: {
+            cancellationTiers: [],
+            extraBagPrice: 2500,
+            maxExtraBags: 0,
+          },
+        }),
+      });
+
+      const response = await service.setBaggagePolicy(
+        AIRLINE_ID,
+        MODERATOR_ID,
+        {
+          extraBagPrice: 2500,
+          maxExtraBags: 0,
+        },
+      );
+
+      expect(model.findByIdAndUpdate).toHaveBeenCalledWith(
+        AIRLINE_ID,
+        { $set: { 'policy.extraBagPrice': 2500, 'policy.maxExtraBags': 0 } },
+        expect.any(Object),
+      );
+      expect(response.maxExtraBags).toBe(0);
+    });
+
+    it('returns the cancellation tiers unchanged next to the rule', async () => {
+      const tiers = [{ daysBefore: 7, refundPercent: 50 }];
+      const { service } = setup({
+        updatedAirline: airlineDocument({
+          policy: { cancellationTiers: tiers, ...rule },
+        }),
+      });
+
+      const response = await service.setBaggagePolicy(
+        AIRLINE_ID,
+        MODERATOR_ID,
+        rule,
+      );
+
+      expect(response.cancellationTiers).toEqual(tiers);
+    });
+
+    it('refuses the moderator of another airline with 403 and writes nothing', async () => {
+      const { model, service } = setup({ assignedAirlineId: OTHER_AIRLINE_ID });
+
+      await expect(
+        service.setBaggagePolicy(AIRLINE_ID, MODERATOR_ID, rule),
+      ).rejects.toThrow(
+        new ForbiddenException(
+          'You can only change the policy of your assigned airline',
+        ),
+      );
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('refuses an account with no airline assignment, or one that no longer exists, with 403', async () => {
+      const { model, service, usersService } = setup();
+      usersService.findEntityById.mockResolvedValue({
+        assignment: {
+          providerType: ProviderType.Hotel,
+          providerId: new Types.ObjectId(AIRLINE_ID),
+        },
+      });
+
+      await expect(
+        service.setBaggagePolicy(AIRLINE_ID, MODERATOR_ID, rule),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      usersService.findEntityById.mockResolvedValue(null);
+      await expect(
+        service.setBaggagePolicy(AIRLINE_ID, MODERATOR_ID, rule),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for an airline that does not exist, before checking the moderator', async () => {
+      const { findByIdExec, model, service, usersService } = setup();
+      findByIdExec.mockResolvedValue(null);
+
+      await expect(
+        service.setBaggagePolicy(AIRLINE_ID, MODERATOR_ID, rule),
+      ).rejects.toThrow(new NotFoundException('Airline not found'));
+      expect(usersService.findEntityById).not.toHaveBeenCalled();
+      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the airline is deleted before the update', async () => {
+      const { service, updateExec } = setup();
+      updateExec.mockResolvedValue(null);
+
+      await expect(
+        service.setBaggagePolicy(AIRLINE_ID, MODERATOR_ID, rule),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
   describe('create (FLT-01)', () => {
     it('saves the logo filename and returns the mapped profile', async () => {
       const { model, service, uploadsService } = setup();
@@ -304,6 +438,9 @@ describe('AirlinesService', () => {
         logoUrl: `/api/uploads/${LOGO_FILENAME}`,
         active: true,
         cancellationTiers: [],
+        extraBagPrice: null,
+        extraBagCurrency: 'USD',
+        maxExtraBags: 0,
         createdAt: '2026-11-05T11:00:00.000Z',
         updatedAt: '2026-11-06T12:00:00.000Z',
       });

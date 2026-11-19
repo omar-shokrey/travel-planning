@@ -77,6 +77,14 @@ export type StoredCabin = Partial<Omit<FlightCabin, '_id'>> & {
 export interface InsertFlightOptions {
   /** Default: 30 days from now. */
   departureAt?: Date;
+  /** Default: 12 hours after the departure. */
+  arrivalAt?: Date;
+  /** Default: `airlineId`. Must be one of the fixture's two airlines, so cleanup deletes the flight. */
+  airlineId?: string;
+  /** Default: the fixture's departure airport. Must be an airport the fixture made. */
+  departureAirport?: string;
+  /** Default: the fixture's arrival airport. Must be an airport the fixture made. */
+  arrivalAirport?: string;
   /** Default: scheduled. */
   status?: FlightStatus;
   /** Default: no cabin. Missing cabin fields get the fixture's values. */
@@ -106,6 +114,11 @@ export interface FlightFixture {
   user: Actor;
   /** Inserts a flight straight in the database and returns its id. */
   insertFlight: (options?: InsertFlightOptions) => Promise<string>;
+  /**
+   * Adds one more airport with a random free code in this IANA time zone,
+   * deleted by cleanup, and returns its code.
+   */
+  createAirport: (timeZone: string, countryCode: string) => Promise<string>;
   /** A complete cabin as stored, with a new id and no seat booked or held. */
   storedCabin: (fields?: StoredCabin) => Required<StoredCabin>;
   /** Deletes every record the fixture and its tests made, one by one by id. */
@@ -143,6 +156,8 @@ export async function createFlightFixture(
   const userIds: string[] = [];
   const airlineIds: string[] = [];
   const airportCodes: string[] = [];
+  /** The time zone of each airport the fixture made. */
+  const zoneOf = new Map<string, string>();
   const http = () => request(app.getHttpServer());
 
   /**
@@ -206,6 +221,7 @@ export async function createFlightFixture(
           timeZone,
         });
         airportCodes.push(code);
+        zoneOf.set(code, timeZone);
         return code;
       } catch (error) {
         if ((error as { code?: number }).code !== DUPLICATE_KEY) throw error;
@@ -278,15 +294,29 @@ export async function createFlightFixture(
     ): Promise<string> => {
       const departureAt =
         options.departureAt ?? new Date(Date.now() + 30 * DAY_MS);
+      const owner = options.airlineId ?? airlineId;
+      const from = options.departureAirport ?? departure;
+      const to = options.arrivalAirport ?? arrival;
+      const zone = zoneOf.get(from);
+      if (
+        ![airlineId, otherAirlineId].includes(owner) ||
+        !zone ||
+        !zoneOf.has(to)
+      ) {
+        throw new Error(
+          'insertFlight only uses the fixture airlines and airports',
+        );
+      }
       const flight = await flights.create({
-        airlineId: new Types.ObjectId(airlineId),
+        airlineId: new Types.ObjectId(owner),
         flightNumber: newFlightNumber(),
-        departureAirport: departure,
-        arrivalAirport: arrival,
+        departureAirport: from,
+        arrivalAirport: to,
         departureAt,
-        arrivalAt: new Date(departureAt.getTime() + 12 * HOUR_MS),
+        arrivalAt:
+          options.arrivalAt ?? new Date(departureAt.getTime() + 12 * HOUR_MS),
         departureDateLocal: DateTime.fromJSDate(departureAt, {
-          zone: FIXTURE_ZONES.departure,
+          zone,
         }).toFormat('yyyy-MM-dd'),
         status: options.status ?? FlightStatus.Scheduled,
         cabins: (options.cabins ?? []).map(storedCabin),
@@ -314,6 +344,7 @@ export async function createFlightFixture(
       admin: await createActor(Role.Admin),
       user: await createActor(Role.User),
       insertFlight,
+      createAirport,
       storedCabin,
       cleanup,
     };

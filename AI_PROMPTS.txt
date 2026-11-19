@@ -1999,3 +1999,31 @@ Accepted, changed, or rejected:
 Accepted: the route and its design, and exporting HotelSearchService from the hotels module so that
 the hotels of a group follow the same rule as hotel search. Changed: nothing.
 ================================================
+
+================================================
+Date: 2026-11-19
+Student: Omar Hossam
+Tool: Claude (Claude app, with access to the repository, GitHub and my laptop's folders)
+Branch / Issue: feature/HTL-16-book-rooms-and-hold / #55 (also the hold of #57)
+Related Requirement: HTL-16 (depends on HTL-11, HTL-03 and HTL-15); the 10-minute hold of HTL-18
+Prompt:
+After I merged the ITN-25 pull request (#219), I asked Claude for a prompt for Ali Ahmed's AI to develop HTL-16. Then I asked Claude to develop HTL-16 itself, and said I would create the branch, test, commit and open the pull request.
+How the output was used:
+Claude read the HTL-16 and HTL-18 rows of the requirements workbook, section 8 of the project description, the data model in the specification, the hotels module (the free-room rule of hotel search, the available rooms, room blocks and edits) and Mado's closed pull request #190, which it used as a reference only (not merged or cherry-picked). It added POST /api/hotel-bookings for registered users: one or more rooms of one hotel for the same dates, with the adults and the children's ages of each room, at least one adult per reservation, no room above its maximum occupancy, and a total of nights x each room's price at that moment. The reservation is saved as pending_payment and all its rooms are held for 10 minutes, all or nothing, through the unique (roomId, date) index of room_nights. The hold lives in a new HotelRoomHoldsService in the hotels module, which reuses the one free-room rule, and checks the hotel and the rooms again after the nights are written. Not included, on purpose: the job that expires unpaid reservations (needs ScheduleModule, shared with flight seat holds), the confirmation after payment (HTL-17) and the acceptance of the policies (PAY-02). It wrote the schema, DTOs, mapper, service and controller in the hotel-bookings module, unit tests for each, an end-to-end suite on the -test database (including five requests for one room at the same moment) and README sections for both modules. Claude could not install packages or run the tests in its own workspace, so it only checked the changed files with Prettier 3.8 (the repository locks 3.9) and read the types carefully; lint, typecheck, build and the unit and end-to-end tests are run on my laptop and by the CI of the pull request.
+Accepted, changed, or rejected:
+Accepted: the design (hold in the booking call, no transaction because CI has one MongoDB server, write first then verify) and the new export of HotelRoomHoldsService from the hotels module. Rejected from the reference: its expiry job, its acceptPolicies field and its dependence on the older HTL-15 and HTL-11 code. Changed: one line of the end-to-end test (the five-requests race) was rewritten after `npm run lint` reported a no-unsafe-optional-chaining warning. On my laptop, format, lint (0 warnings), typecheck, the 7 unit suites of the change (75 tests), the 25 end-to-end tests of the new file and the build all passed.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Omar Hossam
+Tool: Claude (Claude app, with access to the repository, GitHub and my laptop's folders)
+Branch / Issue: fix/GEN-05-pagination-skip-and-page-limit / no issue (GEN-05 is #94, already closed)
+Related Requirement: GEN-05 (pagination, page size 10)
+Prompt:
+While Claude reviewed Ali Ghayesh's pull request #221 (FLT-08, FLT-11), it found that his search worked around two faults of the shared pagination DTO. I asked Claude to fix them once in the shared layer instead of leaving them for every list route, in a pull request of their own.
+How the output was used:
+The two faults: a client that sends ?skip=5 made class-transformer assign to a getter-only property of the list DTO, which threw a TypeError (a 500 instead of a 400); and a page such as 1e20 gave MongoDB a $skip it refuses (also a 500). Claude added a setter for skip to PaginationQueryDto that keeps the sent value as an own field, so the global validation pipe answers 400 "property skip should not exist" like for any other unknown parameter, and a maximum for page (MAX_PAGE, 10,000) with the message "page is too large", the same words Ali Ghayesh's search already uses so his tests keep passing. It extended the unit spec of the DTO (also on a subclass, where the crash happened) and the pagination end-to-end spec, and changed one sentence of specs/travel-platform.md. No feature code was touched: the workaround in the flights search DTO stays harmless and can be removed later. Claude could not install packages or run the tests in its own workspace, so it only checked the changed files with Prettier 3.8 and read the types and the class-transformer behaviour carefully; lint, typecheck, build and the tests are run on my laptop and by CI.
+Accepted, changed, or rejected:
+Accepted: a setter on the shared DTO (the same mechanism that Ali Ghayesh's DTO proved on his laptop) and a page limit of 10,000. Rejected: fixing it inside each feature module, and a bigger change of every service that reads skip. Changed: nothing. On my laptop the whole unit suite (181 suites, 2478 tests), the 22 pagination end-to-end tests and the build all passed.
+================================================

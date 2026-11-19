@@ -56,7 +56,7 @@ Swagger UI is served at `/api/docs`. Log in with `POST /api/auth/login` in Swagg
 ### Response conventions
 
 - A successful response is the resource itself, with no wrapper object.
-- Lists are paginated with `?page=1&limit=10` (GEN-05): page size 10 by default, at most 50. A list response is `{ "items": [...], "meta": { "page", "limit", "total", "totalPages" } }`, and an empty result is `"items": []` (GEN-04).
+- Lists are paginated with `?page=1&limit=10` (GEN-05): page size 10 by default, at most 50, and `page` at most 10,000 (a page after the last is an empty page). `skip` is computed by the server: a client that sends it, or any other parameter a list does not have, gets a 400. A list response is `{ "items": [...], "meta": { "page", "limit", "total", "totalPages" } }`, and an empty result is `"items": []` (GEN-04).
 - Every error has the same body: `{ "statusCode", "error", "message", "errors"?, "path", "timestamp" }`. `errors` appears only when validation fails (400) and lists `{ "field", "messages" }` for each invalid field (GEN-02), for example:
 
 ```json

@@ -7,8 +7,10 @@ policies (HTL-09, HTL-10), hotel search (HTL-11) and the free rooms of a hotel
 for the searched dates (HTL-15). `HotelsService` creates profiles and lets a
 moderator update only the hotel in their user assignment. It reads cities from
 `ReferenceModule` and copies each city's country code into the hotel, so
-callers cannot choose a mismatched country. Reservations (HTL-16 to HTL-22) are
-not built yet.
+callers cannot choose a mismatched country. Reservations belong to the
+hotel-bookings module; `HotelRoomHoldsService` here finds and holds their rooms
+(HTL-16, HTL-18). The rest of the reservations (HTL-17 to HTL-22) are not built
+yet.
 
 ## Routes
 
@@ -58,7 +60,7 @@ the order and which route answers each GET path.
 ## Deactivated hotels (ACC-15)
 
 - An admin deactivates or reactivates a hotel through `PATCH /api/admin/providers/hotel/:id/deactivate` and `/reactivate`. `HotelsService.setActive(id, active)` writes the flag for the admin module, with one conditional update. No hotels route exposes it.
-- **Every feature that shows or books hotels must respect `active`:** hotel search (HTL-11) leaves out hotels with `active: false` (the `(cityId, active)` index is there for it), and the hotel page (HTL-02) and the free rooms of a hotel (HTL-15) answer 404 for them. Hotel booking (HTL-16) must refuse them; it does not exist yet, so this is the rule for whoever builds it. Confirmed bookings of a deactivated hotel stay valid.
+- **Every feature that shows or books hotels must respect `active`:** hotel search (HTL-11) leaves out hotels with `active: false` (the `(cityId, active)` index is there for it), and the hotel page (HTL-02) and the free rooms of a hotel (HTL-15) answer 404 for them. Hotel booking (HTL-16) refuses them with 404 (`HotelRoomHoldsService`, and again after the nights are held). Confirmed bookings of a deactivated hotel stay valid.
 
 ## Hotel details (HTL-02)
 
@@ -135,8 +137,8 @@ the order and which route answers each GET path.
 - The new price has the same cap as in HTL-03: at most `ROOM_PRICE_MAX` (1,000,000,000 minor units), or the request answers 400. The workbook gives no limit; it is an engineering limit so that a reservation total stays exact: `ROOM_PRICE_MAX` x 366 nights x 1000 rooms = 3.66e14, below `Number.MAX_SAFE_INTEGER` (about 9.007e15).
 - The availability route takes the complete new list of ranges and replaces the old one. The HTL-04 route only adds a range; HTL-05 asks to edit availability, which also means shortening or removing ranges, and one list is the simplest way to do all three. Overlapping ranges answer 400; ranges that only touch are allowed, as in HTL-04. At most 100 ranges (`ROOM_AVAILABILITY_RANGES_MAX_COUNT`), a limit I chose because the workbook gives none.
 - "Availability cannot be removed for dates with confirmed reservations": before saving, the service reads the room's nights in `room_nights` that are `booked`, or `held` with a hold that has not expired, and answers 409 if one of them would fall outside the new ranges. A held night counts too, because its reservation may still be paid and confirmed. A `blocked` night does not count: it is the moderator's own block (HTL-06).
-- `room_nights` is the collection of the data model in the spec. I added its schema (`RoomNight`, with the unique (`roomId`, `date`) index) because HTL-05 needs to read it. Blocking (HTL-06) writes `blocked` nights to it; the holds and reservations of HTL-16 and HTL-18 will write `held` and `booked` ones. Until they exist no night is reserved, so the 409 can only be reached by the end-to-end test, which creates nights itself.
-- The check and the save are two steps. A reservation made between them could end up outside the availability; the hold of HTL-18 must therefore check the availability again when it inserts its nights.
+- `room_nights` is the collection of the data model in the spec. I added its schema (`RoomNight`, with the unique (`roomId`, `date`) index) because HTL-05 needs to read it. Blocking (HTL-06) writes `blocked` nights to it; the holds of HTL-16 and HTL-18 write `held` ones and the confirmation (HTL-17) will write `booked` ones.
+- The check and the save are two steps. A reservation made between them could end up outside the availability; the hold (HTL-16, HTL-18) therefore reads the availability again after it inserts its nights.
 
 ## Blocking dates, deactivating and deleting a room (HTL-06)
 
@@ -145,9 +147,9 @@ the order and which route answers each GET path.
 - Blocking a night that a reservation has booked or holds answers 409 before anything is written. A hold whose time has passed no longer counts and is removed before the night is blocked, as the spec says for every new hold.
 - The response of both room routes is `ManagedRoomResponseDto`: the HTL-03 room plus `blocked`, the blocked nights joined into date ranges. `RoomResponseDto` and its mapper are unchanged.
 - One request can block at most 366 nights (`ROOM_BLOCK_MAX_NIGHTS`), one document per night. The workbook gives no limit.
-- Deactivating and reactivating use `PATCH /api/hotels/:id/rooms/:roomId/deactivate` and `/reactivate`. The endpoint table has no route for them; the names follow the provider routes of ACC-15. A room with a reserved night from today (UTC) on cannot be deactivated; past stays do not count. A deactivated room keeps its blocks and availability. Hotel search (HTL-11) and the available rooms (HTL-15) leave out rooms whose `active` is false, and the reservation (HTL-16) must too.
-- `DELETE /api/hotels/:id/rooms/:roomId` deletes a room only if no `room_nights` document with a reservation (`bookingId`) was ever stored for it, and removes its blocks with it. When the reservations of HTL-16 exist, the check should also look at `hotel_bookings`, because an expired hold may have been cleaned up.
-- The checks and the writes of deactivation and deletion are separate steps. A hold inserted between them could end up on a deactivated or deleted room; the hold of HTL-18 must therefore check that the room still exists and is active.
+- Deactivating and reactivating use `PATCH /api/hotels/:id/rooms/:roomId/deactivate` and `/reactivate`. The endpoint table has no route for them; the names follow the provider routes of ACC-15. A room with a reserved night from today (UTC) on cannot be deactivated; past stays do not count. A deactivated room keeps its blocks and availability. Hotel search (HTL-11) and the available rooms (HTL-15) leave out rooms whose `active` is false, and the reservation (HTL-16) does too.
+- `DELETE /api/hotels/:id/rooms/:roomId` deletes a room only if no `room_nights` document with a reservation (`bookingId`) was ever stored for it, and removes its blocks with it. The reservations of HTL-16 now exist, so the check should also look at `hotel_bookings`, because an expired hold may have been cleaned up. It does not yet: HTL-16 did not change room deletion, and the follow-up belongs to the issue that cleans up expired holds (HTL-18).
+- The checks and the writes of deactivation and deletion are separate steps. A hold inserted between them could end up on a deactivated or deleted room; the hold (HTL-16, HTL-18) therefore checks again, after it inserts its nights, that the hotel and every room are still active.
 
 ## Room status for a date range (HTL-08)
 
@@ -183,3 +185,11 @@ the order and which route answers each GET path.
 - **Order and pages.** By room number, with the digits compared as numbers (2 before 10, as in HTL-08), then id; 10 per page (GEN-05). Whether a room is free depends on two collections, so the free rooms of the hotel are found first and paged in memory; one hotel has few rooms.
 - **The hotel page (HTL-02).** HTL-02 shows "the available rooms when dates are provided". `GET /api/hotels/:id` takes the same `checkIn` and `checkOut` as optional parameters (`HotelDetailsQueryDto`): with both it adds `availableRooms`, the full list without pages, from the same `listAvailable` method as the route, so the two cannot disagree; without dates it is `null`; with only one date it answers 400. The page applies the same `assertStay` before it reads the hotel.
 - **Read only.** The route writes nothing and locks nothing. A listed room can be taken before the user books it, so the hold of HTL-18 must take the nights through the unique (`roomId`, `date`) index of `room_nights` and not trust this list.
+
+## Holding rooms for a reservation (HTL-16, HTL-18)
+
+- **Who owns what.** The hotel-bookings module owns the reservation (`hotel_bookings`). This module owns the rooms and `room_nights`, so a reservation reaches them only through `HotelRoomHoldsService`, which the module exports. The booking module never registers a hotels schema.
+- **`findBookableRooms`.** Reads, and holds nothing. In this order: the stay (the same 400s as search, `assertStay`), the hotel is active (404), every room is a room of this hotel (404, naming the room ids), no room has more guests than its maximum occupancy (400), every room is free for the whole stay (409, naming the room numbers). "Free" is the one rule of `hotel-search.ts` (`roomsThatCanBeFree`, `nightsOfTheStay`, `groupNightsByRoom`, `isFreeForStay`), so booking, search and the free rooms of a hotel cannot disagree.
+- **`hold`.** Holds every night of every room for one reservation, all or nothing. It first removes only the expired holds on those nights, then inserts one `held` night per room per night with `holdExpiresAt`. The unique (`roomId`, `date`) index decides who gets a night: if an insert fails, the nights this call inserted are deleted again by their own ids and the answer is 409. There is no transaction because the CI database is a single MongoDB server; the fallback of the spec is used, and a night left behind by a crash stops counting when its hold ends.
+- **Write first, then verify.** The checks in `findBookableRooms` and the writes in `hold` are separate steps. After the nights are inserted, `hold` reads the hotel and the rooms again: if the hotel was deactivated, or a room was deleted, deactivated or cut out of its availability (HTL-05, HTL-06) in between, only this call's nights are released and the answer is 409.
+- **`release`.** Deletes only the `held` nights of one reservation. The reservation service calls it when it cannot save the reservation after the hold. The job that releases the nights of expired reservations (HTL-18) does not exist yet.

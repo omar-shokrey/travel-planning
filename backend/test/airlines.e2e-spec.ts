@@ -351,9 +351,12 @@ describe('Airline profiles (e2e, FLT-01)', () => {
         'cancellationTiers',
         'code',
         'createdAt',
+        'extraBagCurrency',
+        'extraBagPrice',
         'id',
         'logo',
         'logoUrl',
+        'maxExtraBags',
         'name',
         'updatedAt',
       ]);

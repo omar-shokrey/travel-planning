@@ -10,6 +10,8 @@ import { AirlinesController } from './airlines.controller';
 import { FlightCabinsController } from './flight-cabins.controller';
 import { FlightCabinsService } from './flight-cabins.service';
 import { FlightResponsesService } from './flight-responses.service';
+import { FlightSearchController } from './flight-search.controller';
+import { FlightSearchService } from './flight-search.service';
 import { FlightSeatHoldsService } from './flight-seat-holds.service';
 import { FlightsController } from './flights.controller';
 import { FlightsService } from './flights.service';
@@ -25,12 +27,20 @@ import { FlightsService } from './flights.service';
     // The Airport model, read only, for the airports list and time zones (FLT-02).
     ReferenceModule,
   ],
-  controllers: [AirlinesController, FlightsController, FlightCabinsController],
+  // FlightSearchController first: GET /flights/search must be matched before
+  // any GET /flights/:id (FLT-17). flights.module.spec.ts checks the order.
+  controllers: [
+    FlightSearchController,
+    AirlinesController,
+    FlightsController,
+    FlightCabinsController,
+  ],
   providers: [
     AirlinesService,
     FlightsService,
     FlightCabinsService,
     FlightResponsesService,
+    FlightSearchService,
     FlightSeatHoldsService,
   ],
   // FlightResponsesService: flight responses with local times (GEN-06) for
