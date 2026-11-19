@@ -561,3 +561,57 @@ describe('HotelRoomHoldsService', () => {
     });
   });
 });
+
+describe('HotelRoomHoldsService: confirming a paid reservation (HTL-17)', () => {
+  const bookingId = new Types.ObjectId();
+  const setupNights = (modifiedCount: number) => {
+    const roomNights = {
+      updateMany: jest.fn().mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ modifiedCount }),
+      }),
+    };
+    const service = new HotelRoomHoldsService(
+      {} as never,
+      {} as never,
+      roomNights as never,
+    );
+    return { service, roomNights };
+  };
+
+  it('secureHold keeps only the live held nights of the reservation, until the given moment', async () => {
+    const { service, roomNights } = setupNights(6);
+    const now = new Date('2027-06-01T10:00:00.000Z');
+    const until = new Date('2027-06-01T10:30:00.000Z');
+
+    await expect(service.secureHold(bookingId, until, now)).resolves.toBe(6);
+
+    expect(roomNights.updateMany).toHaveBeenCalledWith(
+      {
+        bookingId,
+        state: RoomNightState.Held,
+        holdExpiresAt: { $gt: now },
+      },
+      { $set: { holdExpiresAt: until } },
+    );
+  });
+
+  it('confirm turns only the held nights of the reservation into booked nights with no hold end', async () => {
+    const { service, roomNights } = setupNights(6);
+
+    await expect(service.confirm(bookingId)).resolves.toBe(6);
+
+    expect(roomNights.updateMany).toHaveBeenCalledWith(
+      { bookingId, state: RoomNightState.Held },
+      {
+        $set: { state: RoomNightState.Booked },
+        $unset: { holdExpiresAt: '' },
+      },
+    );
+  });
+
+  it('confirm reports 0 when there is nothing left to change (a repeated call)', async () => {
+    const { service } = setupNights(0);
+
+    await expect(service.confirm(bookingId)).resolves.toBe(0);
+  });
+});
