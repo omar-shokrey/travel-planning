@@ -166,6 +166,9 @@ describe('Pagination (e2e, GEN-05)', () => {
     ['limit', '51'],
     ['limit', 'abc'],
     ['size', '5'],
+    ['page', '10001'],
+    ['page', '1e20'],
+    ['skip', '5'],
   ])('rejects %s=%s with a message for that field', async (field, value) => {
     const response = await list(25, `?${field}=${value}`).expect(400);
 
@@ -173,6 +176,13 @@ describe('Pagination (e2e, GEN-05)', () => {
     expect(
       (response.body.errors as { field: string }[]).map((error) => error.field),
     ).toEqual([field]);
+  });
+
+  it('accepts the highest page and answers it with an empty page', async () => {
+    const response = await list(25, '?page=10000').expect(200);
+
+    expect(response.body.items).toEqual([]);
+    expect(response.body.meta).toMatchObject({ page: 10000, total: 25 });
   });
 
   it('documents the page parameters and the items and meta body in Swagger', async () => {
@@ -192,6 +202,7 @@ describe('Pagination (e2e, GEN-05)', () => {
     expect(parameter('limit')).toMatchObject({ in: 'query' });
     expect(JSON.stringify(parameter('limit'))).toContain('"default":10');
     expect(JSON.stringify(parameter('limit'))).toContain('"maximum":50');
+    expect(JSON.stringify(parameter('page'))).toContain('"maximum":10000');
     expect(
       Object.keys(
         route.responses['200'].content['application/json'].schema.properties,
