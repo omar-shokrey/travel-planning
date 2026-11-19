@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Types } from 'mongoose';
 import type { AirlinesService } from '../flights/airlines.service';
+import type { FlightResponsesService } from '../flights/flight-responses.service';
 import type { FlightSeatHoldsService } from '../flights/flight-seat-holds.service';
 import { CabinClass } from '../flights/models/cabin-class.enum';
 import { FlightStatus } from '../flights/models/flight-status.enum';
@@ -96,7 +97,16 @@ const plannedFlight = (fields: Record<string, unknown> = {}) => ({
   departureDateLocal: DEPARTURE,
   cabins: [
     { cabin: CabinClass.Business, maxBagKg: 32 },
-    { cabin: CabinClass.Economy, maxBagKg: 23 },
+    {
+      _id: new Types.ObjectId(),
+      cabin: CabinClass.Economy,
+      totalSeats: 180,
+      bookedSeats: 0,
+      heldSeats: 3,
+      price: 25000,
+      freeBags: 1,
+      maxBagKg: 23,
+    },
   ],
   ...fields,
 });
@@ -149,16 +159,23 @@ function setup(
       calls.push('airline');
       return Promise.resolve({
         _id: AIRLINE_ID,
+        name: 'Nile Air',
+        code: 'NP',
         policy: policy ?? undefined,
         ...airlineFields,
       });
     }),
+  };
+  /** FLT-21: the flight as the API returns it; the real one is tested in the flights module. */
+  const flightResponses = {
+    toResponse: jest.fn(() => Promise.resolve({ id: FLIGHT_ID.toString() })),
   };
   const service = new FlightBookingsService(
     bookings as never,
     flights as never,
     seatHolds as unknown as FlightSeatHoldsService,
     airlines as unknown as AirlinesService,
+    flightResponses as unknown as FlightResponsesService,
   );
   return {
     service,
@@ -168,6 +185,7 @@ function setup(
     seatHolds,
     bookings,
     airlines,
+    flightResponses,
     calls,
   };
 }
@@ -648,6 +666,7 @@ describe('FlightBookingsService owner lookup and policy acceptance (PAY-02)', ()
       {} as never,
       {} as FlightSeatHoldsService,
       {} as AirlinesService,
+      {} as FlightResponsesService,
     );
     return { service, bookings };
   };
@@ -704,5 +723,176 @@ describe('FlightBookingsService owner lookup and policy acceptance (PAY-02)', ()
     await expect(
       service.acceptPolicies(BOOKING_ID, OWNER_ID, AT),
     ).resolves.toBeNull();
+  });
+});
+
+describe('FlightBookingsService.summarise (FLT-21)', () => {
+  /** One adult with 2 extra bags, a second adult, a child and an infant. */
+  const withBags = () =>
+    dto([
+      adult('ADULT0001', { extraBags: { bags: 2, weightKg: 40 } }),
+      adult('ADULT0002'),
+      child,
+      infant,
+    ]);
+
+  const errorOf = async (call: Promise<unknown>): Promise<Error> => {
+    const error: unknown = await call.then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(Error);
+    return error as Error;
+  };
+
+  it('builds the summary from one read, without holding or saving anything', async () => {
+    const { service, seatHolds, bookings, flightResponses, calls } = setup();
+
+    const summary = await service.summarise(withBags());
+
+    expect(calls).toEqual(['flight', 'airline']);
+    expect(seatHolds.hold).not.toHaveBeenCalled();
+    expect(seatHolds.release).not.toHaveBeenCalled();
+    expect(bookings.create).not.toHaveBeenCalled();
+    expect(flightResponses.toResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: FLIGHT_ID }),
+      NOW,
+    );
+    expect(summary).toMatchObject({
+      flight: { id: FLIGHT_ID.toString() },
+      airline: { id: AIRLINE_ID.toString(), name: 'Nile Air', code: 'NP' },
+      cabin: 'economy',
+      seats: 3,
+      passengerCounts: { adults: 2, children: 1, infants: 1 },
+      baggage: {
+        freeBags: 1,
+        maxBagKg: 23,
+        extraBagPrice: 4500,
+        maxExtraBags: 2,
+      },
+      currency: 'USD',
+      fareTotal: 3 * 25000 + 2500,
+      baggageTotal: 9000,
+      total: 3 * 25000 + 2500 + 9000,
+    });
+    expect(
+      summary.passengers.map(({ type, fare, baggageFee }) => ({
+        type,
+        fare,
+        baggageFee,
+      })),
+    ).toEqual([
+      { type: PassengerType.Adult, fare: 25000, baggageFee: 9000 },
+      { type: PassengerType.Adult, fare: 25000, baggageFee: 0 },
+      { type: PassengerType.Child, fare: 25000, baggageFee: 0 },
+      { type: PassengerType.Infant, fare: 2500, baggageFee: 0 },
+    ]);
+    expect(summary.priceNote).toContain('POST /api/flight-bookings/hold');
+  });
+
+  it('gives the same totals the hold saves for the same passengers and cabin price', async () => {
+    const summarised = setup();
+    const held = setup();
+
+    const summary = await summarised.service.summarise(withBags());
+    await held.service.hold(USER_ID, withBags());
+
+    const saved = held.bookings.create.mock.calls[0][0] as Record<
+      string,
+      number
+    >;
+    expect({
+      fareTotal: summary.fareTotal,
+      baggageTotal: summary.baggageTotal,
+      total: summary.total,
+    }).toEqual({
+      fareTotal: saved.fareTotal,
+      baggageTotal: saved.baggageTotal,
+      total: saved.total,
+    });
+  });
+
+  it('answers 409 when the cabin has too few seats left, and holds nothing', async () => {
+    const { service, read, seatHolds } = setup();
+    read.mockImplementationOnce(() =>
+      Promise.resolve(
+        plannedFlight({
+          cabins: [
+            {
+              _id: new Types.ObjectId(),
+              cabin: CabinClass.Economy,
+              totalSeats: 180,
+              bookedSeats: 100,
+              heldSeats: 78,
+              price: 25000,
+              freeBags: 1,
+              maxBagKg: 23,
+            },
+          ],
+        }),
+      ),
+    );
+
+    const error = await errorOf(service.summarise(dto()));
+
+    expect(error).toBeInstanceOf(ConflictException);
+    expect(error.message).toBe('Not enough seats left in this cabin');
+    expect(seatHolds.hold).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 for a missing flight', async () => {
+    const { service, read, airlines } = setup();
+    read.mockImplementationOnce(() => Promise.resolve(null));
+
+    const error = await errorOf(service.summarise(dto()));
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(error.message).toBe('Flight not found');
+    expect(airlines.findEntityOrThrow).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 for a deactivated airline before a 400 on the passengers', async () => {
+    const { service } = setup(airlinePolicy(), { active: false });
+
+    const error = await errorOf(service.summarise(dto([child])));
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(error.message).toBe('Flight not found');
+  });
+
+  it('answers 409 for a flight that can no longer be booked, before a 400', async () => {
+    const { service, read } = setup();
+    read.mockImplementationOnce(() =>
+      Promise.resolve(plannedFlight({ status: FlightStatus.Cancelled })),
+    );
+
+    const error = await errorOf(service.summarise(dto([child])));
+
+    expect(error).toBeInstanceOf(ConflictException);
+    expect(error.message).toBe('This flight can no longer be booked');
+  });
+
+  it('answers 404 for a cabin the flight does not have', async () => {
+    const { service } = setup();
+
+    const error = await errorOf(
+      service.summarise({ ...dto(), cabin: CabinClass.First }),
+    );
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(error.message).toBe('This flight has no first cabin');
+  });
+
+  it('answers 400 on the field paths for passengers that break a rule, and holds nothing', async () => {
+    const { service, seatHolds, bookings } = setup();
+
+    const error = await errorOf(service.summarise(dto([child])));
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect(
+      (error as BadRequestException).getResponse() as { message: string },
+    ).toMatchObject({ message: 'Validation failed' });
+    expect(seatHolds.hold).not.toHaveBeenCalled();
+    expect(bookings.create).not.toHaveBeenCalled();
   });
 });

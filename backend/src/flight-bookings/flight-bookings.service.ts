@@ -14,7 +14,9 @@ import {
   FLIGHT_NOT_BOOKABLE_MESSAGE,
   FlightSeatHoldsService,
   type HeldFlight,
+  NOT_ENOUGH_SEATS_MESSAGE,
 } from '../flights/flight-seat-holds.service';
+import { FlightResponsesService } from '../flights/flight-responses.service';
 import { effectiveStatus } from '../flights/flight-status';
 import { FLIGHT_NOT_FOUND_MESSAGE } from '../flights/flights.constants';
 import { FlightStatus } from '../flights/models/flight-status.enum';
@@ -22,6 +24,7 @@ import { Flight } from '../flights/models/flight.schema';
 import { planPassengers } from './booking-passengers';
 import { priceBooking } from './booking-price';
 import type { FlightBookingResponseDto } from './dto/flight-booking-response.dto';
+import type { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import type { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import {
@@ -32,6 +35,7 @@ import {
   type FlightBookingSource,
   toFlightBookingResponse,
 } from './mappers/flight-booking.mapper';
+import { toFlightBookingSummary } from './mappers/flight-booking-summary.mapper';
 import { FlightBooking } from './models/flight-booking.schema';
 
 // FLT-21: the fare helpers live in booking-price.ts with the one booking
@@ -72,6 +76,8 @@ export class FlightBookingsService {
     @InjectModel(Flight.name) private readonly flights: Model<Flight>,
     private readonly seatHolds: FlightSeatHoldsService,
     private readonly airlines: AirlinesService,
+    // FLT-21: the flight of the summary, with its local times (GEN-06).
+    private readonly flightResponses: FlightResponsesService,
   ) {}
 
   /**
@@ -213,6 +219,35 @@ export class FlightBookingsService {
       throw error;
     }
     return toFlightBookingResponse(booking.toObject());
+  }
+
+  /**
+   * FLT-21: the booking summary (flight, passengers, baggage, total) before
+   * payment. The same body, the same checks in the same order
+   * (`planBooking`) and the same price function (`priceBooking`) as the
+   * hold, so both give the same totals for the same passengers and the same
+   * cabin price. It holds nothing and saves nothing.
+   *
+   * The seat check here only informs: 409 "Not enough seats left in this
+   * cabin" when the cabin already has too few. The hold checks again
+   * atomically, and the seats or the price can still change before it.
+   */
+  async summarise(
+    dto: HoldFlightBookingDto,
+  ): Promise<FlightBookingSummaryResponseDto> {
+    const now = new Date();
+    const { flight, airline, cabin, plan } = await this.planBooking(dto, now);
+    const seatsLeft = cabin.totalSeats - cabin.bookedSeats - cabin.heldSeats;
+    if (seatsLeft < plan.seats) {
+      throw new ConflictException(NOT_ENOUGH_SEATS_MESSAGE);
+    }
+    return toFlightBookingSummary({
+      flight: await this.flightResponses.toResponse(flight, now),
+      airline,
+      cabin,
+      plan,
+      price: priceBooking(cabin.price, plan),
+    });
   }
 
   /**
