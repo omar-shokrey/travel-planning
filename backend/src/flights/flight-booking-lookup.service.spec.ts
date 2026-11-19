@@ -5,6 +5,7 @@ const FLIGHT_ID = '6740f1c2a4b5c6d7e8f90456';
 
 function setup() {
   const collection = {
+    distinct: jest.fn(),
     findOne: jest.fn(),
     // Any write method called by mistake fails the test.
     insertOne: jest.fn(),
@@ -32,6 +33,21 @@ function setup() {
 }
 
 describe('FlightBookingLookup (FLT-05, until FLT-21)', () => {
+  it('reads the users of the confirmed bookings of the flight, each once', async () => {
+    const { lookup, collection, connection, noWrite } = setup();
+    const users = [new Types.ObjectId(), new Types.ObjectId()];
+    collection.distinct.mockResolvedValue(users);
+
+    await expect(lookup.confirmedUserIds(FLIGHT_ID)).resolves.toBe(users);
+
+    expect(connection.collection).toHaveBeenCalledWith('flight_bookings');
+    expect(collection.distinct).toHaveBeenCalledWith('userId', {
+      'segments.flightId': new Types.ObjectId(FLIGHT_ID),
+      status: 'confirmed',
+    });
+    noWrite();
+  });
+
   it('finds a booking waiting for its payment or confirmed, and reads only its id', async () => {
     const { lookup, collection, noWrite } = setup();
     collection.findOne.mockResolvedValue({ _id: new Types.ObjectId() });

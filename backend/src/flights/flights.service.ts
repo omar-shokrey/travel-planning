@@ -2,16 +2,25 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { DateTime } from 'luxon';
 import type { Model, QueryFilter, Types } from 'mongoose';
 import type { FieldError } from '../common/interfaces/error-response.interface';
+import { NotificationLinkType } from '../notifications/enums/notification-link-type.enum';
+import { NotificationType } from '../notifications/enums/notification-type.enum';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AirlinesService } from './airlines.service';
 import type { CreateFlightDto } from './dto/create-flight.dto';
 import type { FlightResponseDto } from './dto/flight-response.dto';
 import type { UpdateFlightDto } from './dto/update-flight.dto';
 import { FlightBookingLookup } from './flight-booking-lookup.service';
+import {
+  type FlightSchedule,
+  flightTimeChangeMessage,
+  minuteOf,
+} from './flight-change-message';
 import { assertEditable, type EditableFlight } from './flight-editable';
 import { FlightResponsesService } from './flight-responses.service';
 import { scheduledFlightFilter } from './flight-status';
@@ -77,7 +86,10 @@ const UPDATE_FIELDS = [
 
 /** What the edit reads of a flight: the rules are checked against these values. */
 type EditState = EditableFlight &
-  Pick<Flight, 'departureAirport' | 'arrivalAirport' | 'arrivalAt'> & {
+  Pick<
+    Flight,
+    'flightNumber' | 'departureAirport' | 'arrivalAirport' | 'arrivalAt'
+  > & {
     _id: Types.ObjectId;
     cabins?: Pick<FlightCabin, 'bookedSeats' | 'heldSeats'>[];
   };
@@ -108,11 +120,14 @@ const formatOf = (value: string): string =>
 
 @Injectable()
 export class FlightsService {
+  private readonly logger = new Logger(FlightsService.name);
+
   constructor(
     @InjectModel(Flight.name) private readonly flights: Model<Flight>,
     private readonly airlines: AirlinesService,
     private readonly responses: FlightResponsesService,
     private readonly bookings: FlightBookingLookup,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /**
@@ -213,7 +228,8 @@ export class FlightsService {
    * The airports cannot change once the flight has a booking: a booking that
    * waits for its payment or is confirmed is read before the write, and the
    * seats booked or held are part of the write's filter. Times can always
-   * change.
+   * change: the passengers with a confirmed booking are then notified, after
+   * the write (see `notifyTimeChange`).
    *
    * One conditional write (`findOneAndUpdate`, which also returns the flight
    * as written): it matches only while the flight is still the moderator's,
@@ -315,7 +331,7 @@ export class FlightsService {
     errors.throwIfAny();
 
     // All four are set here: a missing one added an error above.
-    const after = {
+    const after: FlightSchedule = {
       departureAirport,
       arrivalAirport,
       departureAt: departureAt as Date,
@@ -323,6 +339,15 @@ export class FlightsService {
       departureZone: departureZone as string,
       arrivalZone: arrivalZone as string,
     };
+    const before: FlightSchedule = {
+      departureAirport: stored.departureAirport,
+      arrivalAirport: stored.arrivalAirport,
+      departureAt: stored.departureAt,
+      arrivalAt: stored.arrivalAt,
+      departureZone: zones.get(stored.departureAirport) as string,
+      arrivalZone: zones.get(stored.arrivalAirport) as string,
+    };
+
     if (airportsChange && (await this.bookings.hasActiveBooking(flightId))) {
       throw new ConflictException(AIRPORTS_LOCKED_MESSAGE);
     }
@@ -382,6 +407,12 @@ export class FlightsService {
       throw new ConflictException(FLIGHT_CHANGED_MESSAGE);
     }
 
+    if (
+      minuteOf(after.departureAt) !== minuteOf(before.departureAt) ||
+      minuteOf(after.arrivalAt) !== minuteOf(before.arrivalAt)
+    ) {
+      await this.notifyTimeChange(flightId, stored.flightNumber, before, after);
+    }
     // The zones were read above, so the response needs no second query (GEN-06).
     return toFlightResponse(updated, now, {
       departure: after.departureZone,
@@ -389,11 +420,43 @@ export class FlightsService {
     });
   }
 
+  /**
+   * FLT-05, GEN-01: tells every user with a confirmed booking of the flight
+   * that its times changed, one notification per user. It runs after the
+   * flight is saved: a failure here is logged with the flight id only and the
+   * edit still succeeds, because the new times are already what every booking
+   * shows (a booking reads the flight's times, never a copy).
+   */
+  private async notifyTimeChange(
+    flightId: string,
+    flightNumber: string,
+    before: FlightSchedule,
+    after: FlightSchedule,
+  ): Promise<void> {
+    try {
+      const userIds = await this.bookings.confirmedUserIds(flightId);
+      if (userIds.length === 0) {
+        return;
+      }
+      await this.notifications.notifyMany(
+        userIds,
+        NotificationType.FlightChanged,
+        flightTimeChangeMessage(flightNumber, before, after),
+        { type: NotificationLinkType.Flight, id: flightId },
+      );
+    } catch (error) {
+      this.logger.error(
+        `Could not notify the passengers of flight ${flightId} about its new times`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
   private readEditState(flightId: string): Promise<EditState | null> {
     return this.flights
       .findById(flightId)
       .select(
-        'airlineId status departureAirport arrivalAirport departureAt arrivalAt cabins.bookedSeats cabins.heldSeats',
+        'airlineId status flightNumber departureAirport arrivalAirport departureAt arrivalAt cabins.bookedSeats cabins.heldSeats',
       )
       .lean<EditState>()
       .exec();

@@ -131,7 +131,7 @@ export const AIRPORTS_LOCKED_MESSAGE =
  * the only reader.
  */
 export const FLIGHT_BOOKINGS_COLLECTION = 'flight_bookings';
-/** Paid: the passenger flies. */
+/** Paid: the passenger flies, and is told about a time change. */
 export const FLIGHT_BOOKING_CONFIRMED = 'confirmed';
 /** Seats held while the payment runs (FLT-22): it still holds the flight. */
 export const FLIGHT_BOOKING_PENDING_PAYMENT = 'pending_payment';

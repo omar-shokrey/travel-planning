@@ -2,10 +2,12 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Types } from 'mongoose';
 import type { FieldError } from '../common/interfaces/error-response.interface';
+import type { NotificationsService } from '../notifications/notifications.service';
 import type { AirlinesService } from './airlines.service';
 import type { CreateFlightDto } from './dto/create-flight.dto';
 import type { UpdateFlightDto } from './dto/update-flight.dto';
@@ -82,6 +84,7 @@ function setup() {
     airlines as unknown as AirlinesService,
     new FlightResponsesService(airports as never),
     {} as FlightBookingLookup,
+    {} as NotificationsService,
   );
   return { service, flights, airports, airlines };
 }
@@ -589,12 +592,15 @@ function editSetup(...reads: unknown[]) {
   };
   const bookings = {
     hasActiveBooking: jest.fn().mockResolvedValue(false),
+    confirmedUserIds: jest.fn().mockResolvedValue([]),
   };
+  const notifications = { notifyMany: jest.fn().mockResolvedValue(undefined) };
   const service = new FlightsService(
     flights as never,
     airlines as unknown as AirlinesService,
     new FlightResponsesService(airports as never),
     bookings as unknown as FlightBookingLookup,
+    notifications as unknown as NotificationsService,
   );
   /** The filter and the update of the one write. */
   const write = () => {
@@ -621,6 +627,7 @@ function editSetup(...reads: unknown[]) {
     airports,
     airlines,
     bookings,
+    notifications,
     write,
     writeFindsNothing,
   };
@@ -1068,7 +1075,7 @@ describe('FlightsService.update (FLT-05)', () => {
     ])(
       'reads the flight again when the write matched nothing: %s',
       async (_label, current, answer) => {
-        const { service, writeFindsNothing } = editSetup(
+        const { service, writeFindsNothing, notifications } = editSetup(
           storedFlight(),
           current,
         );
@@ -1077,6 +1084,7 @@ describe('FlightsService.update (FLT-05)', () => {
         await expect(
           edit(service, { departureLocal: '2027-06-15T16:30' }),
         ).rejects.toThrow(answer);
+        expect(notifications.notifyMany).not.toHaveBeenCalled();
       },
     );
 
@@ -1100,6 +1108,121 @@ describe('FlightsService.update (FLT-05)', () => {
       await expect(
         edit(service, { departureLocal: '2027-06-15T16:30' }),
       ).rejects.toBe(failure);
+    });
+  });
+
+  describe('the notification of a time change (GEN-01)', () => {
+    const userA = new Types.ObjectId('6740f1c2a4b5c6d7e8f9a001');
+    const userB = new Types.ObjectId('6740f1c2a4b5c6d7e8f9a002');
+
+    it('notifies the users with a confirmed booking once, after the write, with the old and new local times', async () => {
+      const { service, flights, bookings, notifications } = editSetup(
+        storedFlight(),
+        storedFlight({ departureAt: new Date('2027-06-15T13:30:00.000Z') }),
+      );
+      bookings.confirmedUserIds.mockResolvedValueOnce([userA, userB]);
+
+      await edit(service, { departureLocal: '2027-06-15T16:30' });
+
+      expect(bookings.confirmedUserIds).toHaveBeenCalledWith(FLIGHT_ID);
+      expect(notifications.notifyMany).toHaveBeenCalledTimes(1);
+      expect(notifications.notifyMany).toHaveBeenCalledWith(
+        [userA, userB],
+        'flight_changed',
+        'Flight MS123 from CAI to JFK has new times. Departure: 2027-06-15 16:30 CAI time (was 2027-06-15 14:30). Arrival: 2027-06-15 18:30 JFK time (unchanged).',
+        { type: 'flight', id: FLIGHT_ID },
+      );
+      expect(flights.findOneAndUpdate.mock.invocationCallOrder[0]).toBeLessThan(
+        bookings.confirmedUserIds.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('notifies for a new arrival time alone', async () => {
+      const { service, bookings, notifications } = editSetup(
+        storedFlight(),
+        storedFlight(),
+      );
+      bookings.confirmedUserIds.mockResolvedValueOnce([userA]);
+
+      await edit(service, { arrivalLocal: '2027-06-15T19:00' });
+
+      expect(notifications.notifyMany).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['the same local time again', { departureLocal: '2027-06-15T14:30' }],
+      ['the same time with seconds', { arrivalLocal: '2027-06-15T18:30:00' }],
+      ['only a new airport', { arrivalAirport: 'LAX' }],
+    ])('sends nothing when no instant changed: %s', async (_label, body) => {
+      const { service, bookings, notifications } = editSetup(
+        storedFlight(),
+        storedFlight(),
+      );
+      bookings.confirmedUserIds.mockResolvedValue([userA]);
+
+      await edit(service, body);
+
+      expect(bookings.confirmedUserIds).not.toHaveBeenCalled();
+      expect(notifications.notifyMany).not.toHaveBeenCalled();
+    });
+
+    it('treats a time as changed only when its minute changes, as every response and notification shows it', async () => {
+      // Stored with seconds: 14:30:45 in Cairo, shown as 14:30 everywhere.
+      const withSeconds = storedFlight({
+        departureAt: new Date('2027-06-15T11:30:45.000Z'),
+      });
+      const same = editSetup(withSeconds, withSeconds);
+      same.bookings.confirmedUserIds.mockResolvedValue([userA]);
+      const moved = editSetup(withSeconds, withSeconds);
+      moved.bookings.confirmedUserIds.mockResolvedValue([userA]);
+
+      await edit(same.service, { departureLocal: '2027-06-15T14:30' });
+      await edit(moved.service, { departureLocal: '2027-06-15T14:31' });
+
+      // The exact time sent is stored either way.
+      expect(same.write().update.$set.departureAt).toEqual(
+        new Date('2027-06-15T11:30:00.000Z'),
+      );
+      expect(same.notifications.notifyMany).not.toHaveBeenCalled();
+      expect(moved.notifications.notifyMany).toHaveBeenCalledWith(
+        [userA],
+        'flight_changed',
+        'Flight MS123 from CAI to JFK has new times. Departure: 2027-06-15 14:31 CAI time (was 2027-06-15 14:30). Arrival: 2027-06-15 18:30 JFK time (unchanged).',
+        { type: 'flight', id: FLIGHT_ID },
+      );
+    });
+
+    it('sends nothing when nobody has a confirmed booking, and still succeeds', async () => {
+      const { service, bookings, notifications } = editSetup(
+        storedFlight(),
+        storedFlight(),
+      );
+
+      await expect(
+        edit(service, { departureLocal: '2027-06-15T16:30' }),
+      ).resolves.toMatchObject({ id: FLIGHT_ID });
+      expect(bookings.confirmedUserIds).toHaveBeenCalledTimes(1);
+      expect(notifications.notifyMany).not.toHaveBeenCalled();
+    });
+
+    it('logs a failure with the flight id only and still answers the changed flight', async () => {
+      const logged = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      const { service, bookings, notifications } = editSetup(
+        storedFlight(),
+        storedFlight({ departureAt: new Date('2027-06-15T13:30:00.000Z') }),
+      );
+      bookings.confirmedUserIds.mockRejectedValueOnce(new Error('timeout'));
+
+      await expect(
+        edit(service, { departureLocal: '2027-06-15T16:30' }),
+      ).resolves.toMatchObject({ departureLocal: '2027-06-15T16:30' });
+      expect(notifications.notifyMany).not.toHaveBeenCalled();
+      expect(logged).toHaveBeenCalledWith(
+        `Could not notify the passengers of flight ${FLIGHT_ID} about its new times`,
+        expect.any(String),
+      );
     });
   });
 });

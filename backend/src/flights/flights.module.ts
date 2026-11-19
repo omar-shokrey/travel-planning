@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { UsersModule } from '../users/users.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { ReferenceModule } from '../reference/reference.module';
@@ -24,6 +25,8 @@ import { FlightsService } from './flights.service';
     ]),
     UsersModule,
     UploadsModule,
+    // The in-app notification of a time change (FLT-05, GEN-01).
+    NotificationsModule,
     // The Airport model, read only, for the airports list and time zones (FLT-02).
     ReferenceModule,
   ],

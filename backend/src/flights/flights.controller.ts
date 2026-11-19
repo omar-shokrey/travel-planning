@@ -97,7 +97,7 @@ export class FlightsController {
     description: [
       "Airline moderators only, for a scheduled flight of the moderator's assigned airline. Send only the fields to change: `departureLocal`, `arrivalLocal` (each airport's local time, `YYYY-MM-DDTHH:mm`, as in POST /api/flights), `departureAirport`, `arrivalAirport`. Anything else (`flightNumber`, `airlineId`, `status`, `departureDateLocal`, `cabins`, the seat counters) answers 400. Cabin prices and seat counts are changed with PATCH /api/flights/{id}/cabins/{cabinId}.",
       'The rules of POST /api/flights apply to the flight as it will be, a field that is not sent keeping its stored value: the airports must be in the airports list and differ, a local time must exist in its time zone, the departure must be in the future and the arrival after it, compared in UTC. A time that is not sent keeps its instant, also at a new airport. `departureDateLocal` is recomputed. All broken rules are listed in one 400.',
-      'The airports cannot be changed once the flight has a booking: seats booked or held in a cabin, or a booking waiting for its payment or confirmed (409). Sending the airport the flight already has is not a change. The times can still be changed.',
+      'The airports cannot be changed once the flight has a booking: seats booked or held in a cabin, or a booking waiting for its payment or confirmed (409). Sending the airport the flight already has is not a change. The times can still be changed: every passenger with a confirmed booking then gets one in-app notification with the old and new local times.',
       'Answers the whole flight with its cabins.',
     ].join('\n\n'),
   })

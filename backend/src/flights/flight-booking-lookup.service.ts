@@ -12,6 +12,7 @@ import {
  * specs/travel-platform.md ("Flight bookings") defines them.
  */
 interface FlightBookingRecord {
+  userId: Types.ObjectId;
   status: string;
   segments: { flightId: Types.ObjectId }[];
 }
@@ -32,6 +33,17 @@ const ACTIVE_STATUSES = [
 @Injectable()
 export class FlightBookingLookup {
   constructor(@InjectConnection() private readonly connection: Connection) {}
+
+  /**
+   * The users with a confirmed booking of this flight, each once: a user with
+   * two confirmed bookings is one passenger to notify.
+   */
+  async confirmedUserIds(flightId: string): Promise<Types.ObjectId[]> {
+    return this.bookings().distinct('userId', {
+      'segments.flightId': new Types.ObjectId(flightId),
+      status: FLIGHT_BOOKING_CONFIRMED,
+    });
+  }
 
   /**
    * Whether a booking still holds this flight: one waiting for its payment or
