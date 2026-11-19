@@ -213,14 +213,14 @@ describe('SearchFlightsQueryDto (FLT-11)', () => {
       const errors = await errorsOf({
         ...valid,
         skip: '5',
-        cabin: 'economy',
+        sort: 'economy',
         passengers: '0',
       });
 
       expect(errors.map((error) => error.field).sort()).toEqual([
-        'cabin',
         'passengers',
         'skip',
+        'sort',
       ]);
     });
 
@@ -232,7 +232,8 @@ describe('SearchFlightsQueryDto (FLT-11)', () => {
     });
   });
 
-  it.each(['returnDate', 'cabin', 'sort', 'price', 'airlineId', 'status'])(
+  // returnDate and cabin were refused here before FLT-12 added them.
+  it.each(['sort', 'price', 'airlineId', 'status', 'tripType', 'returnFlight'])(
     'refuses the parameter %s, which this search does not have',
     async (field) => {
       expect(await errorsOf({ ...valid, [field]: 'x' })).toEqual([
@@ -361,5 +362,97 @@ describe('SearchFlightsQueryDto: price range and order (FLT-15)', () => {
       });
       expect(new SearchFlightsQueryDto()[field]).toBe(value);
     });
+  });
+});
+
+describe('SearchFlightsQueryDto: round trip and cabin (FLT-12)', () => {
+  describe('returnDate (a), optional', () => {
+    it('is optional: a one-way search sends none', async () => {
+      const dto = await parse(valid);
+
+      expect(await errorsOf(valid)).toEqual([]);
+      expect(dto.returnDate).toBeUndefined();
+    });
+
+    it('accepts a real date, trimmed, also equal to departureDate (the service compares them)', async () => {
+      expect(
+        (await parse({ ...valid, returnDate: ' 2027-06-22 ' })).returnDate,
+      ).toBe('2027-06-22');
+      expect(
+        await errorsOf({ ...valid, returnDate: valid.departureDate }),
+      ).toEqual([]);
+      expect(await errorsOf({ ...valid, returnDate: '2028-02-29' })).toEqual(
+        [],
+      );
+    });
+
+    it.each(['2027-02-29', '2026-02-30', '2027-04-31'])(
+      'refuses the date that does not exist %p',
+      async (returnDate) => {
+        expect(await onlyField({ ...valid, returnDate }, 'returnDate')).toEqual(
+          ['returnDate must be a real calendar date'],
+        );
+      },
+    );
+
+    it.each([
+      '2026-13-01',
+      '22-06-2027',
+      '2027/06/22',
+      '2027-06-22T10:00',
+      'next week',
+      '',
+    ])('refuses the format %p', async (returnDate) => {
+      expect(await onlyField({ ...valid, returnDate }, 'returnDate')).toContain(
+        'returnDate must be a date YYYY-MM-DD',
+      );
+    });
+
+    it('refuses a repeated parameter (a list), not text', async () => {
+      expect(
+        await onlyField(
+          { ...valid, returnDate: ['2027-06-22', '2027-06-23'] },
+          'returnDate',
+        ),
+      ).toContain('returnDate must be a string');
+    });
+  });
+
+  describe('cabin (c), optional', () => {
+    it.each(['economy', 'premium_economy', 'business', 'first'])(
+      'accepts %s',
+      async (cabin) => {
+        expect(await errorsOf({ ...valid, cabin })).toEqual([]);
+        expect((await parse({ ...valid, cabin })).cabin).toBe(cabin);
+      },
+    );
+
+    it.each(['Economy', 'ECONOMY', 'coach', 'premium', '', 'x'])(
+      'refuses %p, with every cabin in the message',
+      async (cabin) => {
+        expect(await onlyField({ ...valid, cabin }, 'cabin')).toEqual([
+          'cabin must be one of: economy, premium_economy, business, first',
+        ]);
+      },
+    );
+
+    it('is optional: no cabin means every cabin', async () => {
+      expect((await parse(valid)).cabin).toBeUndefined();
+    });
+  });
+
+  it('has no Swagger example on returnDate or cabin, so "Try it out" never turns a plain search into a round trip or a cabin search', () => {
+    const property = (name: string) =>
+      Reflect.getMetadata(
+        DECORATORS.API_MODEL_PROPERTIES,
+        SearchFlightsQueryDto.prototype,
+        name,
+      ) as { example?: unknown; required?: boolean };
+
+    for (const name of ['returnDate', 'cabin']) {
+      expect(property(name)).toBeDefined();
+      expect(property(name).example).toBeUndefined();
+      expect(property(name).required).toBe(false);
+    }
   });
 });

@@ -1,9 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 import { Types, type Model } from 'mongoose';
+import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
+import type { FlightSearchResultResponseDto } from './dto/flight-search-result-response.dto';
 import type { SearchFlightsQueryDto } from './dto/search-flights-query.dto';
 import { PRICE_RANGE_MESSAGE } from './flights.constants';
 import type { FlightResponsesService } from './flight-responses.service';
-import { FlightSearchService } from './flight-search.service';
+import { FlightSearchService, outboundLeg } from './flight-search.service';
 import type { FlightSearchSource } from './mappers/flight-search.mapper';
 import type { Airline } from './models/airline.schema';
 import { CabinClass } from './models/cabin-class.enum';
@@ -59,6 +61,16 @@ const found = (flightNumber: string): FlightSearchSource => ({
     logo: 'logo.png',
   },
 });
+
+/** A one-way search answers one page; fails the test on a round-trip answer. */
+function onePage(
+  result: Awaited<ReturnType<FlightSearchService['search']>>,
+): PaginatedResponse<FlightSearchResultResponseDto> {
+  if (!('items' in result)) {
+    throw new Error('Expected one page, got a round-trip answer');
+  }
+  return result;
+}
 
 function setup(page: unknown = [{ items: [], total: [] }], zones = ZONES) {
   const exec = jest.fn().mockResolvedValue(page);
@@ -272,7 +284,7 @@ describe('FlightSearchService (FLT-11)', () => {
         { items: [found('MS1'), found('MS2')], total: [{ count: 12 }] },
       ]);
 
-      const result = await service.search(query({ limit: 2 }), NOW);
+      const result = onePage(await service.search(query({ limit: 2 }), NOW));
 
       expect(responses.timeZonesOf).toHaveBeenCalledTimes(1);
       expect(responses.timeZonesOf).toHaveBeenCalledWith(['CAI', 'JFK']);
@@ -543,5 +555,364 @@ describe('FlightSearchService: price range and order (FLT-15)', () => {
     await service.search(query({ minPrice: 25000, maxPrice: 25000 }), NOW);
 
     expect(flights.aggregate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('FlightSearchService: cabin filter (FLT-12(c))', () => {
+  type Expression =
+    number | string | boolean | { [operator: string]: Expression[] };
+
+  /** Evaluates the operators the cabin condition uses, as MongoDB does. */
+  const evaluate = (
+    expression: Expression,
+    cabin: Record<string, number | string>,
+  ): number | string | boolean => {
+    if (typeof expression !== 'object') {
+      return typeof expression === 'string' && expression.startsWith('$$cabin.')
+        ? cabin[expression.replace('$$cabin.', '')]
+        : expression;
+    }
+    const [operator, args] = Object.entries(expression)[0];
+    const values = args.map((arg) => evaluate(arg, cabin));
+    if (operator === '$and') return values.every(Boolean);
+    if (operator === '$eq') return values[0] === values[1];
+    const [a, b] = values as number[];
+    if (operator === '$gte') return a >= b;
+    if (operator === '$lte') return a <= b;
+    if (operator === '$subtract') return a - b;
+    if (operator === '$add')
+      return (values as number[]).reduce((sum, value) => sum + value, 0);
+    throw new Error(`Unexpected operator ${operator}`);
+  };
+
+  const stagesOf = (change: Partial<SearchFlightsQueryDto>) =>
+    setup().service.pipeline(query(change), NOW) as unknown as Record<
+      string,
+      Record<string, unknown>
+    >[];
+
+  const conditionOf = (change: Partial<SearchFlightsQueryDto>): Expression =>
+    (
+      stagesOf(change)[1] as unknown as {
+        $addFields: { fittingCabins: { $filter: { cond: Expression } } };
+      }
+    ).$addFields.fittingCabins.$filter.cond;
+
+  const cabin = (name: CabinClass, change: Record<string, number> = {}) => ({
+    cabin: name,
+    totalSeats: 10,
+    bookedSeats: 0,
+    heldSeats: 0,
+    price: 25000,
+    ...change,
+  });
+
+  it('keeps only a cabin of the class asked for', () => {
+    const cond = conditionOf({ cabin: CabinClass.Business });
+
+    expect(evaluate(cond, cabin(CabinClass.Business))).toBe(true);
+    for (const other of [
+      CabinClass.Economy,
+      CabinClass.PremiumEconomy,
+      CabinClass.First,
+    ]) {
+      expect(evaluate(cond, cabin(other))).toBe(false);
+    }
+  });
+
+  it('still asks for the seats and the price range in the same condition', () => {
+    const cond = conditionOf({
+      cabin: CabinClass.Business,
+      passengers: 3,
+      minPrice: 20000,
+      maxPrice: 30000,
+    });
+
+    expect(evaluate(cond, cabin(CabinClass.Business))).toBe(true);
+    // Not enough seats left.
+    expect(
+      evaluate(
+        cond,
+        cabin(CabinClass.Business, { bookedSeats: 6, heldSeats: 2 }),
+      ),
+    ).toBe(false);
+    // Outside the price range.
+    expect(evaluate(cond, cabin(CabinClass.Business, { price: 30001 }))).toBe(
+      false,
+    );
+  });
+
+  it('drops a flight without that cabin in the first $match, which uses the route index', () => {
+    expect(stagesOf({ cabin: CabinClass.First })[0].$match).toEqual(
+      expect.objectContaining({
+        departureAirport: 'CAI',
+        arrivalAirport: 'JFK',
+        departureDateLocal: '2027-06-15',
+        'cabins.cabin': CabinClass.First,
+      }),
+    );
+  });
+
+  it('adds nothing without a cabin: the pipeline of FLT-11 and FLT-15', () => {
+    const stages = stagesOf({});
+
+    expect(stages[0].$match).not.toHaveProperty(['cabins.cabin']);
+    expect(JSON.stringify(stages)).not.toContain('$eq');
+  });
+});
+
+describe('FlightSearchService: round trip (FLT-12(a))', () => {
+  const page = (numbers: string[], count: number) => [
+    { items: numbers.map(found), total: count ? [{ count }] : [] },
+  ];
+
+  it('without returnDate answers one page from one aggregation (one-way)', async () => {
+    const { service, flights } = setup(page(['MS1'], 1));
+
+    const result = await service.search(query(), NOW);
+
+    expect(flights.aggregate).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      items: [expect.objectContaining({ flightNumber: 'MS1' })],
+      meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
+    });
+    expect(result).not.toHaveProperty('outbound');
+  });
+
+  it('with returnDate searches the route and the reversed route on the return date, and answers { outbound, return }', async () => {
+    const { service, flights, exec, responses } = setup();
+    exec
+      .mockResolvedValueOnce(page(['MS1', 'MS2'], 2))
+      .mockResolvedValueOnce(page(['MS9'], 1));
+
+    const result = await service.search(
+      query({ returnDate: '2027-06-22', limit: 5 }),
+      NOW,
+    );
+
+    // One airport lookup for both legs.
+    expect(responses.timeZonesOf).toHaveBeenCalledTimes(1);
+    expect(flights.aggregate).toHaveBeenCalledTimes(2);
+    const [outboundStages, returnStages] = (
+      flights.aggregate.mock.calls as unknown as [Record<string, unknown>[]][]
+    ).map(([stages]) => stages);
+    expect(outboundStages[0].$match).toEqual(
+      expect.objectContaining({
+        departureAirport: 'CAI',
+        arrivalAirport: 'JFK',
+        departureDateLocal: '2027-06-15',
+      }),
+    );
+    expect(returnStages[0].$match).toEqual(
+      expect.objectContaining({
+        departureAirport: 'JFK',
+        arrivalAirport: 'CAI',
+        departureDateLocal: '2027-06-22',
+      }),
+    );
+    expect(result).toEqual({
+      outbound: {
+        items: [
+          expect.objectContaining({ flightNumber: 'MS1' }),
+          expect.objectContaining({ flightNumber: 'MS2' }),
+        ],
+        meta: { page: 1, limit: 5, total: 2, totalPages: 1 },
+      },
+      return: {
+        items: [expect.objectContaining({ flightNumber: 'MS9' })],
+        meta: { page: 1, limit: 5, total: 1, totalPages: 1 },
+      },
+    });
+  });
+
+  it('gives each leg the local times of its own airports: the return leaves in New York', async () => {
+    const { service, exec } = setup();
+    exec
+      .mockResolvedValueOnce(page(['MS1'], 1))
+      .mockResolvedValueOnce(page(['MS9'], 1));
+
+    const result = (await service.search(
+      query({ returnDate: '2027-06-22' }),
+      NOW,
+    )) as {
+      outbound: {
+        items: { departureTimeZone: string; arrivalTimeZone: string }[];
+      };
+      return: {
+        items: { departureTimeZone: string; arrivalTimeZone: string }[];
+      };
+    };
+
+    expect(result.outbound.items[0]).toMatchObject({
+      departureTimeZone: 'Africa/Cairo',
+      arrivalTimeZone: 'America/New_York',
+    });
+    expect(result.return.items[0]).toMatchObject({
+      departureTimeZone: 'America/New_York',
+      arrivalTimeZone: 'Africa/Cairo',
+    });
+  });
+
+  it('applies the same passengers, cabin, price range, order and page to both legs', async () => {
+    const { service, flights } = setup();
+    const filters = {
+      returnDate: '2027-06-22',
+      passengers: 3,
+      cabin: CabinClass.Business,
+      minPrice: 10000,
+      maxPrice: 90000,
+      sortBy: 'price' as const,
+      sortOrder: 'desc' as const,
+      page: 2,
+      limit: 4,
+      skip: 4,
+    };
+
+    await service.search(query(filters), NOW);
+
+    const [outboundStages, returnStages] = (
+      flights.aggregate.mock.calls as unknown as [Record<string, unknown>[]][]
+    ).map(([stages]) => JSON.stringify(stages.slice(1)));
+    // Everything after the route and date is the same.
+    expect(returnStages).toBe(outboundStages);
+    expect(outboundStages).toContain('"$skip":4');
+    expect(outboundStages).toContain('"$limit":4');
+    expect(outboundStages).toContain('"lowestPrice":-1');
+  });
+
+  it('answers an empty return page as a 200 page, not an error', async () => {
+    const { service, exec } = setup();
+    exec
+      .mockResolvedValueOnce(page(['MS1'], 1))
+      .mockResolvedValueOnce([{ items: [], total: [] }]);
+
+    const result = (await service.search(
+      query({ returnDate: '2027-06-22' }),
+      NOW,
+    )) as { return: unknown };
+
+    expect(result.return).toEqual({
+      items: [],
+      meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
+    });
+  });
+
+  it('searches at the current time when no `now` is given (the controller sends none)', async () => {
+    jest.useFakeTimers({ now: NOW });
+    try {
+      const { service, flights } = setup();
+
+      await service.search(query());
+
+      const [stages] = flights.aggregate.mock.calls[0] as unknown as [
+        { $match: { departureAt: { $gt: Date } } }[],
+      ];
+      expect(stages[0].$match.departureAt).toEqual({ $gt: NOW });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('answers an empty page when the aggregation gives no result at all', async () => {
+    const { service } = setup([]);
+
+    expect(await service.search(query(), NOW)).toEqual({
+      items: [],
+      meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
+    });
+  });
+
+  it('accepts a return on the departure date (a same-day round trip)', async () => {
+    const { service, flights } = setup();
+
+    await service.search(query({ returnDate: '2027-06-15' }), NOW);
+
+    expect(flights.aggregate).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a return date before the departure date with 400 on returnDate, before any query', async () => {
+    const { service, flights, responses } = setup();
+
+    await expect(
+      service.search(query({ returnDate: '2027-06-14' }), NOW),
+    ).rejects.toMatchObject({
+      response: {
+        message: 'Validation failed',
+        errors: [
+          {
+            field: 'returnDate',
+            messages: ['returnDate cannot be before departureDate'],
+          },
+        ],
+      },
+    });
+    expect(responses.timeZonesOf).not.toHaveBeenCalled();
+    expect(flights.aggregate).not.toHaveBeenCalled();
+  });
+
+  it('reports a wrong return date and a wrong price range in one answer', async () => {
+    const { service } = setup();
+
+    await expect(
+      service.search(
+        query({ returnDate: '2027-06-01', minPrice: 9, maxPrice: 1 }),
+        NOW,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        errors: [
+          {
+            field: 'minPrice',
+            messages: ['minPrice must not be greater than maxPrice'],
+          },
+          {
+            field: 'returnDate',
+            messages: ['returnDate cannot be before departureDate'],
+          },
+        ],
+      },
+    });
+  });
+
+  it('checks the airports once for both legs, with the answers of FLT-03', async () => {
+    const { service, flights } = setup(
+      undefined,
+      new Map([['CAI', 'Africa/Cairo']]),
+    );
+
+    await expect(
+      service.search(query({ returnDate: '2027-06-22' }), NOW),
+    ).rejects.toMatchObject({
+      response: {
+        errors: [
+          {
+            field: 'arrivalAirport',
+            messages: ['arrivalAirport JFK is not in the airports list'],
+          },
+        ],
+      },
+    });
+    expect(flights.aggregate).not.toHaveBeenCalled();
+  });
+
+  it('pipeline() searches the outbound leg of the query when no leg is given', () => {
+    const { service } = setup();
+    const stages = service.pipeline(query(), NOW) as unknown as Record<
+      string,
+      Record<string, unknown>
+    >[];
+
+    expect(stages[0].$match).toEqual(
+      expect.objectContaining({
+        departureAirport: 'CAI',
+        arrivalAirport: 'JFK',
+        departureDateLocal: '2027-06-15',
+      }),
+    );
+    expect(outboundLeg(query({ returnDate: '2027-06-22' }))).toEqual({
+      from: 'CAI',
+      to: 'JFK',
+      date: '2027-06-15',
+    });
   });
 });

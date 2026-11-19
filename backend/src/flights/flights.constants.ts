@@ -162,3 +162,7 @@ export const FLIGHT_BOOKING_PENDING_PAYMENT = 'pending_payment';
  */
 export const duplicateCabinMessage = (cabin: CabinClass): string =>
   `This flight already has ${/^[aeiou]/.test(cabin) ? 'an' : 'a'} ${cabin} cabin`;
+
+/** FLT-12(a): the return of a round trip cannot leave before the outbound date. */
+export const RETURN_BEFORE_DEPARTURE_MESSAGE =
+  'returnDate cannot be before departureDate';
