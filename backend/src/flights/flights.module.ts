@@ -8,6 +8,7 @@ import { Flight, FlightSchema } from './models/flight.schema';
 import { AirlinesService } from './airlines.service';
 import { AirlinesController } from './airlines.controller';
 import { FlightCabinsController } from './flight-cabins.controller';
+import { FlightBookingLookup } from './flight-booking-lookup.service';
 import { FlightCabinsService } from './flight-cabins.service';
 import { FlightResponsesService } from './flight-responses.service';
 import { FlightSearchController } from './flight-search.controller';
@@ -40,6 +41,7 @@ import { FlightsService } from './flights.service';
     FlightCabinsService,
     FlightResponsesService,
     FlightSearchService,
+    FlightBookingLookup,
   ],
   // FlightResponsesService: flight responses with local times (GEN-06) for
   // the flight-bookings module (FLT-23, FLT-25, FLT-29).

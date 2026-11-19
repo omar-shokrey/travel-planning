@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -19,13 +18,11 @@ import {
   EMPTY_CABIN_UPDATE_MESSAGE,
   FLIGHT_CHANGED_MESSAGE,
   FLIGHT_NOT_FOUND_MESSAGE,
-  FLIGHT_NOT_SCHEDULED_MESSAGE,
-  FOREIGN_FLIGHT_MESSAGE,
 } from './flights.constants';
 import type { CabinSource, FlightSource } from './mappers/flight.mapper';
+import { assertEditable } from './flight-editable';
 import { FlightResponsesService } from './flight-responses.service';
-import { effectiveStatus, scheduledFlightFilter } from './flight-status';
-import { FlightStatus } from './models/flight-status.enum';
+import { scheduledFlightFilter } from './flight-status';
 import { Flight } from './models/flight.schema';
 
 /** The cabin fields a moderator may change (FLT-04, FLT-05), in the order of the DTO. */
@@ -42,28 +39,6 @@ type EditableCabinField = (typeof EDITABLE_CABIN_FIELDS)[number];
 type FlightState = Pick<Flight, 'airlineId' | 'status' | 'departureAt'> & {
   cabins?: CabinSource[];
 };
-
-/**
- * The checks every cabin change shares, in this order: the flight exists
- * (404), it belongs to the moderator's airline (403), it is scheduled at
- * `now` (409): not cancelled, not departed, and its departure time has not
- * passed (FLT-30).
- */
-function assertEditable(
-  flight: FlightState | null,
-  airlineId: Types.ObjectId,
-  now: Date,
-): asserts flight is FlightState {
-  if (!flight) {
-    throw new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE);
-  }
-  if (!flight.airlineId.equals(airlineId)) {
-    throw new ForbiddenException(FOREIGN_FLIGHT_MESSAGE);
-  }
-  if (effectiveStatus(flight, now) !== FlightStatus.Scheduled) {
-    throw new ConflictException(FLIGHT_NOT_SCHEDULED_MESSAGE);
-  }
-}
 
 /**
  * The cabin categories of a flight (FLT-04): an airline moderator adds them

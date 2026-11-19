@@ -5,19 +5,28 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { DateTime } from 'luxon';
-import type { Model } from 'mongoose';
+import type { Model, QueryFilter, Types } from 'mongoose';
 import type { FieldError } from '../common/interfaces/error-response.interface';
 import { AirlinesService } from './airlines.service';
 import type { CreateFlightDto } from './dto/create-flight.dto';
 import type { FlightResponseDto } from './dto/flight-response.dto';
+import type { UpdateFlightDto } from './dto/update-flight.dto';
+import { FlightBookingLookup } from './flight-booking-lookup.service';
+import { assertEditable, type EditableFlight } from './flight-editable';
 import { FlightResponsesService } from './flight-responses.service';
+import { scheduledFlightFilter } from './flight-status';
 import {
+  AIRPORTS_LOCKED_MESSAGE,
   DUPLICATE_FLIGHT_MESSAGE,
+  EMPTY_FLIGHT_UPDATE_MESSAGE,
+  FLIGHT_CHANGED_MESSAGE,
   SAME_AIRPORTS_MESSAGE,
+  SAME_DEPARTURE_AIRPORT_MESSAGE,
   unknownAirportMessage,
 } from './flights.constants';
-import { toFlightResponse } from './mappers/flight.mapper';
+import { type FlightSource, toFlightResponse } from './mappers/flight.mapper';
 import { FlightStatus } from './models/flight-status.enum';
+import type { FlightCabin } from './models/flight.schema';
 import { Flight } from './models/flight.schema';
 
 const DUPLICATE_KEY = 11000;
@@ -58,6 +67,39 @@ class FieldErrors {
   }
 }
 
+/** The fields of the flight edit (FLT-05), in the order of its DTO. */
+const UPDATE_FIELDS = [
+  'departureAirport',
+  'arrivalAirport',
+  'departureLocal',
+  'arrivalLocal',
+] as const;
+
+/** What the edit reads of a flight: the rules are checked against these values. */
+type EditState = EditableFlight &
+  Pick<Flight, 'departureAirport' | 'arrivalAirport' | 'arrivalAt'> & {
+    _id: Types.ObjectId;
+    cabins?: Pick<FlightCabin, 'bookedSeats' | 'heldSeats'>[];
+  };
+
+/**
+ * No cabin has a seat booked or held (FLT-05): part of the write's filter when
+ * the airports change, so a hold that arrives at the same moment (FLT-22
+ * changes these counters in the same document) can never slip between the
+ * check and the write.
+ */
+const NO_SEATS_TAKEN: QueryFilter<Flight> = {
+  $nor: [
+    { 'cabins.bookedSeats': { $gt: 0 } },
+    { 'cabins.heldSeats': { $gt: 0 } },
+  ],
+};
+
+const seatsTaken = (flight: EditState): boolean =>
+  (flight.cabins ?? []).some(
+    (cabin) => cabin.bookedSeats > 0 || cabin.heldSeats > 0,
+  );
+
 /** The format a local date-time is typed in, with or without seconds. */
 const formatOf = (value: string): string =>
   value.length > 'YYYY-MM-DDTHH:mm'.length
@@ -70,6 +112,7 @@ export class FlightsService {
     @InjectModel(Flight.name) private readonly flights: Model<Flight>,
     private readonly airlines: AirlinesService,
     private readonly responses: FlightResponsesService,
+    private readonly bookings: FlightBookingLookup,
   ) {}
 
   /**
@@ -159,6 +202,201 @@ export class FlightsService {
       }
       throw error;
     }
+  }
+
+  /**
+   * FLT-05: an airline moderator changes the times or the airports of a
+   * scheduled flight of their airline. The times are typed in each airport's
+   * local time and checked with the rules of FLT-03 against the values the
+   * flight keeps; all broken rules are listed in one 400.
+   *
+   * The airports cannot change once the flight has a booking: a booking that
+   * waits for its payment or is confirmed is read before the write, and the
+   * seats booked or held are part of the write's filter. Times can always
+   * change.
+   *
+   * One conditional write (`findOneAndUpdate`, which also returns the flight
+   * as written): it matches only while the flight is still the moderator's,
+   * scheduled at `now` (FLT-30) and exactly as it was read, so a concurrent
+   * change can never combine with this one into a flight whose arrival is
+   * before its departure.
+   */
+  async update(
+    flightId: string,
+    dto: UpdateFlightDto,
+    userId: string,
+  ): Promise<FlightResponseDto> {
+    if (UPDATE_FIELDS.every((field) => dto[field] === undefined)) {
+      throw new BadRequestException(EMPTY_FLIGHT_UPDATE_MESSAGE);
+    }
+
+    const now = new Date();
+    const airline = await this.airlines.findAssignedAirlineOrThrow(userId);
+    const stored = await this.readEditState(flightId);
+    assertEditable(stored, airline._id, now);
+
+    const departureAirport = dto.departureAirport ?? stored.departureAirport;
+    const arrivalAirport = dto.arrivalAirport ?? stored.arrivalAirport;
+    const airportsChange =
+      departureAirport !== stored.departureAirport ||
+      arrivalAirport !== stored.arrivalAirport;
+
+    // The zones of the old and the new airports, in one query.
+    const zones = await this.responses.timeZonesOf([
+      stored.departureAirport,
+      stored.arrivalAirport,
+      departureAirport,
+      arrivalAirport,
+    ]);
+    const errors = new FieldErrors();
+    const zoneOf = (
+      field: 'departureAirport' | 'arrivalAirport',
+      code: string,
+    ): string | undefined => {
+      const zone = zones.get(code);
+      if (!zone && dto[field] !== undefined) {
+        errors.add(field, unknownAirportMessage(field, code));
+      } else if (!zone) {
+        throw new Error(
+          `Airport ${code} of a stored flight has no time zone in the airports list`,
+        );
+      }
+      return zone;
+    };
+    const departureZone = zoneOf('departureAirport', departureAirport);
+    const arrivalZone = zoneOf('arrivalAirport', arrivalAirport);
+    if (departureAirport === arrivalAirport) {
+      if (dto.arrivalAirport !== undefined) {
+        errors.add('arrivalAirport', SAME_AIRPORTS_MESSAGE);
+      } else {
+        errors.add('departureAirport', SAME_DEPARTURE_AIRPORT_MESSAGE);
+      }
+    }
+
+    // A time that is not sent keeps its instant, even at a new airport.
+    let departureAt: Date | undefined = stored.departureAt;
+    if (dto.departureLocal !== undefined) {
+      departureAt = departureZone
+        ? this.toInstant(
+            dto.departureLocal,
+            departureZone,
+            'departureLocal',
+            errors,
+          )?.toJSDate()
+        : undefined;
+      if (departureAt && departureAt <= now) {
+        errors.add('departureLocal', 'departureLocal must be in the future');
+      }
+    }
+    let arrivalAt: Date | undefined = stored.arrivalAt;
+    if (dto.arrivalLocal !== undefined) {
+      arrivalAt = arrivalZone
+        ? this.toInstant(
+            dto.arrivalLocal,
+            arrivalZone,
+            'arrivalLocal',
+            errors,
+          )?.toJSDate()
+        : undefined;
+    }
+    if (departureAt && arrivalAt && arrivalAt <= departureAt) {
+      if (dto.arrivalLocal !== undefined) {
+        errors.add(
+          'arrivalLocal',
+          'arrivalLocal must be after departureLocal, compared in UTC',
+        );
+      } else {
+        errors.add(
+          'departureLocal',
+          'departureLocal must be before the arrival, compared in UTC',
+        );
+      }
+    }
+    errors.throwIfAny();
+
+    // All four are set here: a missing one added an error above.
+    const after = {
+      departureAirport,
+      arrivalAirport,
+      departureAt: departureAt as Date,
+      arrivalAt: arrivalAt as Date,
+      departureZone: departureZone as string,
+      arrivalZone: arrivalZone as string,
+    };
+    if (airportsChange && (await this.bookings.hasActiveBooking(flightId))) {
+      throw new ConflictException(AIRPORTS_LOCKED_MESSAGE);
+    }
+
+    const filter: QueryFilter<Flight> = {
+      $and: [
+        { _id: stored._id, airlineId: airline._id },
+        scheduledFlightFilter(now),
+        // Compare-and-set: the flight is still as the rules saw it.
+        {
+          departureAirport: stored.departureAirport,
+          arrivalAirport: stored.arrivalAirport,
+          departureAt: stored.departureAt,
+          arrivalAt: stored.arrivalAt,
+        },
+        ...(airportsChange ? [NO_SEATS_TAKEN] : []),
+      ],
+    };
+    let updated: FlightSource | null;
+    try {
+      // One atomic call: the answer is the flight exactly as this write left it.
+      updated = await this.flights
+        .findOneAndUpdate(
+          filter,
+          {
+            $set: {
+              departureAirport: after.departureAirport,
+              arrivalAirport: after.arrivalAirport,
+              departureAt: after.departureAt,
+              arrivalAt: after.arrivalAt,
+              // The departure date at the (new) departure airport (FLT-11 searches by it).
+              departureDateLocal: DateTime.fromJSDate(after.departureAt, {
+                zone: after.departureZone,
+              }).toFormat('yyyy-MM-dd'),
+            },
+          },
+          { returnDocument: 'after', runValidators: true },
+        )
+        .lean<FlightSource>()
+        .exec();
+    } catch (error) {
+      // The new local date can clash with another flight of the same number (FLT-03).
+      if (isDuplicateKey(error)) {
+        throw new ConflictException(DUPLICATE_FLIGHT_MESSAGE);
+      }
+      throw error;
+    }
+
+    if (!updated) {
+      const current = await this.readEditState(flightId);
+      assertEditable(current, airline._id, now);
+      if (airportsChange && seatsTaken(current)) {
+        throw new ConflictException(AIRPORTS_LOCKED_MESSAGE);
+      }
+      // It matched none of the reasons above when it was read again: it
+      // changed between the read and the write.
+      throw new ConflictException(FLIGHT_CHANGED_MESSAGE);
+    }
+
+    // The zones were read above, so the response needs no second query (GEN-06).
+    return toFlightResponse(updated, now, {
+      departure: after.departureZone,
+      arrival: after.arrivalZone,
+    });
+  }
+
+  private readEditState(flightId: string): Promise<EditState | null> {
+    return this.flights
+      .findById(flightId)
+      .select(
+        'airlineId status departureAirport arrivalAirport departureAt arrivalAt cabins.bookedSeats cabins.heldSeats',
+      )
+      .lean<EditState>()
+      .exec();
   }
 
   /**

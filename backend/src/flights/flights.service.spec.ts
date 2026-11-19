@@ -2,13 +2,24 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import { Types } from 'mongoose';
 import type { FieldError } from '../common/interfaces/error-response.interface';
 import type { AirlinesService } from './airlines.service';
 import type { CreateFlightDto } from './dto/create-flight.dto';
+import type { UpdateFlightDto } from './dto/update-flight.dto';
+import type { FlightBookingLookup } from './flight-booking-lookup.service';
 import { FlightResponsesService } from './flight-responses.service';
-import { DUPLICATE_FLIGHT_MESSAGE } from './flights.constants';
+import {
+  AIRPORTS_LOCKED_MESSAGE,
+  DUPLICATE_FLIGHT_MESSAGE,
+  EMPTY_FLIGHT_UPDATE_MESSAGE,
+  FLIGHT_CHANGED_MESSAGE,
+  FLIGHT_NOT_FOUND_MESSAGE,
+  FLIGHT_NOT_SCHEDULED_MESSAGE,
+  FOREIGN_FLIGHT_MESSAGE,
+} from './flights.constants';
 import { FlightsService } from './flights.service';
 import { FlightStatus } from './models/flight-status.enum';
 
@@ -21,6 +32,7 @@ const AIRPORTS: Record<string, string> = {
   NRT: 'Asia/Tokyo',
   LAX: 'America/Los_Angeles',
   SYD: 'Australia/Sydney',
+  SIN: 'Asia/Singapore',
 };
 
 const AIRLINE_ID = new Types.ObjectId('6740f1c2a4b5c6d7e8f90123');
@@ -69,6 +81,7 @@ function setup() {
     flights as never,
     airlines as unknown as AirlinesService,
     new FlightResponsesService(airports as never),
+    {} as FlightBookingLookup,
   );
   return { service, flights, airports, airlines };
 }
@@ -495,5 +508,598 @@ describe('FlightsService.create (FLT-03)', () => {
     await service.create(dto(), 'm');
 
     expect(flights.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+const FLIGHT_ID = '6740f1c2a4b5c6d7e8f90456';
+const OTHER_AIRLINE_ID = new Types.ObjectId('6740f1c2a4b5c6d7e8f90999');
+
+/**
+ * The flight as stored: CAI 14:30 (UTC+3 in June) to JFK 18:30 (UTC-4),
+ * scheduled, with one economy cabin.
+ */
+const storedFlight = (fields: Record<string, unknown> = {}) => ({
+  _id: new Types.ObjectId(FLIGHT_ID),
+  airlineId: AIRLINE_ID,
+  status: FlightStatus.Scheduled,
+  flightNumber: 'MS123',
+  departureAirport: 'CAI',
+  arrivalAirport: 'JFK',
+  departureAt: new Date('2027-06-15T11:30:00.000Z'),
+  arrivalAt: new Date('2027-06-15T22:30:00.000Z'),
+  departureDateLocal: '2027-06-15',
+  cabins: [
+    {
+      _id: new Types.ObjectId('6740f1c2a4b5c6d7e8f90789'),
+      cabin: 'economy',
+      totalSeats: 100,
+      bookedSeats: 0,
+      heldSeats: 0,
+      price: 25000,
+      freeBags: 1,
+      maxBagKg: 23,
+    },
+  ],
+  createdAt: NOW,
+  updatedAt: NOW,
+  ...fields,
+});
+
+/**
+ * The edit's collaborators. `reads` are the answers of the flight reads, in
+ * order: `findById` (the state the rules check), then `findOneAndUpdate` (the
+ * flight as written) or, when `writeFindsNothing()` made the write match nothing,
+ * `findById` again (the state read to tell why).
+ */
+function editSetup(...reads: unknown[]) {
+  const airportsQuery = {
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockReturnThis(),
+    exec: jest.fn(),
+  };
+  const airports = {
+    find: jest.fn((filter: { _id: { $in: string[] } }) => {
+      airportsQuery.exec.mockResolvedValue(
+        filter._id.$in
+          .filter((code) => code in AIRPORTS)
+          .map((code) => ({ _id: code, timeZone: AIRPORTS[code] })),
+      );
+      return airportsQuery;
+    }),
+  };
+  const queue = [...reads];
+  const flights = {
+    findById: jest.fn(() => {
+      const query = {
+        select: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn(() => Promise.resolve(queue.shift() ?? null)),
+      };
+      return query;
+    }),
+    findOneAndUpdate: jest.fn(() => ({
+      lean: jest.fn().mockReturnThis(),
+      exec: jest.fn(() => Promise.resolve(queue.shift() ?? null)),
+    })),
+  };
+  const airlines = {
+    findAssignedAirlineOrThrow: jest
+      .fn()
+      .mockResolvedValue({ _id: AIRLINE_ID, active: true }),
+  };
+  const bookings = {
+    hasActiveBooking: jest.fn().mockResolvedValue(false),
+  };
+  const service = new FlightsService(
+    flights as never,
+    airlines as unknown as AirlinesService,
+    new FlightResponsesService(airports as never),
+    bookings as unknown as FlightBookingLookup,
+  );
+  /** The filter and the update of the one write. */
+  const write = () => {
+    expect(flights.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    const [filter, update, options] = flights.findOneAndUpdate.mock
+      .calls[0] as unknown as [
+      { $and: Record<string, unknown>[] },
+      { $set: Record<string, unknown> },
+      unknown,
+    ];
+    return { filter, update, options };
+  };
+  /** Makes the one write find no flight to change, or fail with `error`. */
+  const writeFindsNothing = (error?: unknown) =>
+    flights.findOneAndUpdate.mockReturnValueOnce({
+      lean: jest.fn().mockReturnThis(),
+      exec: error
+        ? jest.fn().mockRejectedValue(error)
+        : jest.fn().mockResolvedValue(null),
+    });
+  return {
+    service,
+    flights,
+    airports,
+    airlines,
+    bookings,
+    write,
+    writeFindsNothing,
+  };
+}
+
+/** The filter of a write that leaves the airports as they are. */
+const timesOnlyFilter = (now: Date) => ({
+  $and: [
+    { _id: new Types.ObjectId(FLIGHT_ID), airlineId: AIRLINE_ID },
+    { status: FlightStatus.Scheduled, departureAt: { $gt: now } },
+    {
+      departureAirport: 'CAI',
+      arrivalAirport: 'JFK',
+      departureAt: new Date('2027-06-15T11:30:00.000Z'),
+      arrivalAt: new Date('2027-06-15T22:30:00.000Z'),
+    },
+  ],
+});
+
+const NO_SEATS_TAKEN = {
+  $nor: [
+    { 'cabins.bookedSeats': { $gt: 0 } },
+    { 'cabins.heldSeats': { $gt: 0 } },
+  ],
+};
+
+const edit = (
+  service: FlightsService,
+  body: UpdateFlightDto,
+  flightId = FLIGHT_ID,
+) => service.update(flightId, body, 'moderator-1');
+
+describe('FlightsService.update (FLT-05)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers({ now: NOW });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  describe('the times', () => {
+    it('stores a new local departure in UTC, keeps the rest, and answers the flight', async () => {
+      const after = storedFlight({
+        departureAt: new Date('2027-06-15T13:30:00.000Z'),
+      });
+      const { service, write, airlines } = editSetup(storedFlight(), after);
+
+      const result = await edit(service, {
+        departureLocal: '2027-06-15T16:30',
+      });
+
+      expect(airlines.findAssignedAirlineOrThrow).toHaveBeenCalledWith(
+        'moderator-1',
+      );
+      const { filter, update, options } = write();
+      expect(filter).toEqual(timesOnlyFilter(NOW));
+      expect(update).toEqual({
+        $set: {
+          departureAirport: 'CAI',
+          arrivalAirport: 'JFK',
+          departureAt: new Date('2027-06-15T13:30:00.000Z'),
+          arrivalAt: new Date('2027-06-15T22:30:00.000Z'),
+          departureDateLocal: '2027-06-15',
+        },
+      });
+      expect(options).toEqual({ returnDocument: 'after', runValidators: true });
+      expect(result).toMatchObject({
+        id: FLIGHT_ID,
+        departureAt: '2027-06-15T13:30:00.000Z',
+        departureLocal: '2027-06-15T16:30',
+        departureTimeZone: 'Africa/Cairo',
+        arrivalLocal: '2027-06-15T18:30',
+        departureDateLocal: '2027-06-15',
+        status: 'scheduled',
+      });
+      expect(result.cabins).toHaveLength(1);
+    });
+
+    it('reads the arrival in the arrival airport time zone', async () => {
+      const { service, write } = editSetup(storedFlight(), storedFlight());
+
+      await edit(service, { arrivalLocal: '2027-06-15T20:45' });
+
+      // 20:45 in New York (UTC-4) is 00:45 UTC the next day.
+      expect(write().update.$set).toMatchObject({
+        departureAt: new Date('2027-06-15T11:30:00.000Z'),
+        arrivalAt: new Date('2027-06-16T00:45:00.000Z'),
+      });
+    });
+
+    it('recomputes the local departure date when the new time crosses midnight at an airport ahead of UTC', async () => {
+      // SIN is UTC+8: 23:00 on the 15th is 15:00 UTC.
+      const fromSingapore = storedFlight({
+        departureAirport: 'SIN',
+        departureAt: new Date('2027-06-15T15:00:00.000Z'),
+        arrivalAt: new Date('2027-06-16T10:00:00.000Z'),
+      });
+      const { service, write } = editSetup(fromSingapore, fromSingapore);
+
+      // 00:30 on the 16th in Singapore is still the 15th in UTC (16:30).
+      await edit(service, { departureLocal: '2027-06-16T00:30' });
+
+      expect(write().update.$set).toMatchObject({
+        departureAt: new Date('2027-06-15T16:30:00.000Z'),
+        departureDateLocal: '2027-06-16',
+      });
+    });
+
+    it('refuses a departure in the past, as FLT-03 does', async () => {
+      const { service, flights } = editSetup(storedFlight());
+
+      // NOW is 2027-01-10 00:00 UTC, 02:00 in Cairo.
+      expect(
+        await fieldErrors(
+          edit(service, { departureLocal: '2027-01-10T01:59' }),
+        ),
+      ).toEqual([
+        {
+          field: 'departureLocal',
+          messages: ['departureLocal must be in the future'],
+        },
+      ]);
+      expect(flights.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('refuses a new arrival not after the stored departure, on arrivalLocal', async () => {
+      const { service } = editSetup(storedFlight());
+
+      // 07:30 in New York is 11:30 UTC: the same instant as the departure.
+      expect(
+        await fieldErrors(edit(service, { arrivalLocal: '2027-06-15T07:30' })),
+      ).toEqual([
+        {
+          field: 'arrivalLocal',
+          messages: [
+            'arrivalLocal must be after departureLocal, compared in UTC',
+          ],
+        },
+      ]);
+    });
+
+    it('refuses a new departure not before the stored arrival, on departureLocal', async () => {
+      const { service } = editSetup(storedFlight());
+
+      // 01:30 on the 16th in Cairo is 22:30 UTC: the stored arrival.
+      expect(
+        await fieldErrors(
+          edit(service, { departureLocal: '2027-06-16T01:30' }),
+        ),
+      ).toEqual([
+        {
+          field: 'departureLocal',
+          messages: [
+            'departureLocal must be before the arrival, compared in UTC',
+          ],
+        },
+      ]);
+    });
+
+    it('accepts a new departure and arrival that are only in order together', async () => {
+      const { service, write } = editSetup(storedFlight(), storedFlight());
+
+      await edit(service, {
+        departureLocal: '2027-06-16T08:00',
+        arrivalLocal: '2027-06-16T15:00',
+      });
+
+      expect(write().update.$set).toMatchObject({
+        departureAt: new Date('2027-06-16T05:00:00.000Z'),
+        arrivalAt: new Date('2027-06-16T19:00:00.000Z'),
+        departureDateLocal: '2027-06-16',
+      });
+    });
+
+    it('refuses a local time inside a daylight saving gap', async () => {
+      // New York skips 02:00-03:00 on 2027-03-14.
+      const { service } = editSetup(storedFlight());
+
+      const errors = await fieldErrors(
+        edit(service, { arrivalLocal: '2027-03-14T02:30' }),
+      );
+      expect(errors).toEqual([
+        {
+          field: 'arrivalLocal',
+          messages: [
+            'arrivalLocal 2027-03-14T02:30 does not exist in America/New_York: the clocks skip that time (daylight saving change)',
+          ],
+        },
+      ]);
+    });
+  });
+
+  describe('the airports', () => {
+    it('changes an airport when the flight has no booking: the lookup first, then a write that requires no seat booked or held', async () => {
+      const after = storedFlight({ departureAirport: 'NRT' });
+      const { service, write, bookings, airports, flights } = editSetup(
+        storedFlight(),
+        after,
+      );
+
+      const result = await edit(service, { departureAirport: 'NRT' });
+
+      expect(bookings.hasActiveBooking).toHaveBeenCalledWith(FLIGHT_ID);
+      const { filter, update } = write();
+      expect(filter).toEqual({
+        $and: [...timesOnlyFilter(NOW).$and, NO_SEATS_TAKEN],
+      });
+      expect(
+        bookings.hasActiveBooking.mock.invocationCallOrder[0],
+      ).toBeLessThan(flights.findOneAndUpdate.mock.invocationCallOrder[0]);
+      // The instants stay; the local date is read at the new airport:
+      // 11:30 UTC is 20:30 in Tokyo, still the 15th.
+      expect(update.$set).toEqual({
+        departureAirport: 'NRT',
+        arrivalAirport: 'JFK',
+        departureAt: new Date('2027-06-15T11:30:00.000Z'),
+        arrivalAt: new Date('2027-06-15T22:30:00.000Z'),
+        departureDateLocal: '2027-06-15',
+      });
+      // The old and the new airports' zones in one query.
+      expect(airports.find).toHaveBeenCalledTimes(1);
+      expect(airports.find).toHaveBeenCalledWith({
+        _id: { $in: ['CAI', 'JFK', 'NRT'] },
+      });
+      expect(result).toMatchObject({
+        departureAirport: 'NRT',
+        departureTimeZone: 'Asia/Tokyo',
+        departureLocal: '2027-06-15T20:30',
+      });
+    });
+
+    it('recomputes the local date at the new departure airport', async () => {
+      const lateUtc = storedFlight({
+        departureAt: new Date('2027-06-15T20:00:00.000Z'),
+        arrivalAt: new Date('2027-06-16T08:00:00.000Z'),
+      });
+      const { service, write } = editSetup(lateUtc, lateUtc);
+
+      // 20:00 UTC is 23:00 in Cairo (the 15th) and 04:00 in Singapore (the 16th).
+      await edit(service, { departureAirport: 'SIN' });
+
+      expect(write().update.$set).toMatchObject({
+        departureAirport: 'SIN',
+        departureDateLocal: '2027-06-16',
+      });
+    });
+
+    it('reads a new local time in the new airport time zone', async () => {
+      const { service, write } = editSetup(storedFlight(), storedFlight());
+
+      await edit(service, {
+        departureAirport: 'NRT',
+        departureLocal: '2027-06-15T20:00',
+      });
+
+      // 20:00 in Tokyo (UTC+9) is 11:00 UTC.
+      expect(write().update.$set).toMatchObject({
+        departureAirport: 'NRT',
+        departureAt: new Date('2027-06-15T11:00:00.000Z'),
+      });
+    });
+
+    it('refuses to change the airports while a booking waits for its payment or is confirmed (409), before any write', async () => {
+      const { service, flights, bookings } = editSetup(storedFlight());
+      bookings.hasActiveBooking.mockResolvedValueOnce(true);
+
+      await expect(edit(service, { arrivalAirport: 'LAX' })).rejects.toThrow(
+        new ConflictException(AIRPORTS_LOCKED_MESSAGE),
+      );
+      expect(flights.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['booked', { bookedSeats: 1, heldSeats: 0 }],
+      ['held', { bookedSeats: 0, heldSeats: 1 }],
+    ])(
+      'answers 409 when the write matched nothing because a seat is %s',
+      async (_label, counters) => {
+        const taken = storedFlight({
+          cabins: [{ ...storedFlight().cabins[0], ...counters }],
+        });
+        const { service, writeFindsNothing } = editSetup(storedFlight(), taken);
+        writeFindsNothing();
+
+        await expect(
+          edit(service, { departureAirport: 'NRT' }),
+        ).rejects.toThrow(new ConflictException(AIRPORTS_LOCKED_MESSAGE));
+      },
+    );
+
+    it('treats the airport the flight already has as no change: no lookup and no seat condition', async () => {
+      const { service, write, bookings } = editSetup(
+        storedFlight({
+          cabins: [{ ...storedFlight().cabins[0], bookedSeats: 40 }],
+        }),
+        storedFlight(),
+      );
+
+      await edit(service, {
+        departureAirport: 'CAI',
+        arrivalAirport: 'JFK',
+        departureLocal: '2027-06-15T16:30',
+      });
+
+      expect(bookings.hasActiveBooking).not.toHaveBeenCalled();
+      expect(write().filter).toEqual(timesOnlyFilter(NOW));
+    });
+
+    it('changes the times of a booked flight: the seat condition is only for the airports', async () => {
+      const booked = storedFlight({
+        cabins: [
+          { ...storedFlight().cabins[0], bookedSeats: 40, heldSeats: 2 },
+        ],
+      });
+      const { service, write, bookings } = editSetup(booked, booked);
+
+      await edit(service, { departureLocal: '2027-06-15T16:30' });
+
+      expect(bookings.hasActiveBooking).not.toHaveBeenCalled();
+      expect(write().filter).toEqual(timesOnlyFilter(NOW));
+    });
+
+    it('refuses an airport that is not in the airports list, on its field', async () => {
+      const { service } = editSetup(storedFlight());
+
+      expect(
+        await fieldErrors(edit(service, { arrivalAirport: 'QQQ' })),
+      ).toEqual([
+        {
+          field: 'arrivalAirport',
+          messages: ['arrivalAirport QQQ is not in the airports list'],
+        },
+      ]);
+    });
+
+    it('refuses identical airports, on the field that was sent', async () => {
+      const { service } = editSetup(storedFlight(), storedFlight());
+
+      expect(
+        await fieldErrors(edit(service, { arrivalAirport: 'CAI' })),
+      ).toEqual([
+        {
+          field: 'arrivalAirport',
+          messages: ['arrivalAirport must be different from departureAirport'],
+        },
+      ]);
+      expect(
+        await fieldErrors(edit(service, { departureAirport: 'JFK' })),
+      ).toEqual([
+        {
+          field: 'departureAirport',
+          messages: ['departureAirport must be different from arrivalAirport'],
+        },
+      ]);
+    });
+
+    it('lists several broken rules in one 400, in the order of the fields', async () => {
+      const { service } = editSetup(storedFlight());
+
+      const errors = await fieldErrors(
+        edit(service, {
+          departureAirport: 'QQQ',
+          arrivalLocal: '2027-06-15T07:30',
+        }),
+      );
+      expect(errors.map((error) => error.field)).toEqual([
+        'departureAirport',
+        'arrivalLocal',
+      ]);
+    });
+  });
+
+  describe('who and which flight: the answers of the cabin routes (FLT-04)', () => {
+    it('answers 400 to an empty body before anything is read', async () => {
+      const { service, airlines, flights } = editSetup();
+
+      await expect(edit(service, {})).rejects.toThrow(
+        new BadRequestException(EMPTY_FLIGHT_UPDATE_MESSAGE),
+      );
+      expect(airlines.findAssignedAirlineOrThrow).not.toHaveBeenCalled();
+      expect(flights.findById).not.toHaveBeenCalled();
+    });
+
+    it('answers 403 to a moderator with no airline, before the flight is read', async () => {
+      const { service, airlines, flights } = editSetup();
+      airlines.findAssignedAirlineOrThrow.mockRejectedValueOnce(
+        new ForbiddenException('You are not assigned to an airline'),
+      );
+
+      await expect(
+        edit(service, { departureLocal: '2027-06-15T16:30' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(flights.findById).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['no flight', null, new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE)],
+      [
+        "another airline's flight",
+        storedFlight({ airlineId: OTHER_AIRLINE_ID }),
+        new ForbiddenException(FOREIGN_FLIGHT_MESSAGE),
+      ],
+      [
+        'a cancelled flight',
+        storedFlight({ status: FlightStatus.Cancelled }),
+        new ConflictException(FLIGHT_NOT_SCHEDULED_MESSAGE),
+      ],
+      [
+        'a departed flight',
+        storedFlight({ status: FlightStatus.Departed }),
+        new ConflictException(FLIGHT_NOT_SCHEDULED_MESSAGE),
+      ],
+      [
+        'a flight still stored as scheduled whose departure has passed (FLT-30)',
+        storedFlight({ departureAt: new Date(NOW.getTime() - 60_000) }),
+        new ConflictException(FLIGHT_NOT_SCHEDULED_MESSAGE),
+      ],
+    ])(
+      'answers %s before any rule or write',
+      async (_label, flight, answer) => {
+        const { service, flights, airports, bookings } = editSetup(flight);
+
+        await expect(
+          edit(service, { departureAirport: 'NRT' }),
+        ).rejects.toThrow(answer);
+        expect(airports.find).not.toHaveBeenCalled();
+        expect(bookings.hasActiveBooking).not.toHaveBeenCalled();
+        expect(flights.findOneAndUpdate).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      [
+        'cancelled in between',
+        storedFlight({ status: FlightStatus.Cancelled }),
+        new ConflictException(FLIGHT_NOT_SCHEDULED_MESSAGE),
+      ],
+      [
+        'changed by another request in between',
+        storedFlight({ arrivalAt: new Date('2027-06-15T23:30:00.000Z') }),
+        new ConflictException(FLIGHT_CHANGED_MESSAGE),
+      ],
+    ])(
+      'reads the flight again when the write matched nothing: %s',
+      async (_label, current, answer) => {
+        const { service, writeFindsNothing } = editSetup(
+          storedFlight(),
+          current,
+        );
+        writeFindsNothing();
+
+        await expect(
+          edit(service, { departureLocal: '2027-06-15T16:30' }),
+        ).rejects.toThrow(answer);
+      },
+    );
+
+    it('answers 409 when the new local date clashes with the same flight number (E11000)', async () => {
+      const { service, writeFindsNothing } = editSetup(storedFlight());
+      writeFindsNothing({ code: 11000 });
+
+      await expect(
+        edit(service, {
+          departureLocal: '2027-06-16T14:30',
+          arrivalLocal: '2027-06-16T18:30',
+        }),
+      ).rejects.toThrow(new ConflictException(DUPLICATE_FLIGHT_MESSAGE));
+    });
+
+    it('rethrows any other database error', async () => {
+      const failure = new Error('connection lost');
+      const { service, writeFindsNothing } = editSetup(storedFlight());
+      writeFindsNothing(failure);
+
+      await expect(
+        edit(service, { departureLocal: '2027-06-15T16:30' }),
+      ).rejects.toBe(failure);
+    });
   });
 });
