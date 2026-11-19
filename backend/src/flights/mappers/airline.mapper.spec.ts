@@ -1,6 +1,10 @@
 import { Types } from 'mongoose';
 import { imageUrl } from '../../uploads/uploads.constants';
-import { toAirlineResponse, type AirlineSource } from './airline.mapper';
+import {
+  toAirlinePolicyFields,
+  toAirlineResponse,
+  type AirlineSource,
+} from './airline.mapper';
 
 const source: AirlineSource = {
   _id: new Types.ObjectId('6740f1c2a4b5c6d7e8f90123'),
@@ -117,5 +121,31 @@ describe('toAirlineResponse', () => {
       expect(response.extraBagPrice).toBeNull();
       expect(response.maxExtraBags).toBe(0);
     }
+  });
+});
+
+describe('toAirlinePolicyFields (FLT-08, FLT-09, FLT-17)', () => {
+  it('reads no policy as no tier and no extra bag', () => {
+    expect(toAirlinePolicyFields(undefined)).toEqual({
+      cancellationTiers: [],
+      extraBagPrice: null,
+      extraBagCurrency: 'USD',
+      maxExtraBags: 0,
+    });
+  });
+
+  it('copies the tiers as plain objects and the extra-bag rule', () => {
+    expect(
+      toAirlinePolicyFields({
+        cancellationTiers: [{ daysBefore: 3, refundPercent: 40 }],
+        extraBagPrice: 3000,
+        maxExtraBags: 1,
+      }),
+    ).toEqual({
+      cancellationTiers: [{ daysBefore: 3, refundPercent: 40 }],
+      extraBagPrice: 3000,
+      extraBagCurrency: 'USD',
+      maxExtraBags: 1,
+    });
   });
 });

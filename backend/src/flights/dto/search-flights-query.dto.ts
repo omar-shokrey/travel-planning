@@ -1,19 +1,27 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   IsDefined,
+  IsIn,
   IsInt,
   IsISO8601,
+  IsOptional,
   IsString,
   Matches,
   Max,
   Min,
 } from 'class-validator';
+import { PLATFORM_CURRENCY } from '../../common/constants/currency';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import {
   AIRPORT_CODE_PATTERN,
+  CABIN_PRICE_MAX,
   FLIGHT_SEARCH_PASSENGERS_MAX,
+  FLIGHT_SEARCH_SORTS,
+  type FlightSearchSort,
   LOCAL_DATE_PATTERN,
+  SORT_ORDERS,
+  type SortOrder,
 } from '../flights.constants';
 
 const trimmedUppercase = ({ value }: { value: unknown }): unknown =>
@@ -23,38 +31,35 @@ const trimmed = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
 
 /**
- * FLT-11: a flight search, as a guest or a user sends it in the query string.
- * Only the four criteria of FLT-11 and the page: the round trip, the cabin
- * filter, price filters and sorting are later issues (FLT-12 to FLT-15),
- * which add their fields here. Any other parameter answers 400. The service
- * also checks that both airports are in the airports list and that they
- * differ, with the answers of FLT-03.
+ * A price from the query string as a number, only when it is written as a
+ * whole number. Anything else (`''`, `12.5`, `1e3`, `abc`, a repeated
+ * parameter) stays as sent, so `@IsInt` refuses it; `@Type(() => Number)`
+ * would turn `''` into 0 and accept it.
+ */
+const wholeNumber = ({ value }: { value: unknown }): unknown =>
+  typeof value === 'string' && /^-?\d+$/.test(value.trim())
+    ? Number(value.trim())
+    : value;
+
+/**
+ * No `example` on the price range: Swagger UI's "Try it out" sends every
+ * example, which would narrow a plain search. The example is in the text.
+ */
+const priceDescription = (
+  bound: 'Lowest' | 'Highest',
+  exampleCents: number,
+): string =>
+  `${bound} price of one seat, inclusive, in minor units of ${PLATFORM_CURRENCY} (cents): a whole number from 0 to ${CABIN_PRICE_MAX}. A flight is listed when one of its cabins fits the passengers and is inside the price range; only those cabins are returned. minPrice above maxPrice answers 400; equal values are valid. For example, ${exampleCents} is ${(exampleCents / 100).toFixed(2)} ${PLATFORM_CURRENCY}.`;
+
+/**
+ * FLT-11: a flight search, as a guest or a user sends it in the query string:
+ * the four criteria of FLT-11, the price range and the order of FLT-15, and
+ * the page. The round trip and the cabin filter (FLT-12) add their fields
+ * here. Any other parameter answers 400. The service also checks that both
+ * airports are in the airports list and that they differ (the answers of
+ * FLT-03), and that minPrice is not above maxPrice.
  */
 export class SearchFlightsQueryDto extends PaginationQueryDto {
-  /**
-   * `skip` is computed by the server from `page` and `limit`, as in the shared
-   * `PaginationQueryDto`. There it is a getter only, and class-transformer
-   * assigns a sent `?skip=5` to a subclass, which throws (500). This setter
-   * stores the sent value as an own field instead, so the global validation
-   * pipe refuses it like any parameter the search does not have: 400 "property
-   * skip should not exist", in the same answer as the other errors. The
-   * validation pipe always runs (`forbidNonWhitelisted`), so a sent value never
-   * reaches the service. The proper fix belongs in the shared DTO (a
-   * shared-layer pull request).
-   */
-  override get skip(): number {
-    return super.skip;
-  }
-
-  set skip(sent: unknown) {
-    Object.defineProperty(this, 'skip', {
-      value: sent,
-      enumerable: true,
-      configurable: true,
-      writable: true,
-    });
-  }
-
   @ApiProperty({
     example: 'CAI',
     description:
@@ -113,4 +118,60 @@ export class SearchFlightsQueryDto extends PaginationQueryDto {
     message: `passengers must be at most ${FLIGHT_SEARCH_PASSENGERS_MAX}`,
   })
   passengers: number;
+
+  @ApiPropertyOptional({
+    type: 'integer',
+    minimum: 0,
+    maximum: CABIN_PRICE_MAX,
+    description: priceDescription('Lowest', 10000),
+  })
+  @IsOptional()
+  @Transform(wholeNumber)
+  @IsInt({ message: 'minPrice must be a whole number of minor units (cents)' })
+  @Min(0, { message: 'minPrice must be 0 or more' })
+  @Max(CABIN_PRICE_MAX, {
+    message: `minPrice must be at most ${CABIN_PRICE_MAX}`,
+  })
+  minPrice?: number;
+
+  @ApiPropertyOptional({
+    type: 'integer',
+    minimum: 0,
+    maximum: CABIN_PRICE_MAX,
+    description: priceDescription('Highest', 50000),
+  })
+  @IsOptional()
+  @Transform(wholeNumber)
+  @IsInt({ message: 'maxPrice must be a whole number of minor units (cents)' })
+  @Min(0, { message: 'maxPrice must be 0 or more' })
+  @Max(CABIN_PRICE_MAX, {
+    message: `maxPrice must be at most ${CABIN_PRICE_MAX}`,
+  })
+  maxPrice?: number;
+
+  @ApiPropertyOptional({
+    enum: FLIGHT_SEARCH_SORTS,
+    default: 'departureTime',
+    example: 'departureTime',
+    description:
+      'The order of the results: `price` (the price of one seat in the cheapest cabin listed for the flight), `duration` (arrival minus departure) or `departureTime` (the default). Flights that are equal on it keep a fixed order (by id), so pages never repeat or skip a flight.',
+  })
+  @IsOptional()
+  @IsIn(FLIGHT_SEARCH_SORTS, {
+    message: `sortBy must be one of: ${FLIGHT_SEARCH_SORTS.join(', ')}`,
+  })
+  sortBy: FlightSearchSort = 'departureTime';
+
+  @ApiPropertyOptional({
+    enum: SORT_ORDERS,
+    default: 'asc',
+    example: 'asc',
+    description:
+      'The direction of `sortBy`: `asc` (cheapest, shortest or earliest first, the default) or `desc`.',
+  })
+  @IsOptional()
+  @IsIn(SORT_ORDERS, {
+    message: `sortOrder must be one of: ${SORT_ORDERS.join(', ')}`,
+  })
+  sortOrder: SortOrder = 'asc';
 }
