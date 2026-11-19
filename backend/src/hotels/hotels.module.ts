@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceModule } from '../reference/reference.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { UsersModule } from '../users/users.module';
+import { HotelBookingLookup } from './hotel-booking-lookup.service';
 import { HotelAvailableRoomsController } from './hotel-available-rooms.controller';
 import { HotelAvailableRoomsService } from './hotel-available-rooms.service';
 import { HotelDetailsController } from './hotel-details.controller';
@@ -53,6 +54,8 @@ import { HotelsService } from './hotels.service';
     HotelSearchService,
     HotelAvailableRoomsService,
     HotelRoomHoldsService,
+    // HotelBookingLookup: reads reservations for room deletion (HTL-06, HTL-18).
+    HotelBookingLookup,
   ],
   // HotelSearchService: the hotels of a city group of an itinerary (ITN-25),
   // so that the itinerary and the search use the one free-room rule (HTL-11).

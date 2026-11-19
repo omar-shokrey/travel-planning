@@ -103,4 +103,10 @@ describe('HotelBooking schema', () => {
       ]),
     );
   });
+
+  it('has the (status, holdExpiresAt) index of the hold-expiry job (HTL-18)', () => {
+    expect(HotelBookingSchema.indexes()).toEqual(
+      expect.arrayContaining([[{ status: 1, holdExpiresAt: 1 }, {}]]),
+    );
+  });
 });

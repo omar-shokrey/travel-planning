@@ -13,6 +13,7 @@ import { configureApp, setupSwagger } from './../src/app.setup';
 import { ProviderType } from './../src/common/enums/provider-type.enum';
 import { Role } from './../src/common/enums/role.enum';
 import { HotelBookingStatus } from './../src/hotel-bookings/enums/hotel-booking-status.enum';
+import { HotelBookingExpiryService } from './../src/hotel-bookings/hotel-booking-expiry.service';
 import { HotelBooking } from './../src/hotel-bookings/models/hotel-booking.schema';
 import { Hotel } from './../src/hotels/models/hotel.schema';
 import { RoomNightState } from './../src/hotels/models/room-night-state.enum';
@@ -202,6 +203,13 @@ describe('Book hotel rooms and hold them for payment (e2e, HTL-16, HTL-18)', () 
     });
     room.expiring = await createRoom(hotelId, '108');
     room.priced = await createRoom(hotelId, '109');
+    room.booked = await createRoom(hotelId, '110');
+    room.adjacent = await createRoom(hotelId, '111');
+    room.lapsed = await createRoom(hotelId, '112');
+    room.lapsedPair = await createRoom(hotelId, '113');
+    room.paid = await createRoom(hotelId, '114');
+    room.running = await createRoom(hotelId, '115');
+    room.gone = await createRoom(hotelId, '116');
     room.plain = await createRoom(plainHotelId, '201');
     room.closed = await createRoom(closedHotelId, '301');
 
@@ -212,6 +220,17 @@ describe('Book hotel rooms and hold them for payment (e2e, HTL-16, HTL-18)', () 
       state: RoomNightState.Blocked,
     });
     createdNightIds.push(blocked._id.toString());
+
+    // A night of a Confirmed reservation of someone else (HTL-17 turns the
+    // held nights of a paid reservation into booked ones).
+    const booked = await roomNights.create({
+      roomId: new Types.ObjectId(room.booked),
+      hotelId: new Types.ObjectId(hotelId),
+      date: day(26),
+      state: RoomNightState.Booked,
+      bookingId: new Types.ObjectId(),
+    });
+    createdNightIds.push(booked._id.toString());
 
     const accounts: [string, Role, Types.ObjectId | undefined][] = [
       ['user', Role.User, undefined],
@@ -394,6 +413,63 @@ describe('Book hotel rooms and hold them for payment (e2e, HTL-16, HTL-18)', () 
     expect(response.status).toBe(409);
     // The moderator's block is still the only night of that room.
     expect(await nightsOfRoom(room.blocked)).toHaveLength(1);
+  });
+
+  it('refuses a room with a night of a confirmed reservation, and holds nothing', async () => {
+    // The free room comes first: it is not held either (all or nothing).
+    const response = await book(
+      'other',
+      body([room.single, room.booked], day(25), day(28)),
+    );
+
+    expect(response.status).toBe(409);
+    expect((response.body as ErrorBody).message).toBe(
+      'Not free for the whole stay: room 110. Nothing was held.',
+    );
+    expect(await nightsOfRoom(room.single)).not.toContainEqual(
+      expect.objectContaining({ date: day(25) }),
+    );
+    // The booked night is the only night of that room.
+    expect(await nightsOfRoom(room.booked)).toHaveLength(1);
+  });
+
+  it('refuses the whole request when one room has a blocked night', async () => {
+    const response = await book(
+      'other',
+      body([room.single, room.blocked], day(21), day(22)),
+    );
+
+    expect(response.status).toBe(409);
+    expect((response.body as ErrorBody).message).toBe(
+      'Not free for the whole stay: room 105. Nothing was held.',
+    );
+    expect(await nightsOfRoom(room.single)).not.toContainEqual(
+      expect.objectContaining({ date: day(21) }),
+    );
+  });
+
+  it('holds back-to-back stays: a stay may start on the check-out day of another', async () => {
+    const first = await book('user', body([room.adjacent], day(30), day(32)));
+    expect(first.status).toBe(201);
+
+    // The check-out day is not a night of the stay, so it is free.
+    const next = await book('other', body([room.adjacent], day(32), day(33)));
+    expect(next.status).toBe(201);
+    const before = await book('other', body([room.adjacent], day(29), day(30)));
+    expect(before.status).toBe(201);
+
+    // One more night inside the first stay overlaps it.
+    expect(
+      (await book('other', body([room.adjacent], day(31), day(32)))).status,
+    ).toBe(409);
+
+    const nights = await nightsOfRoom(room.adjacent);
+    expect(nights.map((item) => item.date)).toEqual([
+      day(29),
+      day(30),
+      day(31),
+      day(32),
+    ]);
   });
 
   it('refuses a deactivated room and a stay outside the availability', async () => {
@@ -582,6 +658,18 @@ describe('Book hotel rooms and hold them for payment (e2e, HTL-16, HTL-18)', () 
     ).toContain(field);
   });
 
+  it('answers 400 when check-out is not after check-in, and holds nothing', async () => {
+    const response = await book('user', body([room.double], day(90), day(90)));
+
+    expect(response.status).toBe(400);
+    expect(
+      (response.body as ErrorBody).errors?.map((error) => error.field),
+    ).toContain('checkIn');
+    expect(await nightsOfRoom(room.double)).not.toContainEqual(
+      expect.objectContaining({ date: day(90) }),
+    );
+  });
+
   it('answers 400 for a check-in in the past, and for a stay of more than 366 nights', async () => {
     const past = await book('user', body([room.double], day(-1), day(1)));
     expect(past.status).toBe(400);
@@ -623,6 +711,138 @@ describe('Book hotel rooms and hold them for payment (e2e, HTL-16, HTL-18)', () 
     expect(await nightsOfRoom(room.double)).not.toContainEqual(
       expect.objectContaining({ date: day(85) }),
     );
+  });
+
+  describe('expiry of unpaid holds (HTL-18, GEN-11)', () => {
+    /** The 10 minutes of a reservation pass: its hold and its nights end. */
+    const endHold = async (bookingId: string) => {
+      const ended = new Date(Date.now() - 1000);
+      await bookings.updateOne(
+        { _id: new Types.ObjectId(bookingId) },
+        { $set: { holdExpiresAt: ended } },
+      );
+      for (const item of await nightsOf(bookingId)) {
+        await roomNights.updateOne(
+          { _id: item._id },
+          { $set: { holdExpiresAt: ended } },
+        );
+      }
+    };
+
+    const statusOf = async (bookingId: string) =>
+      (await bookings.findById(bookingId).lean().exec())?.status;
+
+    it('expires a reservation whose hold ended and releases all its rooms, exactly once', async () => {
+      const held = await book(
+        'user',
+        body([room.lapsed, room.lapsedPair], day(100), day(103)),
+      );
+      expect(held.status).toBe(201);
+      const id = (held.body as BookingBody).id;
+      expect(await nightsOf(id)).toHaveLength(6);
+      await endHold(id);
+
+      const expiry = app.get(HotelBookingExpiryService);
+      await expiry.expireDueHolds(new Date());
+
+      expect(await statusOf(id)).toBe(HotelBookingStatus.Expired);
+      expect(await nightsOf(id)).toHaveLength(0);
+      expect(await nightsOfRoom(room.lapsed)).toHaveLength(0);
+      expect(await nightsOfRoom(room.lapsedPair)).toHaveLength(0);
+
+      // A second run finds nothing of it to expire or release.
+      await expiry.expireDueHolds(new Date());
+      expect(await statusOf(id)).toBe(HotelBookingStatus.Expired);
+
+      // The rooms are free again for the same dates, for someone else.
+      const again = await book(
+        'other',
+        body([room.lapsed, room.lapsedPair], day(100), day(103)),
+      );
+      expect(again.status).toBe(201);
+      expect(await nightsOf((again.body as BookingBody).id)).toHaveLength(6);
+      // The expired reservation stays expired: it is never revived.
+      expect(await statusOf(id)).toBe(HotelBookingStatus.Expired);
+    });
+
+    it('keeps a room of an expired reservation from being deleted (HTL-06)', async () => {
+      const held = await book('user', body([room.gone], day(117), day(118)));
+      expect(held.status).toBe(201);
+      const id = (held.body as BookingBody).id;
+      await endHold(id);
+      await app.get(HotelBookingExpiryService).expireDueHolds(new Date());
+      // The nights are released: only the reservation still names the room.
+      expect(await statusOf(id)).toBe(HotelBookingStatus.Expired);
+      expect(await nightsOfRoom(room.gone)).toHaveLength(0);
+
+      const response = await request(app.getHttpServer())
+        .delete(`/api/hotels/${hotelId}/rooms/${room.gone}`)
+        .set('Cookie', cookies.get('moderator') ?? '');
+
+      expect(response.status).toBe(409);
+      expect((response.body as ErrorBody).message).toBe(
+        'A room that has been reserved cannot be deleted. Deactivate it instead.',
+      );
+      expect(await rooms.exists({ _id: room.gone })).not.toBeNull();
+    });
+
+    it('never expires or releases a reservation confirmed before the job ran', async () => {
+      const held = await book('user', body([room.paid], day(110), day(112)));
+      expect(held.status).toBe(201);
+      const id = (held.body as BookingBody).id;
+      await endHold(id);
+      // HTL-17 confirms it: the status changes and its nights become booked.
+      await bookings.updateOne(
+        { _id: new Types.ObjectId(id) },
+        { $set: { status: HotelBookingStatus.Confirmed } },
+      );
+      for (const item of await nightsOf(id)) {
+        await roomNights.updateOne(
+          { _id: item._id },
+          {
+            $set: { state: RoomNightState.Booked },
+            $unset: { holdExpiresAt: 1 },
+          },
+        );
+      }
+
+      await app.get(HotelBookingExpiryService).expireDueHolds(new Date());
+
+      expect(await statusOf(id)).toBe(HotelBookingStatus.Confirmed);
+      const nights = await nightsOf(id);
+      expect(nights).toHaveLength(2);
+      expect(nights.every((item) => item.state === RoomNightState.Booked)).toBe(
+        true,
+      );
+    });
+
+    it('leaves a hold that has not ended untouched', async () => {
+      const held = await book('user', body([room.running], day(115), day(116)));
+      expect(held.status).toBe(201);
+      const id = (held.body as BookingBody).id;
+
+      await app.get(HotelBookingExpiryService).expireDueHolds(new Date());
+
+      expect(await statusOf(id)).toBe(HotelBookingStatus.PendingPayment);
+      expect(await nightsOf(id)).toHaveLength(1);
+      expect(
+        (await book('other', body([room.running], day(115), day(116)))).status,
+      ).toBe(409);
+    });
+
+    it('runs as a scheduled job every minute, without failing', async () => {
+      const held = await book('user', body([room.running], day(118), day(119)));
+      expect(held.status).toBe(201);
+      const id = (held.body as BookingBody).id;
+      await endHold(id);
+
+      await expect(
+        app.get(HotelBookingExpiryService).expireDueHoldsJob(),
+      ).resolves.toBeUndefined();
+
+      expect(await statusOf(id)).toBe(HotelBookingStatus.Expired);
+      expect(await nightsOf(id)).toHaveLength(0);
+    });
   });
 
   it('is documented in Swagger for logged-in users', async () => {

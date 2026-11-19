@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { HotelRoomsService } from './hotel-rooms.service';
+import type { HotelBookingLookup } from './hotel-booking-lookup.service';
 import type { HotelsService } from './hotels.service';
 import { RoomNightState } from './models/room-night-state.enum';
 import { todayUtc } from './room-dates';
@@ -60,6 +61,8 @@ const setup = (
     reservedNights?: string[];
     blockedNights?: { _id: Types.ObjectId; date: string }[];
     everReserved?: boolean;
+    /** A reservation names the room, but none of its nights is stored (HTL-18). */
+    inAReservation?: boolean;
   } = {},
 ) => {
   const room = options.room === undefined ? storedRoom() : options.room;
@@ -91,12 +94,27 @@ const setup = (
     findManagedEntityOrThrow: jest.fn().mockResolvedValue(hotel),
   };
 
+  const bookingLookup = {
+    wasEverReserved: jest
+      .fn()
+      .mockResolvedValue(options.inAReservation ?? false),
+  };
+
   const service = new HotelRoomsService(
     rooms as never,
     roomNights as never,
     hotelsService as unknown as HotelsService,
+    bookingLookup as unknown as HotelBookingLookup,
   );
-  return { service, room, hotel, rooms, roomNights, hotelsService };
+  return {
+    service,
+    room,
+    hotel,
+    rooms,
+    roomNights,
+    hotelsService,
+    bookingLookup,
+  };
 };
 
 type InsertedNight = { _id: Types.ObjectId; date: string; state: string };
@@ -732,7 +750,7 @@ describe('HotelRoomsService', () => {
 
   describe('remove (HTL-06)', () => {
     it('deletes a room that was never reserved, with its blocks', async () => {
-      const { service, room, rooms, roomNights } = setup();
+      const { service, room, rooms, roomNights, bookingLookup } = setup();
 
       await service.remove(HOTEL_ID, ROOM_ID, USER_ID);
 
@@ -740,6 +758,10 @@ describe('HotelRoomsService', () => {
         roomId: room!._id,
         bookingId: { $exists: true },
       });
+      expect(bookingLookup.wasEverReserved).toHaveBeenCalledWith(
+        room!.hotelId,
+        room!._id,
+      );
       expect(roomNights.deleteMany).toHaveBeenCalledWith({
         roomId: room!._id,
         state: RoomNightState.Blocked,
@@ -748,7 +770,24 @@ describe('HotelRoomsService', () => {
     });
 
     it('answers 409 and deletes nothing for a room that has been reserved', async () => {
-      const { service, rooms, roomNights } = setup({ everReserved: true });
+      const { service, rooms, roomNights, bookingLookup } = setup({
+        everReserved: true,
+      });
+
+      await expect(service.remove(HOTEL_ID, ROOM_ID, USER_ID)).rejects.toThrow(
+        new ConflictException(
+          'A room that has been reserved cannot be deleted. Deactivate it instead.',
+        ),
+      );
+
+      // A stored night already answers: the reservations are not read.
+      expect(bookingLookup.wasEverReserved).not.toHaveBeenCalled();
+      expect(roomNights.deleteMany).not.toHaveBeenCalled();
+      expect(rooms.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it('answers 409 for a room of an expired reservation whose nights were released (HTL-18)', async () => {
+      const { service, rooms, roomNights } = setup({ inAReservation: true });
 
       await expect(service.remove(HOTEL_ID, ROOM_ID, USER_ID)).rejects.toThrow(
         new ConflictException(
