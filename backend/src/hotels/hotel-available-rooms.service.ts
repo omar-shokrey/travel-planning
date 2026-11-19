@@ -8,11 +8,11 @@ import {
 import type { AvailableRoomResponseDto } from './dto/available-room-response.dto';
 import type { AvailableRoomsQueryDto } from './dto/available-rooms-query.dto';
 import {
+  groupNightsByRoom,
   isFreeForStay,
   nightsOfTheStay,
   roomsThatCanBeFree,
   STAY_NIGHT_FIELDS,
-  type SearchNight,
 } from './hotel-search';
 import { toAvailableRoomResponse } from './mappers/available-room.mapper';
 import { Hotel } from './models/hotel.schema';
@@ -102,11 +102,7 @@ export class HotelAvailableRoomsService {
       .select(STAY_NIGHT_FIELDS)
       .lean()
       .exec();
-    const nightsByRoom = new Map<string, SearchNight[]>();
-    for (const night of nights) {
-      const key = night.roomId.toString();
-      nightsByRoom.set(key, [...(nightsByRoom.get(key) ?? []), night]);
-    }
+    const nightsByRoom = groupNightsByRoom(nights);
 
     const count = nightCount(stay);
     return rooms

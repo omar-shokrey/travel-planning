@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import {
   canHost,
+  groupNightsByRoom,
   isFreeForStay,
   nightsOfTheStay,
   roomsThatCanBeFree,
@@ -153,5 +154,44 @@ describe('nightsOfTheStay (HTL-11, HTL-15)', () => {
       'roomId',
       'state',
     ]);
+  });
+});
+
+describe('groupNightsByRoom (HTL-11, HTL-15)', () => {
+  const first = new Types.ObjectId();
+  const second = new Types.ObjectId();
+  const night = (roomId: Types.ObjectId, date: string) => ({
+    roomId,
+    date,
+    state: RoomNightState.Booked,
+  });
+
+  it('groups the nights by room id, keeping the order they were read in', () => {
+    const nights = [
+      night(first, '2026-12-21'),
+      night(second, '2026-12-20'),
+      night(first, '2026-12-20'),
+    ];
+
+    const byRoom = groupNightsByRoom(nights);
+
+    expect([...byRoom.keys()]).toEqual([first.toString(), second.toString()]);
+    expect(byRoom.get(first.toString())).toEqual([nights[0], nights[2]]);
+    expect(byRoom.get(second.toString())).toEqual([nights[1]]);
+  });
+
+  it('gives an empty map for no nights', () => {
+    expect(groupNightsByRoom([]).size).toBe(0);
+  });
+
+  it('groups a year of nights of one room in one list', () => {
+    const nights = Array.from({ length: 366 }, (_, day) =>
+      night(first, `day-${day}`),
+    );
+
+    const byRoom = groupNightsByRoom(nights);
+
+    expect(byRoom.get(first.toString())).toHaveLength(366);
+    expect(byRoom.get(first.toString())?.[365]).toBe(nights[365]);
   });
 });

@@ -9,11 +9,11 @@ import type { HotelSearchResultResponseDto } from './dto/hotel-search-result-res
 import type { SearchHotelsQueryDto } from './dto/search-hotels-query.dto';
 import {
   canHost,
+  groupNightsByRoom,
   isFreeForStay,
   nightsOfTheStay,
   roomsThatCanBeFree,
   STAY_NIGHT_FIELDS,
-  type SearchNight,
   type SearchRoom,
 } from './hotel-search';
 import { toHotelSearchResult } from './mappers/hotel-search-result.mapper';
@@ -86,11 +86,7 @@ export class HotelSearchService {
             .select(STAY_NIGHT_FIELDS)
             .lean()
             .exec();
-    const nightsByRoom = new Map<string, SearchNight[]>();
-    for (const night of nights) {
-      const key = night.roomId.toString();
-      nightsByRoom.set(key, [...(nightsByRoom.get(key) ?? []), night]);
-    }
+    const nightsByRoom = groupNightsByRoom(nights);
 
     const freeByHotel = new Map<string, SearchRoom[]>();
     for (const room of rooms) {

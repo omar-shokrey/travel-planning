@@ -52,6 +52,27 @@ export function nightsOfTheStay(
 /** The `room_nights` fields `isFreeForStay` needs, plus the room id. */
 export const STAY_NIGHT_FIELDS = 'roomId date state holdExpiresAt';
 
+/**
+ * The nights read with `nightsOfTheStay`, by room id, each list in the order
+ * read: `isFreeForStay` takes one room's list. Each night is appended to its
+ * room's list, so the work grows with the number of nights, not its square.
+ */
+export function groupNightsByRoom<N extends { roomId: Types.ObjectId }>(
+  nights: readonly N[],
+): Map<string, N[]> {
+  const byRoom = new Map<string, N[]>();
+  for (const night of nights) {
+    const key = night.roomId.toString();
+    const list = byRoom.get(key);
+    if (list) {
+      list.push(night);
+    } else {
+      byRoom.set(key, [night]);
+    }
+  }
+  return byRoom;
+}
+
 /** A room as much as the search needs. */
 export interface SearchRoom {
   maxOccupancy: number;
