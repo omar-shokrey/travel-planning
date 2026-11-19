@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { CabinClass } from '../../flights/models/cabin-class.enum';
 import { FlightBookingStatus } from '../enums/flight-booking-status.enum';
+import { PassengerType } from '../enums/passenger-type.enum';
 import {
   type FlightBookingSource,
   toFlightBookingResponse,
@@ -18,7 +19,8 @@ const stored = (fields: Partial<FlightBookingSource> = {}) =>
     holdExpiresAt: new Date('2026-11-19T10:10:00.000Z'),
     currency: 'USD',
     fareTotal: 52500,
-    total: 52500,
+    baggageTotal: 4500,
+    total: 57000,
     segments: [
       {
         flightId: FLIGHT_ID,
@@ -29,12 +31,35 @@ const stored = (fields: Partial<FlightBookingSource> = {}) =>
       },
     ],
     passengerCounts: { adults: 2, children: 0, infants: 1 },
+    passengers: [
+      {
+        fullName: 'Sara Ahmed',
+        dateOfBirth: '1990-05-14',
+        passportNumber: 'A12345678',
+        type: PassengerType.Adult,
+        baggage: [{ segment: 0, bags: 1, weightKg: 20 }],
+      },
+      {
+        fullName: 'Omar Ahmed',
+        dateOfBirth: '1992-01-30',
+        passportNumber: 'B12345678',
+        type: PassengerType.Adult,
+        baggage: [],
+      },
+      {
+        fullName: 'Baby Ahmed',
+        dateOfBirth: '2026-03-01',
+        passportNumber: 'C12345678',
+        type: PassengerType.Infant,
+        baggage: [],
+      },
+    ],
     createdAt: new Date('2026-11-19T10:00:00.000Z'),
     updatedAt: new Date('2026-11-19T10:00:00.000Z'),
     ...fields,
   }) as FlightBookingSource;
 
-describe('toFlightBookingResponse (FLT-22)', () => {
+describe('toFlightBookingResponse (FLT-22, FLT-19)', () => {
   it('returns the public fields, ids as strings and moments as UTC Z strings', () => {
     expect(toFlightBookingResponse(stored())).toEqual({
       id: '6740f1c2a4b5c6d7e8f90789',
@@ -42,7 +67,8 @@ describe('toFlightBookingResponse (FLT-22)', () => {
       holdExpiresAt: '2026-11-19T10:10:00.000Z',
       currency: 'USD',
       fareTotal: 52500,
-      total: 52500,
+      baggageTotal: 4500,
+      total: 57000,
       segments: [
         {
           flightId: '6740f1c2a4b5c6d7e8f90456',
@@ -52,8 +78,61 @@ describe('toFlightBookingResponse (FLT-22)', () => {
         },
       ],
       passengerCounts: { adults: 2, children: 0, infants: 1 },
+      passengers: [
+        {
+          fullName: 'Sara Ahmed',
+          dateOfBirth: '1990-05-14',
+          type: 'adult',
+          passportNumber: 'A12345678',
+          extraBags: { bags: 1, weightKg: 20 },
+        },
+        {
+          fullName: 'Omar Ahmed',
+          dateOfBirth: '1992-01-30',
+          type: 'adult',
+          passportNumber: 'B12345678',
+          extraBags: null,
+        },
+        {
+          fullName: 'Baby Ahmed',
+          dateOfBirth: '2026-03-01',
+          type: 'infant',
+          passportNumber: 'C12345678',
+          extraBags: null,
+        },
+      ],
       createdAt: '2026-11-19T10:00:00.000Z',
     });
+  });
+
+  it('shows no passengers and no baggage fee for a booking saved before FLT-19', () => {
+    const response = toFlightBookingResponse(
+      stored({
+        passengers: undefined,
+        baggageTotal: undefined,
+      } as unknown as Partial<FlightBookingSource>),
+    );
+
+    expect(response.passengers).toEqual([]);
+    expect(response.baggageTotal).toBe(0);
+  });
+
+  it('shows only the outbound extra bags (segment 0)', () => {
+    const response = toFlightBookingResponse(
+      stored({
+        passengers: [
+          {
+            fullName: 'Sara Ahmed',
+            dateOfBirth: '1990-05-14',
+            passportNumber: 'A12345678',
+            type: PassengerType.Adult,
+            baggage: [{ segment: 1, bags: 2, weightKg: 30 }],
+          },
+        ],
+      }),
+    );
+
+    expect(response.passengers[0].extraBags).toBeNull();
   });
 
   it('never returns the owner, the airline id or Mongo internals', () => {

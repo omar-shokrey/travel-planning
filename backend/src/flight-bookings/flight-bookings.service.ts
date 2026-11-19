@@ -1,14 +1,31 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { PLATFORM_CURRENCY } from '../common/constants/currency';
 import { AirlinesService } from '../flights/airlines.service';
-import { FlightSeatHoldsService } from '../flights/flight-seat-holds.service';
+import {
+  cabinNotOnFlightMessage,
+  FLIGHT_NOT_BOOKABLE_MESSAGE,
+  FlightSeatHoldsService,
+  type HeldFlight,
+} from '../flights/flight-seat-holds.service';
+import { effectiveStatus } from '../flights/flight-status';
+import { FLIGHT_NOT_FOUND_MESSAGE } from '../flights/flights.constants';
+import { FlightStatus } from '../flights/models/flight-status.enum';
+import { Flight } from '../flights/models/flight.schema';
+import { planPassengers } from './booking-passengers';
 import type { FlightBookingResponseDto } from './dto/flight-booking-response.dto';
 import type { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import {
   FLIGHT_BOOKING_HOLD_MINUTES,
+  FLIGHT_CHANGED_MESSAGE,
   INFANT_FARE_PERCENT,
 } from './flight-bookings.constants';
 import {
@@ -31,7 +48,16 @@ export const fareTotalOf = (
 /** PAY-02: a booking that does not exist or is not the caller's (ACC-11). */
 export const BOOKING_NOT_FOUND_MESSAGE = 'Booking not found';
 
-/** FLT-22: flight bookings. */
+/**
+ * The flight the seat hold returns. `HeldFlight` names only the fields FLT-22
+ * needed; the hold returns the whole flight document, so the departure date
+ * is there too. It is read as optional: if it were ever missing, the booking
+ * treats the flight as changed and releases the seats.
+ */
+type HeldFlightWithDate = HeldFlight &
+  Partial<Pick<Flight, 'departureDateLocal'>>;
+
+/** FLT-22 and FLT-19: flight bookings. */
 @Injectable()
 export class FlightBookingsService {
   private readonly logger = new Logger(FlightBookingsService.name);
@@ -39,26 +65,41 @@ export class FlightBookingsService {
   constructor(
     @InjectModel(FlightBooking.name)
     private readonly bookings: Model<FlightBooking>,
+    // FLT-19: one read-only, light read of the flight before the hold.
+    @InjectModel(Flight.name) private readonly flights: Model<Flight>,
     private readonly seatHolds: FlightSeatHoldsService,
     private readonly airlines: AirlinesService,
   ) {}
 
   /**
-   * FLT-22: the user proceeds to payment. The seats are held first, with one
-   * conditional update on the flight (`FlightSeatHoldsService.hold`), then
-   * the booking is saved as `pending_payment` with a hold of 10 minutes. If
-   * saving fails, the seats are released before the error is rethrown, so
+   * FLT-22 and FLT-19: the user proceeds to payment with the details of every
+   * passenger and their extra bags.
+   *
+   * 1. A light read of the flight (its status, local departure date and the
+   *    cabin's maximum bag weight) and a read of the airline's extra-bag
+   *    rule. A missing flight or airline, a deactivated airline (ACC-15), a
+   *    flight that can no longer be booked (FLT-30) and a missing cabin get
+   *    the hold's 404 or 409 here, before any 400.
+   * 2. Each passenger's type is derived from the date of birth on the
+   *    departure date (FLT-12(b)); the passenger rules and the extra bags are
+   *    checked and priced (`planPassengers`). Any problem is a 400 with the
+   *    field path, and nothing is held.
+   * 3. The seats (adults and children) are held with one conditional update
+   *    on the flight (`FlightSeatHoldsService.hold`).
+   * 4. The flight the hold returned must still have the departure date and
+   *    the bag weight of step 1: a flight edited in between (FLT-05, FLT-04)
+   *    gives 409 and the seats are released.
+   * 5. The fare is the cabin price of the flight the hold returned, so a
+   *    price edit at the same moment cannot give a total that differs from
+   *    the price the seats were taken at. The booking is saved as
+   *    `pending_payment` with a hold of 10 minutes.
+   *
+   * Every error after step 3 releases the seats before it is rethrown, so
    * nothing stays held for a booking that does not exist.
    *
-   * The fare is the cabin price of the flight document the hold returned, so
-   * a price edit at the same moment cannot give a total that differs from
-   * the price the seats were taken at.
-   *
    * PAY-02: the airline's cancellation tiers and extra-bag rule and the
-   * cabin's free allowance are copied into the segment at the same time, so
-   * the policy the user is shown and accepts is the one a refund uses. The
-   * airline is read inside the same try as the save: if the read fails, the
-   * seats are released too.
+   * cabin's free allowance are copied into the segment, so the policy the
+   * user is shown and accepts is the one a refund and the bags use.
    */
   async hold(
     userId: string,
@@ -68,10 +109,57 @@ export class FlightBookingsService {
     const holdExpiresAt = new Date(
       now.getTime() + FLIGHT_BOOKING_HOLD_MINUTES * 60 * 1000,
     );
-    const { adults, children, infants } = dto.passengers;
-    const seats = adults + children;
 
-    const flight = await this.seatHolds.hold(
+    const planned = await this.flights
+      .findById(dto.flightId)
+      .select(
+        'airlineId status departureAt departureDateLocal cabins.cabin cabins.maxBagKg',
+      )
+      .lean()
+      .exec();
+    if (!planned) {
+      throw new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE);
+    }
+    // The same answers as the hold, before any 400, so a flight that cannot
+    // be booked never reveals its airline's bag rule (ACC-15, FLT-30). The
+    // hold checks all of them again in its atomic update.
+    const airline = await this.airlines
+      .findEntityOrThrow(planned.airlineId.toString())
+      .catch((error: unknown) => {
+        throw error instanceof NotFoundException
+          ? new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE)
+          : error;
+      });
+    // An airline stored before ACC-15 has no `active` field and counts as active.
+    if (airline.active === false) {
+      throw new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE);
+    }
+    if (effectiveStatus(planned, now) !== FlightStatus.Scheduled) {
+      throw new ConflictException(FLIGHT_NOT_BOOKABLE_MESSAGE);
+    }
+    const plannedCabin = (planned.cabins ?? []).find(
+      (stored) => stored.cabin === dto.cabin,
+    );
+    if (!plannedCabin) {
+      throw new NotFoundException(cabinNotOnFlightMessage(dto.cabin));
+    }
+    const policy = airline.policy;
+
+    const { plan, errors } = planPassengers(
+      dto.passengers,
+      planned.departureDateLocal,
+      {
+        extraBagPrice: policy?.extraBagPrice,
+        maxExtraBags: policy?.maxExtraBags ?? 0,
+        maxBagKg: plannedCabin.maxBagKg,
+      },
+    );
+    if (!plan) {
+      throw new BadRequestException({ message: 'Validation failed', errors });
+    }
+    const { seats, counts } = plan;
+
+    const flight: HeldFlightWithDate = await this.seatHolds.hold(
       dto.flightId,
       dto.cabin,
       seats,
@@ -88,13 +176,16 @@ export class FlightBookingsService {
           `Flight ${flight._id.toString()} returned no ${dto.cabin} cabin after the hold`,
         );
       }
-      // PAY-02: the policy the user will accept is copied now, with the fare,
-      // so a later change by the airline never changes this booking.
-      const airline = await this.airlines.findEntityOrThrow(
-        flight.airlineId.toString(),
-      );
-      const policy = airline.policy;
-      const fareTotal = fareTotalOf(cabin.price, seats, infants);
+      // The types and the bag weight were checked against the flight as it
+      // was before the hold. If it changed in between, start again.
+      if (
+        flight.departureDateLocal !== planned.departureDateLocal ||
+        cabin.maxBagKg !== plannedCabin.maxBagKg
+      ) {
+        throw new ConflictException(FLIGHT_CHANGED_MESSAGE);
+      }
+
+      const fareTotal = fareTotalOf(cabin.price, seats, counts.infants);
       booking = await this.bookings.create({
         _id: bookingId,
         userId: new Types.ObjectId(userId),
@@ -102,7 +193,8 @@ export class FlightBookingsService {
         holdExpiresAt,
         currency: PLATFORM_CURRENCY,
         fareTotal,
-        total: fareTotal,
+        baggageTotal: plan.baggageTotal,
+        total: fareTotal + plan.baggageTotal,
         segments: [
           {
             flightId: flight._id,
@@ -122,11 +214,27 @@ export class FlightBookingsService {
             maxBagKg: cabin.maxBagKg,
           },
         ],
-        passengerCounts: { adults, children, infants },
+        passengerCounts: counts,
+        passengers: plan.passengers.map((passenger) => ({
+          fullName: passenger.fullName,
+          dateOfBirth: passenger.dateOfBirth,
+          passportNumber: passenger.passportNumber,
+          type: passenger.type,
+          baggage: passenger.extraBags
+            ? [
+                {
+                  segment: 0,
+                  bags: passenger.extraBags.bags,
+                  weightKg: passenger.extraBags.weightKg,
+                },
+              ]
+            : [],
+        })),
       });
     } catch (error) {
       // Nothing may stay held for a booking that does not exist. A failed
-      // release is logged: the save error is the one the caller must see.
+      // release is logged (ids and counts only, never personal data): the
+      // first error is the one the caller must see.
       await this.seatHolds
         .release(flight._id, dto.cabin, seats)
         .catch((releaseError: unknown) =>
