@@ -1967,3 +1967,35 @@ Accepted: the merge verdicts for #191 and #159, the "do not merge yet" verdict f
 itinerary role fix with its tests and READMEs. Rejected: a finding about airlines.service.ts, which
 differs only under the global Prettier version and not in the locked one. Changed: nothing.
 ================================================
+
+================================================
+Date: 2026-11-19
+Student: Omar Hossam
+Tool: Claude (Claude app, with access to the repository, GitHub and my laptop's folders)
+Branch / Issue: feature/ITN-25-hotels-for-a-city-group / #79
+Related Requirement: ITN-25 (depends on ITN-09 and HTL-11; builds on HTL-15, merged in #218)
+Prompt:
+After I merged the HTL-15 pull request (#218), I asked Claude to develop ITN-25 itself: a user picks
+a city group of an itinerary and sees the hotels free for that group's dates (check-in is the date
+of the group's first day, check-out the day after its last day), for the guests and rooms they
+enter, reusing hotel search (HTL-11). I said I would test, commit and open the pull request, and
+that Claude should make the files the way they are needed. Later I asked for the steps to test and
+for the commit, push and pull request commands.
+How the output was used:
+Claude read the ITN-25 row of the requirements workbook, section 8 of the project description, the
+itineraries and hotels modules and the HTL-11 search code. It added GET /api/itineraries/:id/hotels
+(owner only): the group is picked by firstDayNumber from the cityGroups of ITN-09, the city and the
+dates come from the group and cannot be sent by the client, and the search is
+HotelSearchService.search(), reused, so the free-room rule is not copied. It wrote the query and
+response DTOs, a mapper, a service and a controller in the itineraries module, with unit tests for
+each, a module test, and an end-to-end suite on the -test database that also checks that the route
+and GET /api/hotels/search return the same hotels. The one change outside the itineraries module is
+that HotelsModule now exports HotelSearchService (with its module spec and a README line); the
+itineraries README has a new ITN-25 section. Claude could not install packages or run the tests in
+its own workspace, so it only checked the changed files with Prettier 3.8 (the repository locks
+3.9) and that the patch applies to develop (7fc9730); lint, typecheck, build and the unit and
+end-to-end tests are run on my laptop and by the CI of the pull request.
+Accepted, changed, or rejected:
+Accepted: the route and its design, and exporting HotelSearchService from the hotels module so that
+the hotels of a group follow the same rule as hotel search. Changed: nothing.
+================================================

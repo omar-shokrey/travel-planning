@@ -8,6 +8,7 @@ import { HotelAvailableRoomsController } from './hotel-available-rooms.controlle
 import { HotelAvailableRoomsService } from './hotel-available-rooms.service';
 import { HotelDetailsController } from './hotel-details.controller';
 import { HotelSearchController } from './hotel-search.controller';
+import { HotelSearchService } from './hotel-search.service';
 import { HotelsModule } from './hotels.module';
 import { HotelsService } from './hotels.service';
 
@@ -98,12 +99,15 @@ describe('HotelsModule', () => {
     }
   });
 
-  it('provides the available-rooms service and still exports only HotelsService', () => {
+  it('provides the available-rooms service, and exports only what other modules need', () => {
     expect(
       Reflect.getMetadata(MODULE_METADATA.PROVIDERS, HotelsModule),
     ).toContain(HotelAvailableRoomsService);
+    // HotelSearchService is for the itineraries module (ITN-25); the
+    // available-rooms service stays private to the hotels module.
     expect(Reflect.getMetadata(MODULE_METADATA.EXPORTS, HotelsModule)).toEqual([
       HotelsService,
+      HotelSearchService,
     ]);
   });
 });

@@ -52,6 +52,8 @@ import { HotelsService } from './hotels.service';
     HotelSearchService,
     HotelAvailableRoomsService,
   ],
-  exports: [HotelsService],
+  // HotelSearchService: the hotels of a city group of an itinerary (ITN-25),
+  // so that the itinerary and the search use the one free-room rule (HTL-11).
+  exports: [HotelsService, HotelSearchService],
 })
 export class HotelsModule {}
