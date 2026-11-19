@@ -1,3 +1,5 @@
+import type { CabinClass } from './models/cabin-class.enum';
+
 /**
  * The most cancellation tiers an airline may define (FLT-09). The workbook
  * sets no limit: this is an engineering safeguard that keeps a policy small
@@ -30,3 +32,54 @@ export const LOCAL_DATE_PATTERN =
 /** The 409 answer for a duplicate flight number on the same departure date (FLT-03). */
 export const DUPLICATE_FLIGHT_MESSAGE =
   'A flight with this number already exists for your airline on this departure date';
+
+/*
+ * The limits of a cabin (FLT-04). The workbook only says that the seat count
+ * is a whole number above 0 and the price above 0. The upper limits below,
+ * and the rules for the bags, are ours: engineering safeguards that keep a
+ * typing mistake (an extra zero) out of the schedule.
+ */
+
+/** The most seats one cabin may have. The largest airliners seat about 850. */
+export const CABIN_SEATS_MAX = 1000;
+
+/** The highest price of one seat, in minor units (USD cents): 1,000,000 USD. */
+export const CABIN_PRICE_MAX = 100_000_000;
+
+/** The most free bags a cabin may include. 0 is allowed: some fares include no bag. */
+export const CABIN_FREE_BAGS_MAX = 10;
+
+/**
+ * The highest maximum weight of one bag, in whole kg. The minimum is 1 kg even
+ * when a cabin includes no free bag, because an extra bag has the same maximum
+ * weight as the cabin's free allowance (FLT-08).
+ */
+export const CABIN_BAG_WEIGHT_MAX_KG = 100;
+
+/**
+ * How many times a cabin edit is tried when a booking moves the cabin's seat
+ * counters between the read and the write (FLT-04). Ours: a booking takes a
+ * few milliseconds, so three tries in a row failing means a busy cabin.
+ */
+export const CABIN_UPDATE_ATTEMPTS = 3;
+
+/** The answers of the cabin routes (FLT-04). */
+export const FLIGHT_NOT_FOUND_MESSAGE = 'Flight not found';
+export const FOREIGN_FLIGHT_MESSAGE = 'This flight belongs to another airline';
+export const FLIGHT_NOT_SCHEDULED_MESSAGE =
+  'Only a scheduled flight can be changed';
+export const FLIGHT_CHANGED_MESSAGE =
+  'The flight was changed by another request. Try again.';
+export const CABIN_NOT_FOUND_MESSAGE = 'Cabin not found';
+export const CABIN_CHANGED_MESSAGE =
+  'The cabin was changed by another request. Try again.';
+export const EMPTY_CABIN_UPDATE_MESSAGE =
+  'Send at least one of totalSeats, price, freeBags or maxBagKg';
+
+/**
+ * The 409 answer when the flight already has a cabin of this class (FLT-04),
+ * for example "This flight already has an economy cabin". The class is named
+ * by its API value (`premium_economy`), the value the client sent.
+ */
+export const duplicateCabinMessage = (cabin: CabinClass): string =>
+  `This flight already has ${/^[aeiou]/.test(cabin) ? 'an' : 'a'} ${cabin} cabin`;
