@@ -29,6 +29,7 @@ import {
 import { Refund } from './models/refund.schema';
 import { refundMessage } from './refund-messages';
 import { refundStatusOf } from './refund-status';
+import { REFUND_NOT_FOUND_MESSAGE } from './refunds.constants';
 
 const MONGO_DUPLICATE_KEY = 11000;
 
@@ -231,6 +232,66 @@ export class RefundsService {
       .lean()
       .exec();
     return refund ? toRefundSummary(refund) : null;
+  }
+
+  /**
+   * PAY-03: GET /api/refunds/:id. Only the owner sees a refund: someone
+   * else's refund or a missing one is the same 404 (ACC-11).
+   */
+  async findOwned(id: string, userId: string): Promise<RefundResponseDto> {
+    const refund = await this.refunds
+      .findOne({ _id: id, userId: new Types.ObjectId(userId) })
+      .lean()
+      .exec();
+    if (!refund) {
+      throw new NotFoundException(REFUND_NOT_FOUND_MESSAGE);
+    }
+    return toRefundResponse(refund);
+  }
+
+  /**
+   * PAY-03: a refund.* webhook event. The refund moves only forward, from
+   * `pending` to `refunded` or `failed`, with one conditional update; the
+   * owner is notified only when that update really changed it. A refund
+   * Stripe still reports as pending, or one already final, is left alone.
+   * An unknown Stripe refund id is logged and ignored.
+   */
+  async applyStripeStatus(
+    stripeRefundId: string,
+    stripeStatus: string,
+  ): Promise<void> {
+    const status = refundStatusOf(stripeStatus);
+    const refund = await this.refunds.findOne({ stripeRefundId }).lean().exec();
+    if (!refund) {
+      this.logger.warn(`Stripe reported an unknown refund ${stripeRefundId}`);
+      return;
+    }
+    if (status === RefundStatus.Pending) {
+      return;
+    }
+    const moved = await this.refunds
+      .findOneAndUpdate(
+        { _id: refund._id, status: RefundStatus.Pending },
+        { $set: { status } },
+        { returnDocument: 'after' },
+      )
+      .lean()
+      .exec();
+    if (moved) {
+      await this.notify(moved, false);
+    }
+  }
+
+  /**
+   * PAY-03, for the recovery job: sends again a refund Stripe could not take,
+   * and tells the owner when Stripe's answer already settled it.
+   */
+  async resubmit(refund: RefundSource): Promise<RefundSource> {
+    const sent = await this.submit(refund);
+    if (sent.status !== refund.status) {
+      await this.notify(sent, false);
+    }
+    return sent;
   }
 
   /** The in-app notification of a refund (GEN-01). `notify` never throws. */

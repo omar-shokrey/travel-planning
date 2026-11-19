@@ -17,6 +17,7 @@ import { StripeEvent, StripeEventSchema } from './models/stripe-event.schema';
 import { PaymentExpiryService } from './payment-expiry.service';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
+import { RefundsModule } from './refunds/refunds.module';
 import { StripeModule } from './stripe.module';
 import { StripeWebhookController } from './stripe-webhook.controller';
 import { StripeWebhookService } from './stripe-webhook.service';
@@ -33,6 +34,9 @@ import { StripeWebhookService } from './stripe-webhook.service';
     HotelBookingsModule,
     // The one StripeGateway, shared with the refunds (PAY-03).
     StripeModule,
+    // RefundsService: the late-payment refund (PAY-03). RefundsModule imports
+    // no booking module and not this one, so there is no cycle.
+    RefundsModule,
   ],
   controllers: [
     BookingPoliciesController,

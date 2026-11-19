@@ -13,6 +13,7 @@ import {
   BOOKING_CONFIRMATION_UNAVAILABLE_MESSAGE,
   INVALID_SIGNATURE_MESSAGE,
 } from './payments.constants';
+import type { RefundsService } from './refunds/refunds.service';
 import type { GatewayEvent, StripeGateway } from './stripe.gateway';
 import { StripeWebhookService } from './stripe-webhook.service';
 
@@ -77,13 +78,21 @@ function setup(
   };
   const confirmPaid = jest.fn(() => Promise.resolve(options.confirm ?? true));
   const gateway = { constructEvent: jest.fn() };
+  // PAY-03: the refunds are replaced; RefundsService has its own spec.
+  const refunds = {
+    refund: jest.fn<Promise<unknown>, unknown[]>(() => Promise.resolve(null)),
+    applyStripeStatus: jest.fn<Promise<void>, unknown[]>(() =>
+      Promise.resolve(),
+    ),
+  };
   const service = new StripeWebhookService(
     payments as unknown as Model<Payment>,
     events as unknown as Model<StripeEvent>,
     gateway as unknown as StripeGateway,
     options.handlers ?? { [BookingType.Flight]: { confirmPaid } },
+    refunds as unknown as RefundsService,
   );
-  return { service, payments, events, gateway, confirmPaid };
+  return { service, payments, events, gateway, confirmPaid, refunds };
 }
 
 const deliver = (
@@ -352,5 +361,99 @@ describe('StripeWebhookService: the other events (PAY-01)', () => {
     });
     expect(s.payments.updateOne).not.toHaveBeenCalled();
     expect(s.events.create).toHaveBeenCalled();
+  });
+});
+
+describe('StripeWebhookService: refunds (PAY-03)', () => {
+  const refundEvent = (
+    type: string,
+    status: string,
+    id = 're_1',
+  ): GatewayEvent => ({
+    id: `evt_${type}_${status}`,
+    type,
+    intent: null,
+    refund: { id, status, paymentIntentId: 'pi_1' },
+  });
+
+  it.each([
+    ['refund.updated', 'succeeded'],
+    ['refund.failed', 'failed'],
+    ['refund.created', 'pending'],
+  ])(
+    'hands a %s event (%s) to RefundsService and remembers it',
+    async (type, status) => {
+      const s = setup();
+
+      await expect(deliver(s, refundEvent(type, status))).resolves.toEqual({
+        received: true,
+      });
+
+      expect(s.refunds.applyStripeStatus).toHaveBeenCalledWith('re_1', status);
+      expect(s.payments.findOne).not.toHaveBeenCalled();
+      expect(s.payments.updateOne).not.toHaveBeenCalled();
+      expect(s.events.create).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: `evt_${type}_${status}`, type }),
+      );
+    },
+  );
+
+  it('ignores a refund event it has already handled', async () => {
+    const s = setup({ seen: true });
+
+    await deliver(s, refundEvent('refund.updated', 'succeeded'));
+
+    expect(s.refunds.applyStripeStatus).not.toHaveBeenCalled();
+  });
+
+  it('refunds a late payment in full, once per booking, with the late_payment reason', async () => {
+    const s = setup({ payment: stored(), confirm: false });
+
+    await deliver(s, event('payment_intent.succeeded'));
+
+    expect(s.refunds.refund).toHaveBeenCalledTimes(1);
+    expect(s.refunds.refund).toHaveBeenCalledWith({
+      bookingType: BookingType.Flight,
+      bookingId: BOOKING.toString(),
+      refundPercent: 100,
+      reason: 'late_payment',
+    });
+    expect(s.events.create).toHaveBeenCalled();
+  });
+
+  it('does not refund a payment whose booking was confirmed', async () => {
+    const s = setup({ payment: stored(), confirm: true });
+
+    await deliver(s, event('payment_intent.succeeded'));
+
+    expect(s.refunds.refund).not.toHaveBeenCalled();
+  });
+
+  it('answers 500 and forgets the event when the late refund fails unexpectedly, so Stripe sends it again', async () => {
+    const s = setup({ payment: stored(), confirm: false });
+    s.refunds.refund.mockRejectedValueOnce(new Error('database down'));
+
+    await expect(deliver(s, event('payment_intent.succeeded'))).rejects.toThrow(
+      'database down',
+    );
+    expect(s.events.create).not.toHaveBeenCalled();
+  });
+
+  it('leaves the other branches alone: no refund for a cancelled payment or a wrong amount', async () => {
+    const cancelled = setup({
+      payment: stored({ status: PaymentStatus.Cancelled }),
+      confirm: false,
+    });
+    const mismatch = setup({ payment: stored(), confirm: false });
+
+    await deliver(cancelled, event('payment_intent.succeeded'));
+    await deliver(
+      mismatch,
+      event('payment_intent.succeeded', { amountReceived: 100 }),
+    );
+
+    expect(cancelled.refunds.refund).not.toHaveBeenCalled();
+    expect(mismatch.refunds.refund).not.toHaveBeenCalled();
+    expect(cancelled.confirmPaid).not.toHaveBeenCalled();
   });
 });

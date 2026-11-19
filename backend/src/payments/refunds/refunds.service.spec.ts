@@ -394,3 +394,159 @@ describe('RefundsService.findSummaryByBooking (PAY-03)', () => {
     ).resolves.toBeNull();
   });
 });
+
+describe('RefundsService: owner read, webhook status and resend (PAY-03)', () => {
+  const storedRefund = (fields: Record<string, unknown> = {}) => ({
+    _id: REFUND_ID,
+    bookingType: BookingType.Flight,
+    bookingId: new Types.ObjectId(BOOKING_ID),
+    paymentId: PAYMENT_ID,
+    userId: USER_ID,
+    amount: 12550,
+    currency: 'USD',
+    refundPercent: 50,
+    reason: RefundReason.UserCancellation,
+    status: RefundStatus.Pending,
+    stripeRefundId: 're_1',
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...fields,
+  });
+
+  /** A fake whose findOne and findOneAndUpdate answer what each test gives. */
+  function fakes(found: unknown, moved: unknown = null) {
+    const refunds = {
+      findOne: jest.fn(() => query(found)),
+      findOneAndUpdate: jest.fn(() => query(moved)),
+      findById: jest.fn(() => query(moved ?? found)),
+    };
+    const payments = { findById: jest.fn(() => query(payment())) };
+    const gateway = { createRefund: jest.fn() };
+    const notifications = { notify: jest.fn(() => Promise.resolve()) };
+    const service = new RefundsService(
+      refunds as never,
+      payments as never,
+      gateway as unknown as StripeGateway,
+      notifications as unknown as NotificationsService,
+    );
+    return { service, refunds, payments, gateway, notifications };
+  }
+
+  it("returns the owner's refund, looked up by id and owner", async () => {
+    const { service, refunds } = fakes(storedRefund());
+
+    await expect(
+      service.findOwned(REFUND_ID.toString(), USER_ID.toString()),
+    ).resolves.toMatchObject({ id: REFUND_ID.toString(), status: 'pending' });
+    expect(refunds.findOne).toHaveBeenCalledWith({
+      _id: REFUND_ID.toString(),
+      userId: USER_ID,
+    });
+  });
+
+  it("answers 404 'Refund not found' for someone else's refund or a missing one", async () => {
+    const { service } = fakes(null);
+
+    await expect(
+      service.findOwned(REFUND_ID.toString(), USER_ID.toString()),
+    ).rejects.toThrow(new NotFoundException('Refund not found'));
+  });
+
+  it.each([
+    ['succeeded', RefundStatus.Refunded],
+    ['failed', RefundStatus.Failed],
+    ['canceled', RefundStatus.Failed],
+  ])(
+    'moves a pending refund forward when Stripe reports %s, and notifies once',
+    async (stripeStatus, status) => {
+      const { service, refunds, notifications } = fakes(
+        storedRefund(),
+        storedRefund({ status }),
+      );
+
+      await service.applyStripeStatus('re_1', stripeStatus);
+
+      expect(refunds.findOne).toHaveBeenCalledWith({ stripeRefundId: 're_1' });
+      expect(refunds.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: REFUND_ID, status: RefundStatus.Pending },
+        { $set: { status } },
+        { returnDocument: 'after' },
+      );
+      expect(notifications.notify).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('does not move or notify a refund that is already final (a repeated event)', async () => {
+    const { service, notifications } = fakes(
+      storedRefund({ status: RefundStatus.Refunded }),
+      null,
+    );
+
+    await service.applyStripeStatus('re_1', 'succeeded');
+
+    expect(notifications.notify).not.toHaveBeenCalled();
+  });
+
+  it('never moves a refund back to pending', async () => {
+    const { service, refunds, notifications } = fakes(storedRefund());
+
+    await service.applyStripeStatus('re_1', 'requires_action');
+
+    expect(refunds.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(notifications.notify).not.toHaveBeenCalled();
+  });
+
+  it('logs and ignores an unknown Stripe refund id', async () => {
+    const { service, refunds, notifications } = fakes(null);
+
+    await expect(
+      service.applyStripeStatus('re_unknown', 'succeeded'),
+    ).resolves.toBeUndefined();
+    expect(refunds.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(notifications.notify).not.toHaveBeenCalled();
+  });
+
+  it('resends a refund with the payment intent of its payment and notifies when Stripe settled it', async () => {
+    const pending = storedRefund({ stripeRefundId: undefined });
+    const { service, gateway, payments, notifications } = fakes(
+      pending,
+      storedRefund({ status: RefundStatus.Refunded, stripeRefundId: 're_9' }),
+    );
+    gateway.createRefund.mockResolvedValue({
+      id: 're_9',
+      status: 'succeeded',
+      amount: 12550,
+      currency: 'usd',
+      paymentIntentId: 'pi_1',
+    });
+
+    const sent = await service.resubmit(pending);
+
+    expect(payments.findById).toHaveBeenCalledWith(PAYMENT_ID);
+    expect(gateway.createRefund).toHaveBeenCalledWith(
+      expect.objectContaining({ paymentIntentId: 'pi_1', amount: 12550 }),
+      `refund-flight-${BOOKING_ID}`,
+    );
+    expect(sent.stripeRefundId).toBe('re_9');
+    expect(notifications.notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not notify when the resent refund is still pending', async () => {
+    const pending = storedRefund({ stripeRefundId: undefined });
+    const { service, gateway, notifications } = fakes(
+      pending,
+      storedRefund({ stripeRefundId: 're_9' }),
+    );
+    gateway.createRefund.mockResolvedValue({
+      id: 're_9',
+      status: 'pending',
+      amount: 12550,
+      currency: 'usd',
+      paymentIntentId: 'pi_1',
+    });
+
+    await service.resubmit(pending);
+
+    expect(notifications.notify).not.toHaveBeenCalled();
+  });
+});
