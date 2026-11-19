@@ -83,6 +83,7 @@ describe('GET /api/hotels/:id (e2e, HTL-02)', () => {
       createdAt: expect.stringMatching(/Z$/),
       updatedAt: expect.stringMatching(/Z$/),
       policy: null,
+      availableRooms: null,
     });
   });
 

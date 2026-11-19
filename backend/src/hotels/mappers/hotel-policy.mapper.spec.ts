@@ -110,4 +110,26 @@ describe('toHotelDetailsResponse', () => {
   it('shows policy null for a hotel without policies', () => {
     expect(toHotelDetailsResponse(hotel).policy).toBeNull();
   });
+
+  it('shows availableRooms null when no dates were given (HTL-15)', () => {
+    expect(toHotelDetailsResponse(hotel).availableRooms).toBeNull();
+  });
+
+  it('adds the free rooms of the stay when there are some (HTL-15)', () => {
+    const room = {
+      id: '6740f1c2a4b5c6d7e8f90124',
+      number: '101',
+      type: 'Double',
+      beds: 2,
+      maxOccupancy: 3,
+      pricePerNight: 12500,
+      nights: 3,
+      totalPrice: 37500,
+      currency: 'USD',
+    };
+
+    expect(toHotelDetailsResponse(hotel, [room]).availableRooms).toEqual([
+      room,
+    ]);
+  });
 });

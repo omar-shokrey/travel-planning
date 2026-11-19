@@ -14,6 +14,7 @@ import { FlightCabinsService } from './flight-cabins.service';
 import { FlightResponsesService } from './flight-responses.service';
 import { FlightSearchController } from './flight-search.controller';
 import { FlightSearchService } from './flight-search.service';
+import { FlightSeatHoldsService } from './flight-seat-holds.service';
 import { FlightsController } from './flights.controller';
 import { FlightsService } from './flights.service';
 
@@ -45,9 +46,11 @@ import { FlightsService } from './flights.service';
     FlightResponsesService,
     FlightSearchService,
     FlightBookingLookup,
+    FlightSeatHoldsService,
   ],
   // FlightResponsesService: flight responses with local times (GEN-06) for
-  // the flight-bookings module (FLT-23, FLT-25, FLT-29).
-  exports: [AirlinesService, FlightResponsesService],
+  // the flight-bookings module (FLT-23, FLT-25, FLT-29). FlightSeatHoldsService:
+  // the only way a booking holds and releases a cabin's seats (FLT-22).
+  exports: [AirlinesService, FlightResponsesService, FlightSeatHoldsService],
 })
 export class FlightsModule {}

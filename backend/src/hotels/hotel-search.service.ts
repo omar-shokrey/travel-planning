@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import {
@@ -9,27 +9,22 @@ import type { HotelSearchResultResponseDto } from './dto/hotel-search-result-res
 import type { SearchHotelsQueryDto } from './dto/search-hotels-query.dto';
 import {
   canHost,
+  groupNightsByRoom,
   isFreeForStay,
-  type SearchNight,
+  nightsOfTheStay,
+  roomsThatCanBeFree,
+  STAY_NIGHT_FIELDS,
   type SearchRoom,
 } from './hotel-search';
-import { ROOM_QUERY_MAX_NIGHTS } from './hotels.constants';
 import { toHotelSearchResult } from './mappers/hotel-search-result.mapper';
 import { Hotel } from './models/hotel.schema';
 import { RoomNight } from './models/room-night.schema';
 import { Room } from './models/room.schema';
-import { nightCount, todayUtc } from './room-dates';
+import { assertStay, invalid } from './stay-rules';
 
 /** The hotel fields a search result shows (HTL-11). */
 const HOTEL_FIELDS =
   'name addressLine cityId countryCode description photos starClass amenities active ratingCount averageRating createdAt updatedAt';
-
-/** A 400 in the shape of a validation error, naming the field. */
-const invalid = (field: string, message: string) =>
-  new BadRequestException({
-    message: 'Validation failed',
-    errors: [{ field, messages: [message] }],
-  });
 
 /**
  * HTL-11: hotel search for guests and users. It reads only; booking (HTL-16)
@@ -56,15 +51,7 @@ export class HotelSearchService {
   ): Promise<PaginatedResponse<HotelSearchResultResponseDto>> {
     const place = this.placeFilter(query);
     const stay = { from: query.checkIn, to: query.checkOut };
-    if (stay.from < todayUtc()) {
-      throw invalid('checkIn', 'checkIn cannot be in the past');
-    }
-    if (nightCount(stay) > ROOM_QUERY_MAX_NIGHTS) {
-      throw invalid(
-        'checkOut',
-        `A stay can have at most ${ROOM_QUERY_MAX_NIGHTS} nights`,
-      );
-    }
+    assertStay(stay);
 
     const hotels = await this.hotels
       .find({ ...place, active: true })
@@ -80,10 +67,7 @@ export class HotelSearchService {
     const rooms = await this.rooms
       .find({
         hotelId: { $in: hotels.map((hotel) => hotel._id) },
-        active: true,
-        availability: {
-          $elemMatch: { from: { $lte: stay.from }, to: { $gt: stay.from } },
-        },
+        ...roomsThatCanBeFree(stay),
       })
       .select('hotelId maxOccupancy pricePerNight availability')
       .lean()
@@ -93,18 +77,16 @@ export class HotelSearchService {
       rooms.length === 0
         ? []
         : await this.roomNights
-            .find({
-              roomId: { $in: rooms.map((room) => room._id) },
-              date: { $gte: stay.from, $lt: stay.to },
-            })
-            .select('roomId date state holdExpiresAt')
+            .find(
+              nightsOfTheStay(
+                rooms.map((room) => room._id),
+                stay,
+              ),
+            )
+            .select(STAY_NIGHT_FIELDS)
             .lean()
             .exec();
-    const nightsByRoom = new Map<string, SearchNight[]>();
-    for (const night of nights) {
-      const key = night.roomId.toString();
-      nightsByRoom.set(key, [...(nightsByRoom.get(key) ?? []), night]);
-    }
+    const nightsByRoom = groupNightsByRoom(nights);
 
     const freeByHotel = new Map<string, SearchRoom[]>();
     for (const room of rooms) {

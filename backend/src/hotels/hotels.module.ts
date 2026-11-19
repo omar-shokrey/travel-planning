@@ -3,10 +3,13 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceModule } from '../reference/reference.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { UsersModule } from '../users/users.module';
+import { HotelAvailableRoomsController } from './hotel-available-rooms.controller';
+import { HotelAvailableRoomsService } from './hotel-available-rooms.service';
 import { HotelDetailsController } from './hotel-details.controller';
 import { HotelDetailsService } from './hotel-details.service';
 import { HotelPoliciesController } from './hotel-policies.controller';
 import { HotelPoliciesService } from './hotel-policies.service';
+import { HotelRoomHoldsService } from './hotel-room-holds.service';
 import { HotelRoomStatusController } from './hotel-room-status.controller';
 import { HotelRoomStatusService } from './hotel-room-status.service';
 import { HotelRoomsController } from './hotel-rooms.controller';
@@ -38,6 +41,7 @@ import { HotelsService } from './hotels.service';
     HotelRoomsController,
     HotelRoomStatusController,
     HotelSearchController,
+    HotelAvailableRoomsController,
     HotelDetailsController,
   ],
   providers: [
@@ -47,7 +51,13 @@ import { HotelsService } from './hotels.service';
     HotelRoomsService,
     HotelRoomStatusService,
     HotelSearchService,
+    HotelAvailableRoomsService,
+    HotelRoomHoldsService,
   ],
-  exports: [HotelsService],
+  // HotelSearchService: the hotels of a city group of an itinerary (ITN-25),
+  // so that the itinerary and the search use the one free-room rule (HTL-11).
+  // HotelRoomHoldsService: the reservation of rooms (HTL-16, HTL-18), which
+  // finds and holds rooms only through the hotels module that owns them.
+  exports: [HotelsService, HotelSearchService, HotelRoomHoldsService],
 })
 export class HotelsModule {}
