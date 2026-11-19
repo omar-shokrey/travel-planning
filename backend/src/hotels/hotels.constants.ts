@@ -28,3 +28,12 @@ export const ROOM_BLOCK_MAX_NIGHTS = 366;
 
 /** HTL-08 and HTL-15: a date range in a query spans at most this many nights. */
 export const ROOM_QUERY_MAX_NIGHTS = 366;
+
+/**
+ * HTL-11: the most rooms one search may ask for. An engineering limit, not a
+ * workbook rule: it keeps the occupancy check small.
+ */
+export const HOTEL_SEARCH_ROOMS_MAX = 20;
+
+/** HTL-11: the most guests one search may ask for (engineering limit). */
+export const HOTEL_SEARCH_GUESTS_MAX = 100;
