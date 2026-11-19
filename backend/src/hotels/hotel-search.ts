@@ -8,8 +8,9 @@ import { coversNight, nightsOf, type DateRange } from './room-dates';
  * active (HTL-06), its availability (HTL-04) covers every night, and no night
  * is blocked, booked or held by a hold that has not expired (HTL-18). The
  * database does the first part with `roomsThatCanBeFree` and reads the
- * nights with `nightsOfTheStay`; `isFreeForStay` decides the rest. A caller
- * must use all three, so the routes cannot disagree.
+ * nights with `nightsOfTheStay`; `groupNightsByRoom` gives each room its
+ * nights, and `isFreeForStay` decides the rest. A caller must use all four,
+ * so the routes cannot disagree.
  */
 
 /**
