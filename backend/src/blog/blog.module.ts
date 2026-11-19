@@ -13,6 +13,8 @@ import { Comment, CommentSchema } from './models/comment.schema';
 import { Like, LikeSchema } from './models/like.schema';
 import { PostImagesController } from './post-images.controller';
 import { PostImagesService } from './post-images.service';
+import { PostPageController } from './post-page.controller';
+import { PostPageService } from './post-page.service';
 import { PostSearchController } from './post-search.controller';
 import { PostsController } from './posts.controller';
 import { PostsService } from './posts.service';
@@ -37,6 +39,9 @@ import { TagsController } from './tags.controller';
   ],
   controllers: [
     PostsController,
+    // After PostsController, so `GET /posts/mine` is matched before
+    // `GET /posts/:id` (BLG-02).
+    PostPageController,
     PostSearchController,
     TagsController,
     AuthorsController,
@@ -47,6 +52,7 @@ import { TagsController } from './tags.controller';
   providers: [
     PostsService,
     PublishedPostsService,
+    PostPageService,
     AuthorsService,
     PostImagesService,
     CommentsService,

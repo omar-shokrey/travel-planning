@@ -77,6 +77,22 @@ export class CommentsService {
   ): Promise<PaginatedResponse<CommentResponseDto>> {
     await this.assertPublishedPost(postId);
 
+    const { comments, total } = await this.findVisibleComments(postId, query);
+
+    return paginate(comments.map(toCommentResponse), total, query);
+  }
+
+  /**
+   * One page of the visible comments of a post, oldest first, and how many
+   * there are in all. A comment an admin hid (GEN-10) is neither on the page
+   * nor in the total. It does not check the post: the caller has done that
+   * (`listForPost`, and the post page of BLG-02, which has read the post
+   * itself).
+   */
+  async findVisibleComments(
+    postId: string,
+    query: PaginationQueryDto,
+  ): Promise<{ comments: CommentDocument[]; total: number }> {
     const filter = { postId: new Types.ObjectId(postId), ...NOT_HIDDEN };
     const [comments, total] = await Promise.all([
       this.comments
@@ -89,7 +105,7 @@ export class CommentsService {
       this.comments.countDocuments(filter).exec(),
     ]);
 
-    return paginate(comments.map(toCommentResponse), total, query);
+    return { comments, total };
   }
 
   /** BLG-07: the logged-in user edits the text of their own comment. */

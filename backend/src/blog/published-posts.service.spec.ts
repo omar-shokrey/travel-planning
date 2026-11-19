@@ -203,6 +203,39 @@ describe('PublishedPostsService', () => {
         _id: -1,
       });
     });
+
+    it('lists only the posts that have the tag when one is given (BLG-02), still from the public filter', async () => {
+      const { posts, postsQuery, service } = setup();
+      const query = Object.assign(new PaginationQueryDto(), {
+        page: 2,
+        limit: 5,
+      });
+
+      await service.listNewest(query, 'cairo');
+
+      const filter = { ...PUBLIC, tags: 'cairo' };
+      expect(posts.find).toHaveBeenCalledWith(filter);
+      expect(posts.countDocuments).toHaveBeenCalledWith(filter);
+      expect(postsQuery.sort).toHaveBeenCalledWith({
+        publishedAt: -1,
+        _id: -1,
+      });
+      expect(postsQuery.skip).toHaveBeenCalledWith(5);
+      expect(postsQuery.limit).toHaveBeenCalledWith(5);
+    });
+
+    it('reads the same posts as the tag page (BLG-08)', async () => {
+      const { posts, service } = setup();
+      const query = new PaginationQueryDto();
+
+      await service.listNewest(query, 'cairo');
+      await service.listByTag('cairo', query);
+
+      expect(posts.find.mock.calls[0]).toEqual(posts.find.mock.calls[1]);
+      expect(posts.countDocuments.mock.calls[0]).toEqual(
+        posts.countDocuments.mock.calls[1],
+      );
+    });
   });
 
   describe('search (BLG-09)', () => {
@@ -295,6 +328,72 @@ describe('PublishedPostsService', () => {
       expect(page.items).toHaveLength(1);
       expect(page.items[0].author.name).toBe('Sara Ahmed');
       expect(page.meta.total).toBe(1);
+    });
+
+    it('also requires the tag when one is given (BLG-02): both conditions must hold', async () => {
+      const { posts, service } = setup();
+
+      await service.search('cai.ro', new PaginationQueryDto(), 'egypt');
+
+      const match = {
+        ...PUBLIC,
+        tags: 'egypt',
+        $or: [
+          { title: pattern },
+          { tags: pattern },
+          { authorId: { $in: [sara] } },
+        ],
+      };
+      expect(posts.countDocuments).toHaveBeenCalledWith(match);
+      const [pipeline] = posts.aggregate.mock.calls[0] as unknown as [
+        Record<string, unknown>[],
+      ];
+      expect(pipeline[0]).toEqual({ $match: match });
+    });
+
+    it('does not add a tag condition when no tag is given', async () => {
+      const { posts, service } = setup();
+
+      await service.search('cai.ro', new PaginationQueryDto(), undefined);
+
+      const [pipeline] = posts.aggregate.mock.calls[0] as unknown as [
+        { $match: Record<string, unknown> }[],
+      ];
+      expect(Object.keys(pipeline[0].$match).sort()).toEqual([
+        '$or',
+        'moderation',
+        'status',
+      ]);
+    });
+  });
+
+  describe('authorNamesOf (BLG-02)', () => {
+    it('reads the names of active authors in one query', async () => {
+      const { users, service } = setup();
+
+      const names = await service.authorNamesOf([sara, gone, sara]);
+
+      expect(users.find).toHaveBeenCalledTimes(1);
+      expect(users.find).toHaveBeenCalledWith({
+        _id: { $in: [sara, gone] },
+        status: { $ne: UserStatus.Deactivated },
+      });
+      expect(names).toEqual(new Map([[sara.toString(), 'Sara Ahmed']]));
+    });
+
+    it('leaves a missing or deactivated author out, so the mappers show "Deleted user"', async () => {
+      const { service } = setup();
+
+      const names = await service.authorNamesOf([sara, gone]);
+
+      expect(names.has(gone.toString())).toBe(false);
+    });
+
+    it('does not ask the database when there is no author', async () => {
+      const { users, service } = setup();
+
+      expect(await service.authorNamesOf([])).toEqual(new Map());
+      expect(users.find).not.toHaveBeenCalled();
     });
   });
 });

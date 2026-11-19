@@ -226,6 +226,64 @@ describe('CommentsService', () => {
     });
   });
 
+  describe('findVisibleComments (BLG-02)', () => {
+    const pageQuery = (page: number, limit: number): PaginationQueryDto =>
+      Object.assign(new PaginationQueryDto(), { page, limit });
+
+    it('returns the stored comments of one page, oldest first, and the total of visible ones', async () => {
+      const { service, comments } = setup();
+      const first = storedComment('First', '2026-11-15T10:00:00.000Z');
+      const second = storedComment('Second', '2026-11-15T11:00:00.000Z');
+      const findQuery = query([first, second]);
+      comments.find.mockReturnValue(findQuery);
+      comments.countDocuments.mockReturnValue(query(12));
+
+      const result = await service.findVisibleComments(
+        POST_ID,
+        pageQuery(2, 5),
+      );
+
+      // The same filter, order and page as listForPost; GEN-10: a hidden
+      // comment is neither on the page nor in the total.
+      const filter = {
+        postId: new Types.ObjectId(POST_ID),
+        moderation: { $ne: CommentModeration.Hidden },
+      };
+      expect(comments.find).toHaveBeenCalledWith(filter);
+      expect(comments.countDocuments).toHaveBeenCalledWith(filter);
+      expect(findQuery.sort).toHaveBeenCalledWith({ createdAt: 1, _id: 1 });
+      expect(findQuery.skip).toHaveBeenCalledWith(5);
+      expect(findQuery.limit).toHaveBeenCalledWith(5);
+      expect(result).toEqual({ comments: [first, second], total: 12 });
+    });
+
+    it('does not check the post: the caller has done that', async () => {
+      const { service, posts, comments } = setup({ postIsPublished: false });
+      comments.find.mockReturnValue(query([]));
+      comments.countDocuments.mockReturnValue(query(0));
+
+      await expect(
+        service.findVisibleComments(POST_ID, pageQuery(1, 10)),
+      ).resolves.toEqual({ comments: [], total: 0 });
+      expect(posts.exists).not.toHaveBeenCalled();
+    });
+
+    it('gives listForPost the same comments and total', async () => {
+      const { service, comments } = setup();
+      const first = storedComment('First', '2026-11-15T10:00:00.000Z');
+      comments.find.mockReturnValue(query([first]));
+      comments.countDocuments.mockReturnValue(query(1));
+      const shared = jest.spyOn(service, 'findVisibleComments');
+
+      const page = await service.listForPost(POST_ID, pageQuery(1, 10));
+
+      expect(shared).toHaveBeenCalledTimes(1);
+      expect(shared).toHaveBeenCalledWith(POST_ID, pageQuery(1, 10));
+      expect(page.items.map((item) => item.id)).toEqual([first.id]);
+      expect(page.meta.total).toBe(1);
+    });
+  });
+
   /** A comment by USER_ID as `findById` returns it, with a working `save`. */
   const ownComment = () => ({
     ...storedComment('Great tips!', '2026-11-15T10:00:00.000Z'),
