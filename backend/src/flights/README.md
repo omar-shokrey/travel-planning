@@ -123,7 +123,7 @@ FLT-30: a flight is `scheduled`, `cancelled` or `departed`; it becomes departed 
 - **`scheduledFlightFilter(now)`** is `{ status: 'scheduled', departureAt: { $gt: now } }`: the one definition of "searchable, editable or bookable", for every query and every conditional write, now and later.
 - **Decision: `departed` is derived, never written by a timer.** Reasons:
   - it is exact at the instant, where a periodic sweep would leave a gap between the departure and the next run, in which a departed flight would still be editable or bookable;
-  - it needs no scheduler: the open PR #190 already registers `ScheduleModule.forRoot()` in `app.module.ts`, and a second registration would conflict;
+  - it needs no job: `ScheduleModule.forRoot()` is registered once in `app.module.ts` for the hold-expiry jobs (FLT-22, HTL-18), but no job is needed for flight status, and none must register the scheduler a second time;
   - it never bulk-writes the shared database (no `updateMany` over flights).
 
   There is therefore no `@nestjs/schedule` job, `setInterval` or cron for flight status, and the stored status of a past flight stays `scheduled`. (The data model in `specs/travel-platform.md` still says a scheduled job moves flights to `departed`; changing it is a shared-layer PR.)
