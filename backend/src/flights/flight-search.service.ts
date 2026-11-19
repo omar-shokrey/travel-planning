@@ -7,12 +7,14 @@ import {
 } from '../common/dto/paginated-response.dto';
 import type { FieldError } from '../common/interfaces/error-response.interface';
 import type { FlightSearchResultResponseDto } from './dto/flight-search-result-response.dto';
+import type { RoundTripSearchResponseDto } from './dto/round-trip-search-response.dto';
 import type { SearchFlightsQueryDto } from './dto/search-flights-query.dto';
 import { FlightResponsesService } from './flight-responses.service';
 import { scheduledFlightFilter } from './flight-status';
 import {
   type FlightSearchSort,
   PRICE_RANGE_MESSAGE,
+  RETURN_BEFORE_DEPARTURE_MESSAGE,
   SAME_AIRPORTS_MESSAGE,
   unknownAirportMessage,
 } from './flights.constants';
@@ -32,6 +34,24 @@ const SORT_FIELDS: Record<FlightSearchSort, string> = {
   duration: 'durationMs',
   departureTime: 'departureAt',
 };
+
+/**
+ * One direction of a search: the route and the local date at its departure
+ * airport. A one-way search has one leg; a round trip (FLT-12) has the
+ * outbound leg and the return leg, the same route reversed on `returnDate`.
+ */
+export interface SearchLeg {
+  from: string;
+  to: string;
+  date: string;
+}
+
+/** The outbound leg of a query: the route and the date as sent. */
+export const outboundLeg = (query: SearchFlightsQueryDto): SearchLeg => ({
+  from: query.departureAirport,
+  to: query.arrivalAirport,
+  date: query.departureDate,
+});
 
 /** What the `$facet` stage gives: one page of flights and the count of all matches. */
 interface SearchPage {
@@ -59,25 +79,46 @@ export class FlightSearchService {
    * and departing after `now`), of an active airline (ACC-15: `active: false`
    * is left out, an airline without the field counts as active), with at
    * least one cabin where `totalSeats - bookedSeats - heldSeats` is at least
-   * `passengers` and whose price is inside `minPrice`..`maxPrice` (FLT-15,
-   * inclusive, each bound optional). Only those cabins are returned. Ordered
-   * by `sortBy` and `sortOrder` (by default the departure time, earliest
+   * `passengers`, of the `cabin` class when one is asked for (FLT-12(c)),
+   * and whose price is inside `minPrice`..`maxPrice` (FLT-15, inclusive,
+   * each bound optional). Only those cabins are returned. Ordered by
+   * `sortBy` and `sortOrder` (by default the departure time, earliest
    * first), then by id. No match is a 200 with an empty page.
+   *
+   * FLT-12(a): with `returnDate` it is a round trip. The answer is then
+   * `{ outbound, return }`: the page above, and the same search on the
+   * reversed route (arrival airport to departure airport) on `returnDate`,
+   * the local date at the arrival airport, with the same filters, order,
+   * page and limit. Two aggregations, run together.
    */
   async search(
     query: SearchFlightsQueryDto,
     now: Date = new Date(),
-  ): Promise<PaginatedResponse<FlightSearchResultResponseDto>> {
-    // FLT-15: checked before any query, so a wrong range costs no lookup.
+  ): Promise<
+    | PaginatedResponse<FlightSearchResultResponseDto>
+    | RoundTripSearchResponseDto
+  > {
+    // Checked before any query, so a wrong range or date costs no lookup.
+    const errors: FieldError[] = [];
     if (
       query.minPrice !== undefined &&
       query.maxPrice !== undefined &&
       query.minPrice > query.maxPrice
     ) {
-      throw new BadRequestException({
-        message: 'Validation failed',
-        errors: [{ field: 'minPrice', messages: [PRICE_RANGE_MESSAGE] }],
+      errors.push({ field: 'minPrice', messages: [PRICE_RANGE_MESSAGE] });
+    }
+    // Both are real YYYY-MM-DD dates (the DTO), so the text order is the date order.
+    if (
+      query.returnDate !== undefined &&
+      query.returnDate < query.departureDate
+    ) {
+      errors.push({
+        field: 'returnDate',
+        messages: [RETURN_BEFORE_DEPARTURE_MESSAGE],
       });
+    }
+    if (errors.length > 0) {
+      throw new BadRequestException({ message: 'Validation failed', errors });
     }
     const zones = await this.responses.timeZonesOf([
       query.departureAirport,
@@ -85,13 +126,36 @@ export class FlightSearchService {
     ]);
     this.assertAirports(query, zones);
 
+    const outbound = outboundLeg(query);
+    if (query.returnDate === undefined) {
+      return this.searchLeg(query, outbound, zones, now);
+    }
+    const [outboundPage, returnPage] = await Promise.all([
+      this.searchLeg(query, outbound, zones, now),
+      this.searchLeg(
+        query,
+        { from: outbound.to, to: outbound.from, date: query.returnDate },
+        zones,
+        now,
+      ),
+    ]);
+    return { outbound: outboundPage, return: returnPage };
+  }
+
+  /** One page of one leg, mapped with the time zones of its two airports. */
+  private async searchLeg(
+    query: SearchFlightsQueryDto,
+    leg: SearchLeg,
+    zones: ReadonlyMap<string, string>,
+    now: Date,
+  ): Promise<PaginatedResponse<FlightSearchResultResponseDto>> {
     const [page] = await this.flights
-      .aggregate<SearchPage>(this.pipeline(query, now))
+      .aggregate<SearchPage>(this.pipeline(query, now, leg))
       .exec();
     const total = page?.total[0]?.count ?? 0;
     const flightZones = {
-      departure: zones.get(query.departureAirport) as string,
-      arrival: zones.get(query.arrivalAirport) as string,
+      departure: zones.get(leg.from) as string,
+      arrival: zones.get(leg.to) as string,
     };
     const items = (page?.items ?? []).map((flight) =>
       toFlightSearchResult(flight, now, flightZones),
@@ -112,8 +176,17 @@ export class FlightSearchService {
    * page, both from the same matches; the sort ends with `_id`, so equal
    * flights keep one order across pages. With the default order the pipeline
    * is the one of FLT-11.
+   *
+   * FLT-12: `leg` is the route and date to search (the outbound leg of the
+   * query by default; the round trip's return leg reverses it). The cabin
+   * filter is part of the same `$filter`, and the first `$match` asks for a
+   * cabin of that class so flights without it are dropped early.
    */
-  pipeline(query: SearchFlightsQueryDto, now: Date): PipelineStage[] {
+  pipeline(
+    query: SearchFlightsQueryDto,
+    now: Date,
+    leg: SearchLeg = outboundLeg(query),
+  ): PipelineStage[] {
     // The DTO gives the defaults; a query built in code may leave them out.
     const sortField = SORT_FIELDS[query.sortBy ?? 'departureTime'];
     const direction = query.sortOrder === 'desc' ? -1 : 1;
@@ -130,6 +203,9 @@ export class FlightSearchService {
     };
     const keep = [
       seatsLeft,
+      ...(query.cabin === undefined
+        ? []
+        : [{ $eq: ['$$cabin.cabin', query.cabin] }]),
       ...(query.minPrice === undefined
         ? []
         : [{ $gte: ['$$cabin.price', query.minPrice] }]),
@@ -145,10 +221,11 @@ export class FlightSearchService {
     return [
       {
         $match: {
-          departureAirport: query.departureAirport,
-          arrivalAirport: query.arrivalAirport,
-          departureDateLocal: query.departureDate,
+          departureAirport: leg.from,
+          arrivalAirport: leg.to,
+          departureDateLocal: leg.date,
           ...scheduledFlightFilter(now),
+          ...(query.cabin === undefined ? {} : { 'cabins.cabin': query.cabin }),
         },
       },
       {

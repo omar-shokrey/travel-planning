@@ -3,6 +3,7 @@ import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
 import { ROLES_KEY } from '../common/decorators/roles.decorator';
 import { PaginationMeta } from '../common/dto/paginated-response.dto';
 import { FlightSearchResultResponseDto } from './dto/flight-search-result-response.dto';
+import { RoundTripSearchResponseDto } from './dto/round-trip-search-response.dto';
 import type { SearchFlightsQueryDto } from './dto/search-flights-query.dto';
 import { FlightSearchController } from './flight-search.controller';
 import { FlightsController } from './flights.controller';
@@ -43,18 +44,33 @@ describe('FlightSearchController (FLT-11)', () => {
     ).toEqual([{ cookie: [] }]);
   });
 
-  it('documents a paginated list of search results', () => {
+  it('documents a one-way page or a round trip (FLT-12) as the 200 answer', () => {
     const responses = Reflect.getMetadata(API_RESPONSE, handler) as Record<
       string,
-      { schema: { properties: { items: { items: { $ref: string } } } } }
+      {
+        schema: {
+          oneOf: [
+            { properties: { items: { items: { $ref: string } } } },
+            { $ref: string },
+          ];
+        };
+      }
     >;
     const models = Reflect.getMetadata(API_EXTRA_MODELS, handler) as unknown[];
+    const [oneWay, roundTrip] = responses['200'].schema.oneOf;
 
-    expect(responses['200'].schema.properties.items.items.$ref).toBe(
+    expect(oneWay.properties.items.items.$ref).toBe(
       '#/components/schemas/FlightSearchResultResponseDto',
     );
+    expect(roundTrip.$ref).toBe(
+      '#/components/schemas/RoundTripSearchResponseDto',
+    );
     expect(models).toEqual(
-      expect.arrayContaining([PaginationMeta, FlightSearchResultResponseDto]),
+      expect.arrayContaining([
+        PaginationMeta,
+        FlightSearchResultResponseDto,
+        RoundTripSearchResponseDto,
+      ]),
     );
     expect(responses['400']).toBeDefined();
   });

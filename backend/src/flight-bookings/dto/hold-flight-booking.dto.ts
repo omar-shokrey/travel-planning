@@ -9,6 +9,7 @@ import {
   IsInt,
   IsISO8601,
   IsMongoId,
+  isMongoId,
   IsOptional,
   IsString,
   Length,
@@ -16,6 +17,7 @@ import {
   Max,
   Min,
   ValidateBy,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { DateTime } from 'luxon';
@@ -32,6 +34,8 @@ import {
   PASSPORT_NUMBER_MAX_LENGTH,
   PASSPORT_NUMBER_MIN_LENGTH,
   PASSPORT_NUMBER_PATTERN,
+  RETURN_CABIN_WITHOUT_FLIGHT_MESSAGE,
+  RETURN_FLIGHT_WITHOUT_CABIN_MESSAGE,
 } from '../flight-bookings.constants';
 
 const CABIN_VALUES = Object.values(CabinClass).join(', ');
@@ -169,6 +173,23 @@ export class PassengerDetailsDto {
   @ValidateNested({ message: 'extraBags must be an object' })
   @Type(() => ExtraBagsDto)
   extraBags?: ExtraBagsDto;
+
+  @ApiPropertyOptional({
+    type: ExtraBagsDto,
+    description:
+      "FLT-12(a), round trip only: optional extra bags for this passenger on the return flight, with the return airline's maximum and price and the return cabin's maxBagKg. Its fee is added to the booking total. Sent without returnFlightId it is 400.",
+  })
+  @IsOptional()
+  @ValidateBy({
+    name: 'returnExtraBagsIsObject',
+    validator: {
+      validate: (value: unknown): boolean => isPlainObject(value),
+      defaultMessage: () => 'returnExtraBags must be an object',
+    },
+  })
+  @ValidateNested({ message: 'returnExtraBags must be an object' })
+  @Type(() => ExtraBagsDto)
+  returnExtraBags?: ExtraBagsDto;
 }
 
 /**
@@ -220,4 +241,51 @@ export class HoldFlightBookingDto {
   @ValidateNested({ each: true })
   @Type(() => PassengerDetailsDto)
   passengers: PassengerDetailsDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'FLT-12(a), round trip only: id of the return flight, from the `return` page of a round-trip search. It must fly the outbound route reversed and leave after the outbound flight arrives. The two flights are booked as one booking with two segments, one payment and one reference. Leave it out for a one-way booking.',
+  })
+  // Left out or null: one-way. Sent with no returnCabin, or the other way round: 400.
+  @ValidateIf(
+    (body: HoldFlightBookingDto) =>
+      body.returnFlightId != null || body.returnCabin != null,
+  )
+  @IsDefined({ message: RETURN_CABIN_WITHOUT_FLIGHT_MESSAGE })
+  // Only a sent value is checked, so a missing one answers "required" alone.
+  @ValidateBy({
+    name: 'returnFlightIdIsMongoId',
+    validator: {
+      validate: (value: unknown): boolean =>
+        value === undefined ||
+        value === null ||
+        (typeof value === 'string' && isMongoId(value)),
+      defaultMessage: () => 'returnFlightId must be a valid id',
+    },
+  })
+  returnFlightId?: string;
+
+  @ApiPropertyOptional({
+    enum: CabinClass,
+    enumName: 'CabinClass',
+    description:
+      'FLT-12(a), round trip only: the cabin category of the return flight, required with returnFlightId. It may differ from the outbound cabin.',
+  })
+  @ValidateIf(
+    (body: HoldFlightBookingDto) =>
+      body.returnFlightId != null || body.returnCabin != null,
+  )
+  @IsDefined({ message: RETURN_FLIGHT_WITHOUT_CABIN_MESSAGE })
+  // Only a sent value is checked, so a missing one answers "required" alone.
+  @ValidateBy({
+    name: 'returnCabinIsCabinClass',
+    validator: {
+      validate: (value: unknown): boolean =>
+        value === undefined ||
+        value === null ||
+        (Object.values(CabinClass) as unknown[]).includes(value),
+      defaultMessage: () => `returnCabin must be one of: ${CABIN_VALUES}`,
+    },
+  })
+  returnCabin?: CabinClass;
 }

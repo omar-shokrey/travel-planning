@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   IsDefined,
+  IsEnum,
   IsIn,
   IsInt,
   IsISO8601,
@@ -23,6 +24,7 @@ import {
   SORT_ORDERS,
   type SortOrder,
 } from '../flights.constants';
+import { CabinClass } from '../models/cabin-class.enum';
 
 const trimmedUppercase = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim().toUpperCase() : value;
@@ -53,11 +55,12 @@ const priceDescription = (
 
 /**
  * FLT-11: a flight search, as a guest or a user sends it in the query string:
- * the four criteria of FLT-11, the price range and the order of FLT-15, and
- * the page. The round trip and the cabin filter (FLT-12) add their fields
- * here. Any other parameter answers 400. The service also checks that both
- * airports are in the airports list and that they differ (the answers of
- * FLT-03), and that minPrice is not above maxPrice.
+ * the four criteria of FLT-11, the return date and the cabin filter of
+ * FLT-12, the price range and the order of FLT-15, and the page. Any other
+ * parameter answers 400. The service also checks that both airports are in
+ * the airports list and that they differ (the answers of FLT-03), that the
+ * return date is not before the departure date, and that minPrice is not
+ * above maxPrice.
  */
 export class SearchFlightsQueryDto extends PaginationQueryDto {
   @ApiProperty({
@@ -118,6 +121,36 @@ export class SearchFlightsQueryDto extends PaginationQueryDto {
     message: `passengers must be at most ${FLIGHT_SEARCH_PASSENGERS_MAX}`,
   })
   passengers: number;
+
+  // No `example` on the two FLT-12 filters: Swagger UI's "Try it out" would
+  // send it and turn every plain search into a round trip or a cabin search.
+  @ApiPropertyOptional({
+    description:
+      'FLT-12(a): give it for a round trip. The return date at the arrival airport (its local date), YYYY-MM-DD, on or after departureDate. The answer is then `{ outbound, return }`: two pages of the same shape, the outbound flights on departureDate and the return flights (arrival airport to departure airport) on this date, with the same passengers, cabin, price and order, and the same page and limit. Leave it out for a one-way search, which answers one page as before. For example, 2027-06-22.',
+  })
+  @IsOptional()
+  @Transform(trimmed)
+  @IsString({ message: 'returnDate must be a string' })
+  @Matches(LOCAL_DATE_PATTERN, {
+    message: 'returnDate must be a date YYYY-MM-DD',
+  })
+  @IsISO8601(
+    { strict: true },
+    { message: 'returnDate must be a real calendar date' },
+  )
+  returnDate?: string;
+
+  @ApiPropertyOptional({
+    enum: CabinClass,
+    enumName: 'CabinClass',
+    description:
+      'FLT-12(c): optional cabin class. Only flights with this cabin, with enough seats (and inside the price range), are listed, and only that cabin is returned. Leave it out for every cabin.',
+  })
+  @IsOptional()
+  @IsEnum(CabinClass, {
+    message: `cabin must be one of: ${Object.values(CabinClass).join(', ')}`,
+  })
+  cabin?: CabinClass;
 
   @ApiPropertyOptional({
     type: 'integer',

@@ -451,7 +451,7 @@ describe('Booking summary (e2e, FLT-21)', () => {
     };
 
     expect(operation.summary).toBe(
-      'Show the booking summary before payment (FLT-21)',
+      'Show the booking summary before payment (FLT-21), one-way or round trip (FLT-12)',
     );
     expect(operation.tags).toEqual(['Flight bookings']);
     expect(operation.security).toEqual([{ cookie: [] }]);

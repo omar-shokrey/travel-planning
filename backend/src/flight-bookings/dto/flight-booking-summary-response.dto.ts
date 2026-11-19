@@ -99,6 +99,74 @@ export class SummaryBaggageDto {
  * FLT-21: what the user will book and pay, shown before payment. Nothing is
  * held or saved: there is no id, status, hold time or reference.
  */
+/** FLT-12(a): what one passenger pays on the return flight, in the order of the request. */
+export class SummaryReturnPassengerDto {
+  @ApiProperty({
+    description:
+      'The fare of this passenger on the return flight in minor units: its cabin price, or 10% of it (rounded) for an infant',
+    example: 22000,
+  })
+  fare: number;
+
+  @ApiProperty({
+    type: ExtraBagsResponseDto,
+    nullable: true,
+    description:
+      'The extra bags of this passenger on the return flight; `null` when none',
+  })
+  extraBags: ExtraBagsResponseDto | null;
+
+  @ApiProperty({
+    description:
+      "Fee of those extra bags in minor units: bags × the return airline's extra bag price; 0 without bags",
+    example: 4000,
+  })
+  baggageFee: number;
+}
+
+/** FLT-12(a): the return flight of a round-trip summary. */
+export class SummaryReturnTripDto {
+  @ApiProperty({
+    type: FlightResponseDto,
+    description:
+      'The return flight with its UTC times and the local times at each airport (GEN-06)',
+  })
+  flight: FlightResponseDto;
+
+  @ApiProperty({ type: SummaryAirlineDto })
+  airline: SummaryAirlineDto;
+
+  @ApiProperty({
+    enum: CabinClass,
+    enumName: 'CabinClass',
+    example: CabinClass.Economy,
+  })
+  cabin: CabinClass;
+
+  @ApiProperty({
+    type: [SummaryReturnPassengerDto],
+    description:
+      'Each passenger on the return flight, in the order of `passengers` (same people, same types)',
+  })
+  passengers: SummaryReturnPassengerDto[];
+
+  @ApiProperty({ type: SummaryBaggageDto })
+  baggage: SummaryBaggageDto;
+
+  @ApiProperty({
+    description: 'Fares of every passenger on the return flight, minor units',
+    example: 66000,
+  })
+  fareTotal: number;
+
+  @ApiProperty({
+    description:
+      'Extra bag fees of every passenger on the return flight, minor units',
+    example: 4000,
+  })
+  baggageTotal: number;
+}
+
 export class FlightBookingSummaryResponseDto {
   @ApiProperty({
     type: FlightResponseDto,
@@ -132,17 +200,27 @@ export class FlightBookingSummaryResponseDto {
   @ApiProperty({ type: SummaryBaggageDto })
   baggage: SummaryBaggageDto;
 
+  @ApiProperty({
+    type: SummaryReturnTripDto,
+    nullable: true,
+    description:
+      'FLT-12(a): the return flight of a round trip (returnFlightId and returnCabin sent), with its airline, cabin, what each passenger pays on it and its baggage rule; `null` for a one-way booking. The fields above (flight, airline, cabin, passengers, baggage) are the outbound flight.',
+  })
+  returnTrip: SummaryReturnTripDto | null;
+
   @ApiProperty({ description: 'The platform currency', example: 'USD' })
   currency: string;
 
   @ApiProperty({
-    description: 'Fares of every passenger in minor units',
+    description:
+      'Fares of every passenger on every flight (both flights of a round trip) in minor units',
     example: 77500,
   })
   fareTotal: number;
 
   @ApiProperty({
-    description: 'Extra bag fees of every passenger in minor units',
+    description:
+      'Extra bag fees of every passenger on every flight in minor units',
     example: 9000,
   })
   baggageTotal: number;

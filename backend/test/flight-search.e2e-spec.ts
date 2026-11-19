@@ -850,17 +850,18 @@ describe('Flight search (e2e, FLT-11)', () => {
 
     it('reports a sent skip in the same 400 as another unknown parameter', async () => {
       const response = await search(
-        route(dateOf(0), 1, { skip: '5', cabin: 'economy' }),
+        route(dateOf(0), 1, { skip: '5', tripType: 'oneWay' }),
       ).expect(400);
 
       expect(
         response.body.errors
           .map((error: { field: string }) => error.field)
           .sort(),
-      ).toEqual(['cabin', 'skip']);
+      ).toEqual(['skip', 'tripType']);
     });
 
-    it.each(['returnDate', 'cabin', 'sort', 'price'])(
+    // returnDate and cabin were refused here until FLT-12 added them.
+    it.each(['sort', 'price', 'tripType', 'returnFlight'])(
       'refuses the parameter %s, which this search does not have',
       async (field) => {
         expect(
@@ -904,6 +905,8 @@ describe('Flight search (e2e, FLT-11)', () => {
       arrivalAirport: true,
       departureDate: true,
       passengers: true,
+      returnDate: false,
+      cabin: false,
       minPrice: false,
       maxPrice: false,
       sortBy: false,

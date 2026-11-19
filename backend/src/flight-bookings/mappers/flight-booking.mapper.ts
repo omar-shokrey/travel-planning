@@ -5,7 +5,8 @@ import type { FlightBooking } from '../models/flight-booking.schema';
 export type FlightBookingSource = FlightBooking & { _id: Types.ObjectId };
 
 /**
- * A flight booking as its owner sees it (FLT-22, FLT-19). The owner id, the
+ * A flight booking as its owner sees it (FLT-22, FLT-19). A round trip
+ * (FLT-12) has two segments, outbound then return, in `segments`. The owner id, the
  * airline id of each segment, the copied policy and the Mongo internals stay
  * inside; the reference is left out until the payment gives one (FLT-23).
  * The passengers' details are returned to the owner only: only owner routes
@@ -36,15 +37,20 @@ export function toFlightBookingResponse(
       infants: booking.passengerCounts.infants,
     },
     passengers: (booking.passengers ?? []).map((passenger) => {
-      const bags = (passenger.baggage ?? []).find(
-        ({ segment }) => segment === 0,
-      );
+      // FLT-12(a): segment 0 is the outbound flight, segment 1 the return.
+      const bagsOn = (index: number) => {
+        const bags = (passenger.baggage ?? []).find(
+          ({ segment }) => segment === index,
+        );
+        return bags ? { bags: bags.bags, weightKg: bags.weightKg } : null;
+      };
       return {
         fullName: passenger.fullName,
         dateOfBirth: passenger.dateOfBirth,
         type: passenger.type,
         passportNumber: passenger.passportNumber,
-        extraBags: bags ? { bags: bags.bags, weightKg: bags.weightKg } : null,
+        extraBags: bagsOn(0),
+        returnExtraBags: bagsOn(1),
       };
     }),
     createdAt: booking.createdAt.toISOString(),

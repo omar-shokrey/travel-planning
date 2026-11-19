@@ -523,7 +523,7 @@ describe('Flight seat hold (e2e, FLT-22, FLT-19)', () => {
     >;
 
     expect(operation.summary).toBe(
-      'Hold seats for payment, with the passengers and their extra bags (FLT-22, FLT-19)',
+      'Hold seats for payment, with the passengers and their extra bags (FLT-22, FLT-19), one-way or round trip (FLT-12)',
     );
     expect(operation.tags).toEqual(['Flight bookings']);
     expect(operation.security).toEqual([{ cookie: [] }]);
@@ -541,14 +541,16 @@ describe('Flight seat hold (e2e, FLT-22, FLT-19)', () => {
     expect(
       operation.responses['201'].content?.['application/json'].schema.$ref,
     ).toBe('#/components/schemas/FlightBookingResponseDto');
+    // FLT-12 added the return flight, its cabin and the return bags.
     expect(Object.keys(schemas.HoldFlightBookingDto.properties).sort()).toEqual(
-      ['cabin', 'flightId', 'passengers'],
+      ['cabin', 'flightId', 'passengers', 'returnCabin', 'returnFlightId'],
     );
     expect(Object.keys(schemas.PassengerDetailsDto.properties).sort()).toEqual([
       'dateOfBirth',
       'extraBags',
       'fullName',
       'passportNumber',
+      'returnExtraBags',
     ]);
     expect(Object.keys(schemas.ExtraBagsDto.properties).sort()).toEqual([
       'bags',
