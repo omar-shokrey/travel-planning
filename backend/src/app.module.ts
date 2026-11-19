@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { databaseOptions } from './config/database.config';
@@ -33,6 +34,7 @@ import { UsersModule } from './users/users.module';
       inject: [ConfigService],
       useFactory: databaseOptions,
     }),
+    ScheduleModule.forRoot(),
     AdminModule,
     AuditModule,
     AuthModule,

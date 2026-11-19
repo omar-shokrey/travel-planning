@@ -165,7 +165,7 @@ FLT-30: a flight is `scheduled`, `cancelled` or `departed`; it becomes departed 
 - **`scheduledFlightFilter(now)`** is `{ status: 'scheduled', departureAt: { $gt: now } }`: the one definition of "searchable, editable or bookable", for every query and every conditional write, now and later.
 - **Decision: `departed` is derived, never written by a timer.** Reasons:
   - it is exact at the instant, where a periodic sweep would leave a gap between the departure and the next run, in which a departed flight would still be editable or bookable;
-  - it needs no scheduler: the open PR #190 already registers `ScheduleModule.forRoot()` in `app.module.ts`, and a second registration would conflict;
+  - it needs no job: `ScheduleModule.forRoot()` is registered once in `app.module.ts` for the hold-expiry jobs (FLT-22, HTL-18), but no job is needed for flight status, and none must register the scheduler a second time;
   - it never bulk-writes the shared database (no `updateMany` over flights).
 
   There is therefore no `@nestjs/schedule` job, `setInterval` or cron for flight status, and the stored status of a past flight stays `scheduled`. (The data model in `specs/travel-platform.md` still says a scheduled job moves flights to `departed`; changing it is a shared-layer PR.)
@@ -183,3 +183,14 @@ FLT-30: a flight is `scheduled`, `cancelled` or `departed`; it becomes departed 
 
 - **No new index.** The search (FLT-11) filters by route and local date first (`departureAirport`, `arrivalAirport`, `departureDateLocal`, `status`), which leaves few flights for the `departureAt` condition; the cabin writes go by `_id`.
 - **Tests:** `flight-status.spec.ts` (a fake clock that the functions must not read: 1 ms before, exactly at and 1 ms after the departure, a cancelled flight after its departure, a stored departed flight, the filter and its agreement with `effectiveStatus` at the boundary), `mappers/flight.mapper.spec.ts` (the effective status with a fixed `now`), `flight-cabins.service.spec.ts` (the filters carry `departureAt: { $gt: now }`, 409 for a past departure stored as scheduled, before the class check) and `test/flights-status.e2e-spec.ts` (adding and editing a cabin of a future scheduled flight, of a past one still stored as scheduled, of a cancelled one and of a departed one, with nothing changed in the database after each 409, and `POST /api/flights` answering `scheduled`).
+
+## Seat holds (FLT-22)
+
+The booking (flight-bookings module) owns the booking; this module owns the flight document and its seat counters. `FlightSeatHoldsService` (`flight-seat-holds.service.ts`, exported by `FlightsModule`) is the only way a booking holds or releases a cabin's seats. **Only the booking modules may change `heldSeats` and `bookedSeats`**, and only through this service.
+
+- **`hold(flightId, cabin, seats, now)` is one conditional update.** `findOneAndUpdate({ _id, ...scheduledFlightFilter(now), cabins: { $elemMatch: { cabin } }, $expr: cabinHasSeatsLeft(cabin, seats) }, { $inc: { 'cabins.$[c].heldSeats': seats } }, { arrayFilters: [{ 'c.cabin': cabin }], returnDocument: 'after' })`. `cabinHasSeatsLeft` finds the cabin with `$filter` and `$arrayElemAt` and checks `totalSeats - bookedSeats - heldSeats >= seats`. The rule and the change are applied to one document atomically, so requests at the same moment never hold more seats than exist, with no transaction. `scheduledFlightFilter(now)` in the same filter means a flight that departs or is cancelled during the booking cannot be booked (FLT-30).
+- **It returns the flight as the update left it**, so the booking copies the price of the same moment the seats were taken.
+- **A read before the update only chooses the answer**: 404 "Flight not found" (also for a deactivated airline, ACC-15), 409 "This flight can no longer be booked" (`effectiveStatus`), 404 "This flight has no business cabin". If the update then matches nothing, a second read answers 409 "This flight can no longer be booked" or 409 "Not enough seats left in this cabin". Nothing is held in any error case.
+- **`release(flightId, cabin, seats)`** is one `updateOne` that matches only if that cabin's `heldSeats >= seats`, then adds `-seats`, so a counter never goes below 0. A mismatch is logged as a counter to recompute and never thrown.
+- **The cabin edit (FLT-04) is unchanged.** Its compare-and-set matches the `bookedSeats` and `heldSeats` it read, so a hold at the same moment makes it retry, then answer 409 "The cabin was changed by another request. Try again."
+- **Tests:** `flight-seat-holds.service.spec.ts` (the exact filter, update and options, every error with no update, the release guard) and `test/flight-bookings-hold.e2e-spec.ts`.
