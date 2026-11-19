@@ -6,7 +6,8 @@
   "testTimeout": 30000,
   "setupFiles": [
     "<rootDir>/support/test-database.ts",
-    "<rootDir>/support/fxrates-env.ts"
+    "<rootDir>/support/fxrates-env.ts",
+    "<rootDir>/support/stripe-env.ts"
   ],
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"

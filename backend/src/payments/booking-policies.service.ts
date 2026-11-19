@@ -86,7 +86,7 @@ export class BookingPoliciesService {
    * booking, only while it waits for payment, its hold is live at `now` and
    * its policies are accepted. 404 for a missing booking or someone else's,
    * 409 otherwise. Payment is blocked until the policies are accepted. No
-   * route uses it yet: PAY-01 calls it before it creates a PaymentIntent.
+   * route uses it: `PaymentsService` calls it before it creates a PaymentIntent (PAY-01).
    */
   async findPayableOrThrow(
     type: BookingType,

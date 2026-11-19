@@ -141,7 +141,10 @@ export async function createFlightFixture(
   const moduleFixture = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
-  const app = moduleFixture.createNestApplication<NestExpressApplication>();
+  // rawBody: true like main.ts, so the Stripe webhook can check its signature (PAY-01).
+  const app = moduleFixture.createNestApplication<NestExpressApplication>({
+    rawBody: true,
+  });
   configureApp(app);
   setupSwagger(app);
   await app.init();
