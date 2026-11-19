@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { FlightsModule } from '../flights/flights.module';
+import { FlightBookingExpiryService } from './flight-booking-expiry.service';
 import { FlightBookingsController } from './flight-bookings.controller';
 import { FlightBookingsService } from './flight-bookings.service';
 import {
@@ -17,6 +18,7 @@ import {
     FlightsModule,
   ],
   controllers: [FlightBookingsController],
-  providers: [FlightBookingsService],
+  // FlightBookingExpiryService: the hold-expiry job (FLT-22).
+  providers: [FlightBookingsService, FlightBookingExpiryService],
 })
 export class FlightBookingsModule {}

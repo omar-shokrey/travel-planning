@@ -15,3 +15,9 @@ export const INFANT_FARE_PERCENT = 10;
 
 /** One segment now; the return flight of a round trip (FLT-12) adds a second. */
 export const FLIGHT_BOOKING_SEGMENTS_MAX = 2;
+
+/**
+ * FLT-22: how many due holds one run of the expiry job handles, oldest first.
+ * The job runs every minute, so a larger backlog is cleared in a few runs.
+ */
+export const FLIGHT_BOOKING_EXPIRY_BATCH_SIZE = 100;
