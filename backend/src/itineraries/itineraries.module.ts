@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ExchangeRatesModule } from '../exchange-rates/exchange-rates.module';
 import { ReferenceModule } from '../reference/reference.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { UsersModule } from '../users/users.module';
@@ -23,6 +24,8 @@ import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
     ]),
     ReferenceModule,
     UsersModule,
+    // ExchangeRatesService: the budget summary in the user's currency (ITN-18).
+    ExchangeRatesModule,
     // UploadsService: activity images (ITN-12, GEN-08).
     UploadsModule,
   ],

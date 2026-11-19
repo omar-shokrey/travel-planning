@@ -6,6 +6,9 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { PLATFORM_CURRENCY } from '../common/constants/currency';
+import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
+import { UsersService } from '../users/users.service';
 import type { BudgetSummaryResponseDto } from './dto/budget-summary-response.dto';
 import type { CreateBudgetEntryDto } from './dto/create-budget-entry.dto';
 import type { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
@@ -16,7 +19,11 @@ import {
   ITINERARY_CHANGED_MESSAGE,
 } from './itineraries.constants';
 import { ItinerariesService } from './itineraries.service';
-import { toBudgetSummaryResponse } from './mappers/budget-summary.mapper';
+import {
+  type SummaryConversion,
+  toBudgetSummaryResponse,
+} from './mappers/budget-summary.mapper';
+import { withConvertedAmounts } from './mappers/itinerary-conversion.mapper';
 import { toItineraryDetailResponse } from './mappers/itinerary.mapper';
 import type { BudgetEntry } from './models/budget-entry.schema';
 import type { ItineraryDay } from './models/itinerary-day.schema';
@@ -50,6 +57,8 @@ export class BudgetsService {
     @InjectModel(Itinerary.name)
     private readonly itineraries: Model<Itinerary>,
     private readonly itinerariesService: ItinerariesService,
+    private readonly usersService: UsersService,
+    private readonly exchangeRates: ExchangeRatesService,
   ) {}
 
   /**
@@ -149,7 +158,10 @@ export class BudgetsService {
     return toItineraryDetailResponse(itinerary);
   }
 
-  /** ITN-14: the total budget of your own itinerary, by category and by day. */
+  /**
+   * ITN-14: the total budget of your own itinerary, by category and by day.
+   * ITN-18: with every total also converted to your currency.
+   */
   async summary(
     itineraryId: string,
     userId: string,
@@ -159,7 +171,30 @@ export class BudgetsService {
       userId,
       'You can only see the budget of your own itineraries',
     );
-    return toBudgetSummaryResponse(itinerary);
+    return toBudgetSummaryResponse(itinerary, await this.conversionFor(userId));
+  }
+
+  /**
+   * ITN-03 with ITN-18: your itinerary as you open it, with every budget
+   * amount also in your currency.
+   */
+  async findOneConverted(
+    itineraryId: string,
+    userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    const detail = await this.itinerariesService.findOne(itineraryId, userId);
+    return withConvertedAmounts(detail, await this.conversionFor(userId));
+  }
+
+  /**
+   * ITN-18: the user's preferred currency (ACC-09), USD (PAY-04) when there
+   * is none, and the rates. The rates never fail a request: without them
+   * every converted amount is null.
+   */
+  private async conversionFor(userId: string): Promise<SummaryConversion> {
+    const user = await this.usersService.findEntityById(userId);
+    const currency = user?.preferredCurrency ?? PLATFORM_CURRENCY;
+    return { currency, rates: await this.exchangeRates.latest() };
   }
 
   /** Finds the itinerary that holds this entry: 404, then 403 if it is not yours. */

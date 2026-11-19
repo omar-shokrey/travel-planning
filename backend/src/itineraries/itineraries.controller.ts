@@ -101,7 +101,7 @@ export class ItinerariesController {
   @ApiOperation({
     summary: 'Open one of my itineraries',
     description:
-      'ITN-03. The full details of your own itinerary: its fields and its days in order, each with its number and date.',
+      'ITN-03. The full details of your own itinerary: its fields and its days in order, each with its number and date. ITN-18: every budget amount (budget entries, activity costs, transport costs, city-group subtotals) also has `converted`, the same money in your preferred currency (USD when you have none), at the daily rates named in `conversion`.',
   })
   @ApiParam({ name: 'id', description: 'Itinerary id' })
   @ApiOkResponse({ type: ItineraryDetailResponseDto })
@@ -115,7 +115,7 @@ export class ItinerariesController {
     @Param('id', ParseObjectIdPipe) id: string,
     @CurrentUser('id') userId: string,
   ): Promise<ItineraryDetailResponseDto> {
-    return this.itineraries.findOne(id, userId);
+    return this.budgets.findOneConverted(id, userId);
   }
 
   @Patch(':id')
@@ -386,7 +386,7 @@ export class ItinerariesController {
   @ApiOperation({
     summary: 'Budget summary of an itinerary',
     description:
-      'ITN-14. The total budget of your own itinerary, by category and by day. Totals include budget entries, activity costs (under activities) and transport costs (under intercity_transport), each as one amount per currency. Nothing is converted (ITN-18).',
+      'ITN-14. The total budget of your own itinerary, by category and by day. Totals include budget entries, activity costs (under activities) and transport costs (under intercity_transport), each as one amount per currency. ITN-18: every total also has `converted`, the same money in your preferred currency (USD when you have none), at the daily exchange rates named in `conversion`.',
   })
   @ApiParam({ name: 'id', description: 'Itinerary id' })
   @ApiOkResponse({ type: BudgetSummaryResponseDto })

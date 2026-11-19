@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { MoneyResponseDto } from './money-response.dto';
 
 /** ITN-09: consecutive days in the same city, shown together. */
@@ -29,9 +29,18 @@ export class CityGroupResponseDto {
 
   @ApiProperty({
     description:
-      'Budget subtotal of the group: activity costs, budget entries and transport costs of its days, one total per currency, sorted by currency. Conversion to one currency is ITN-18.',
+      'Budget subtotal of the group: activity costs, budget entries and transport costs of its days, one total per currency, sorted by currency. The budget summary gives these totals in your currency (ITN-18).',
     type: [MoneyResponseDto],
     example: [{ amount: 45000, currency: 'EGP' }],
   })
   budgetSubtotal: MoneyResponseDto[];
+
+  @ApiPropertyOptional({
+    type: MoneyResponseDto,
+    nullable: true,
+    description:
+      'ITN-18. Only when you open your itinerary (GET /api/itineraries/:id): the subtotal as one amount in your preferred currency. `null` when a currency of the group has no rate.',
+    example: { amount: 340500, currency: 'EGP' },
+  })
+  budgetSubtotalConverted?: MoneyResponseDto | null;
 }

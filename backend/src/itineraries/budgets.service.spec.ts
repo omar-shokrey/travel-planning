@@ -8,7 +8,12 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Error as MongooseError, Mongoose, Types } from 'mongoose';
 import { City } from '../reference/models/city.schema';
+import {
+  ExchangeRatesService,
+  type RateSet,
+} from '../exchange-rates/exchange-rates.service';
 import { UploadsService } from '../uploads/uploads.service';
+import { UsersService } from '../users/users.service';
 import { Country } from '../reference/models/country.schema';
 import { BudgetsService, DAY_BUDGET_FULL_MESSAGE } from './budgets.service';
 import { BudgetCategory } from './enums/budget-category.enum';
@@ -86,10 +91,29 @@ describe('BudgetsService (ITN-14)', () => {
       return Promise.resolve(itinerary);
     }) as never);
 
+  /** The user's preferred currency (ACC-09), as stored. */
+  let preferredCurrency: string | undefined;
+  const findUser = jest.fn(() =>
+    Promise.resolve({ preferredCurrency } as never),
+  );
+  /** The rates the exchange-rates module gives (ITN-18). */
+  const latestRates = jest.fn(() =>
+    Promise.resolve({
+      rateDate: '2026-11-18',
+      fetchedAt: new Date('2026-11-19T06:00:00.000Z'),
+      rates: { USD: 1, EGP: 50 },
+    } as RateSet | null),
+  );
+
   beforeEach(async () => {
+    preferredCurrency = undefined;
+    findUser.mockClear();
+    latestRates.mockClear();
     const moduleRef = await Test.createTestingModule({
       providers: [
         BudgetsService,
+        { provide: UsersService, useValue: { findEntityById: findUser } },
+        { provide: ExchangeRatesService, useValue: { latest: latestRates } },
         ItinerariesService,
         { provide: getModelToken(Itinerary.name), useValue: ItineraryModel },
         {
@@ -414,6 +438,42 @@ describe('BudgetsService (ITN-14)', () => {
     });
   });
 
+  describe('findOneConverted (ITN-18)', () => {
+    it('gives your itinerary with each budget amount in your currency', async () => {
+      const { itinerary } = stored();
+      preferredCurrency = 'USD';
+
+      const detail = await service.findOneConverted(
+        itinerary.id as string,
+        ownerId,
+      );
+
+      expect(findUser).toHaveBeenCalledWith(ownerId);
+      // EGP 20.00 at 50 per dollar is USD 0.40.
+      expect(detail.days[1].budgetEntries[0].converted).toEqual({
+        amount: 40,
+        currency: 'USD',
+      });
+      expect(detail.cityGroups[0].budgetSubtotalConverted).toEqual({
+        amount: 40,
+        currency: 'USD',
+      });
+      expect(detail.conversion).toMatchObject({
+        currency: 'USD',
+        rateDate: '2026-11-18',
+      });
+    });
+
+    it('answers 403 for the itinerary of another user and reads no rates', async () => {
+      const { itinerary } = stored(otherUserId);
+
+      await expect(
+        service.findOneConverted(itinerary.id as string, ownerId),
+      ).rejects.toThrow(ForbiddenException);
+      expect(latestRates).not.toHaveBeenCalled();
+    });
+  });
+
   describe('summary', () => {
     it('returns the totals of your own itinerary', async () => {
       const { itinerary } = stored();
@@ -429,6 +489,44 @@ describe('BudgetsService (ITN-14)', () => {
       ).toEqual([{ amount: 2000, currency: 'EGP' }]);
     });
 
+    it('converts the totals to your preferred currency (ITN-18)', async () => {
+      const { itinerary } = stored();
+      preferredCurrency = 'USD';
+
+      const summary = await service.summary(itinerary.id as string, ownerId);
+
+      expect(findUser).toHaveBeenCalledWith(ownerId);
+      expect(latestRates).toHaveBeenCalledTimes(1);
+      // EGP 20.00 at 50 per dollar is USD 0.40.
+      expect(summary.converted).toEqual({ amount: 40, currency: 'USD' });
+      expect(summary.conversion).toEqual({
+        currency: 'USD',
+        rateDate: '2026-11-18',
+        fetchedAt: '2026-11-19T06:00:00.000Z',
+        missingCurrencies: [],
+      });
+    });
+
+    it('converts to USD when you have no preferred currency (PAY-04)', async () => {
+      const { itinerary } = stored();
+
+      const summary = await service.summary(itinerary.id as string, ownerId);
+
+      expect(summary.conversion?.currency).toBe('USD');
+    });
+
+    it('still answers, without converted totals, when there are no rates', async () => {
+      const { itinerary } = stored();
+      preferredCurrency = 'EGP';
+      latestRates.mockResolvedValueOnce(null);
+
+      const summary = await service.summary(itinerary.id as string, ownerId);
+
+      expect(summary.total).toEqual([{ amount: 2000, currency: 'EGP' }]);
+      expect(summary.converted).toBeNull();
+      expect(summary.conversion).toBeNull();
+    });
+
     it('answers 403 for the itinerary of another user', async () => {
       const { itinerary } = stored(otherUserId);
 
@@ -439,6 +537,7 @@ describe('BudgetsService (ITN-14)', () => {
           'You can only see the budget of your own itineraries',
         ),
       );
+      expect(latestRates).not.toHaveBeenCalled();
     });
 
     it('answers 404 for an itinerary that does not exist', async () => {

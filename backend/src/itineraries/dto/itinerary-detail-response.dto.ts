@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { BudgetConversionResponseDto } from './budget-summary-response.dto';
 import { CityGroupResponseDto } from './city-group-response.dto';
 import { CloneSourceResponseDto } from './clone-source-response.dto';
 import { ItineraryDayResponseDto } from './itinerary-day-response.dto';
@@ -25,4 +26,12 @@ export class ItineraryDetailResponseDto extends ItineraryResponseDto {
     type: CloneSourceResponseDto,
   })
   clonedFrom?: CloneSourceResponseDto;
+
+  @ApiPropertyOptional({
+    type: BudgetConversionResponseDto,
+    nullable: true,
+    description:
+      'ITN-18. Only when you open your itinerary (GET /api/itineraries/:id): your currency and the exchange rates (with their date) used for every `converted` amount. `null` when no rates were ever fetched; then every `converted` is `null`.',
+  })
+  conversion?: BudgetConversionResponseDto | null;
 }

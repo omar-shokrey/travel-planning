@@ -369,7 +369,11 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
         dayCount: 0,
         days: [],
         cityGroups: [],
+        // ITN-18: the rates used depend on what another test file cached at
+        // that moment; itinerary-budget-conversion.e2e-spec.ts checks them.
+        conversion: response.body.conversion,
       });
+      expect(response.body).toHaveProperty('conversion');
     });
 
     it('answers 403 to another user: a private itinerary is for its owner only', async () => {
