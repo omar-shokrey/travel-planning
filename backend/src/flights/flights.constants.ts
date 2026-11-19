@@ -77,6 +77,24 @@ export const EXTRA_BAG_PRICE_MAX = 1_000_000;
 export const MAX_EXTRA_BAGS_MAX = 10;
 
 /**
+ * The most passengers one flight search may ask seats for (FLT-11). The
+ * workbook gives no limit: 9 is ours, the usual most passengers per booking
+ * on airline sites; a larger group books in parts. Passengers here are seats:
+ * infants (under 2) occupy no seat and are not counted (FLT-12, FLT-19).
+ */
+export const FLIGHT_SEARCH_PASSENGERS_MAX = 9;
+
+/** The 400 answer of a well-formed airport code that is not in the airports list (FLT-03, FLT-11). */
+export const unknownAirportMessage = (
+  field: 'departureAirport' | 'arrivalAirport',
+  code: string,
+): string => `${field} ${code} is not in the airports list`;
+
+/** The 400 answer of identical airports (FLT-03, FLT-11). */
+export const SAME_AIRPORTS_MESSAGE =
+  'arrivalAirport must be different from departureAirport';
+
+/**
  * How many times a cabin edit is tried when a booking moves the cabin's seat
  * counters between the read and the write (FLT-04). Ours: a booking takes a
  * few milliseconds, so three tries in a row failing means a busy cabin.
