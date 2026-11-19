@@ -7,7 +7,13 @@ import {
 } from '../common/dto/paginated-response.dto';
 import type { AvailableRoomResponseDto } from './dto/available-room-response.dto';
 import type { AvailableRoomsQueryDto } from './dto/available-rooms-query.dto';
-import { isFreeForStay, type SearchNight } from './hotel-search';
+import {
+  isFreeForStay,
+  nightsOfTheStay,
+  roomsThatCanBeFree,
+  STAY_NIGHT_FIELDS,
+  type SearchNight,
+} from './hotel-search';
 import { toAvailableRoomResponse } from './mappers/available-room.mapper';
 import { Hotel } from './models/hotel.schema';
 import { RoomNight } from './models/room-night.schema';
@@ -20,8 +26,9 @@ const ROOM_FIELDS = 'number type beds maxOccupancy pricePerNight availability';
 
 /**
  * HTL-15: the rooms of one hotel that are free for a stay. Whether a room is
- * free is decided by `isFreeForStay` in `hotel-search.ts`, the rule hotel
- * search (HTL-11) uses, so the two routes always agree. It only reads: a room
+ * free is decided by the rule in `hotel-search.ts` (`roomsThatCanBeFree`,
+ * `nightsOfTheStay` and `isFreeForStay`), the one hotel search (HTL-11) uses,
+ * so the two routes always agree. It only reads: a room
  * listed here can be taken before the user books it, and the hold of HTL-18
  * relies on the unique (`roomId`, `date`) index of `room_nights`, not on this
  * list.
@@ -72,18 +79,12 @@ export class HotelAvailableRoomsService {
     stay: DateRange,
     now: Date = new Date(),
   ): Promise<AvailableRoomResponseDto[]> {
-    // Only rooms bookable on the first night can be free for the stay, as in
-    // hotel search; `isFreeForStay` checks every night below. Room numbers are
-    // free text, so they are compared with their digits as numbers (2 before
-    // 10), as in HTL-08.
+    // The rule of hotel search: the database reads the active rooms bookable
+    // on the first night, and `isFreeForStay` checks every night below. Room
+    // numbers are free text, so they are compared with their digits as
+    // numbers (2 before 10), as in HTL-08.
     const rooms = await this.rooms
-      .find({
-        hotelId,
-        active: true,
-        availability: {
-          $elemMatch: { from: { $lte: stay.from }, to: { $gt: stay.from } },
-        },
-      })
+      .find({ hotelId, ...roomsThatCanBeFree(stay) })
       .select(ROOM_FIELDS)
       .collation({ locale: 'en', numericOrdering: true })
       .sort({ number: 1, _id: 1 })
@@ -92,11 +93,13 @@ export class HotelAvailableRoomsService {
     if (rooms.length === 0) return [];
 
     const nights = await this.roomNights
-      .find({
-        roomId: { $in: rooms.map((room) => room._id) },
-        date: { $gte: stay.from, $lt: stay.to },
-      })
-      .select('roomId date state holdExpiresAt')
+      .find(
+        nightsOfTheStay(
+          rooms.map((room) => room._id),
+          stay,
+        ),
+      )
+      .select(STAY_NIGHT_FIELDS)
       .lean()
       .exec();
     const nightsByRoom = new Map<string, SearchNight[]>();

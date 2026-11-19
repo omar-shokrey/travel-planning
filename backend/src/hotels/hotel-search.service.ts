@@ -10,6 +10,9 @@ import type { SearchHotelsQueryDto } from './dto/search-hotels-query.dto';
 import {
   canHost,
   isFreeForStay,
+  nightsOfTheStay,
+  roomsThatCanBeFree,
+  STAY_NIGHT_FIELDS,
   type SearchNight,
   type SearchRoom,
 } from './hotel-search';
@@ -64,10 +67,7 @@ export class HotelSearchService {
     const rooms = await this.rooms
       .find({
         hotelId: { $in: hotels.map((hotel) => hotel._id) },
-        active: true,
-        availability: {
-          $elemMatch: { from: { $lte: stay.from }, to: { $gt: stay.from } },
-        },
+        ...roomsThatCanBeFree(stay),
       })
       .select('hotelId maxOccupancy pricePerNight availability')
       .lean()
@@ -77,11 +77,13 @@ export class HotelSearchService {
       rooms.length === 0
         ? []
         : await this.roomNights
-            .find({
-              roomId: { $in: rooms.map((room) => room._id) },
-              date: { $gte: stay.from, $lt: stay.to },
-            })
-            .select('roomId date state holdExpiresAt')
+            .find(
+              nightsOfTheStay(
+                rooms.map((room) => room._id),
+                stay,
+              ),
+            )
+            .select(STAY_NIGHT_FIELDS)
             .lean()
             .exec();
     const nightsByRoom = new Map<string, SearchNight[]>();
