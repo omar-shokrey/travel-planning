@@ -84,6 +84,25 @@ export const MAX_EXTRA_BAGS_MAX = 10;
  */
 export const FLIGHT_SEARCH_PASSENGERS_MAX = 9;
 
+/**
+ * How a flight search can be ordered (FLT-15): by the price of the cheapest
+ * cabin listed, by the flight's duration (arrival minus departure) or by the
+ * departure time, which is the order of FLT-11 and the default.
+ */
+export const FLIGHT_SEARCH_SORTS = [
+  'price',
+  'duration',
+  'departureTime',
+] as const;
+export type FlightSearchSort = (typeof FLIGHT_SEARCH_SORTS)[number];
+
+/** The direction of a sort (FLT-15); ascending is the default. */
+export const SORT_ORDERS = ['asc', 'desc'] as const;
+export type SortOrder = (typeof SORT_ORDERS)[number];
+
+/** The 400 answer of a price range whose minimum is above its maximum (FLT-15). */
+export const PRICE_RANGE_MESSAGE = 'minPrice must not be greater than maxPrice';
+
 /** The 400 answer of a well-formed airport code that is not in the airports list (FLT-03, FLT-11). */
 export const unknownAirportMessage = (
   field: 'departureAirport' | 'arrivalAirport',

@@ -5,7 +5,10 @@ import {
 } from '@nestjs/common';
 import type { FieldError } from '../../common/interfaces/error-response.interface';
 import { validationExceptionFactory } from '../../common/pipes/validation-exception.factory';
-import { FLIGHT_SEARCH_PASSENGERS_MAX } from '../flights.constants';
+import {
+  CABIN_PRICE_MAX,
+  FLIGHT_SEARCH_PASSENGERS_MAX,
+} from '../flights.constants';
 import { SearchFlightsQueryDto } from './search-flights-query.dto';
 
 // The same options as the global pipe in app.setup.ts.
@@ -197,8 +200,8 @@ describe('SearchFlightsQueryDto (FLT-11)', () => {
   });
 
   describe('skip: computed by the server, never sent', () => {
-    // The shared PaginationQueryDto has skip as a getter only: without the
-    // setter of this DTO, the transform would throw a TypeError, a 500.
+    // The shared PaginationQueryDto refuses a sent skip itself (GEN-05, #223):
+    // the search keeps that answer without any code of its own.
     it('refuses a sent skip like any parameter the search does not have', async () => {
       expect(await errorsOf({ ...valid, skip: '5' })).toEqual([
         { field: 'skip', messages: ['property skip should not exist'] },
@@ -228,7 +231,7 @@ describe('SearchFlightsQueryDto (FLT-11)', () => {
     });
   });
 
-  it.each(['returnDate', 'cabin', 'maxPrice', 'sort', 'airlineId', 'status'])(
+  it.each(['returnDate', 'cabin', 'sort', 'price', 'airlineId', 'status'])(
     'refuses the parameter %s, which this search does not have',
     async (field) => {
       expect(await errorsOf({ ...valid, [field]: 'x' })).toEqual([
@@ -236,4 +239,100 @@ describe('SearchFlightsQueryDto (FLT-11)', () => {
       ]);
     },
   );
+});
+
+describe('SearchFlightsQueryDto: price range and order (FLT-15)', () => {
+  it('reads both prices as whole numbers of cents, and keeps the defaults of the order', async () => {
+    const dto = await parse({ ...valid, minPrice: '10000', maxPrice: '50000' });
+
+    expect(dto.minPrice).toBe(10000);
+    expect(dto.maxPrice).toBe(50000);
+    expect(dto.sortBy).toBe('departureTime');
+    expect(dto.sortOrder).toBe('asc');
+  });
+
+  it('leaves both prices out when they are not sent', async () => {
+    const dto = await parse(valid);
+
+    expect(dto.minPrice).toBeUndefined();
+    expect(dto.maxPrice).toBeUndefined();
+  });
+
+  it('accepts 0, the highest price, and equal bounds (the range is inclusive; the service compares them)', async () => {
+    expect(
+      await errorsOf({
+        ...valid,
+        minPrice: '0',
+        maxPrice: `${CABIN_PRICE_MAX}`,
+      }),
+    ).toEqual([]);
+    expect(
+      await errorsOf({ ...valid, minPrice: '25000', maxPrice: '25000' }),
+    ).toEqual([]);
+  });
+
+  describe.each(['minPrice', 'maxPrice'])('%s', (field) => {
+    it.each(['', ' ', '12.5', '1e3', 'abc', '0x10', '25000USD'])(
+      'refuses %p: a price is a whole number of cents',
+      async (value) => {
+        expect(await errorsOf({ ...valid, [field]: value })).toEqual([
+          {
+            field,
+            messages: expect.arrayContaining([
+              `${field} must be a whole number of minor units (cents)`,
+            ]),
+          },
+        ]);
+      },
+    );
+
+    it('refuses a negative price', async () => {
+      expect(await errorsOf({ ...valid, [field]: '-1' })).toEqual([
+        { field, messages: [`${field} must be 0 or more`] },
+      ]);
+    });
+
+    it('refuses a price above the highest price a cabin can have', async () => {
+      expect(
+        await errorsOf({ ...valid, [field]: `${CABIN_PRICE_MAX + 1}` }),
+      ).toEqual([
+        { field, messages: [`${field} must be at most ${CABIN_PRICE_MAX}`] },
+      ]);
+    });
+
+    it('refuses the parameter sent twice', async () => {
+      const errors = await errorsOf({ ...valid, [field]: ['100', '200'] });
+
+      expect(errors.map((error) => error.field)).toEqual([field]);
+    });
+  });
+
+  it.each(['price', 'duration', 'departureTime'])(
+    'accepts sortBy=%s',
+    async (sortBy) => {
+      expect((await parse({ ...valid, sortBy })).sortBy).toBe(sortBy);
+    },
+  );
+
+  it.each(['asc', 'desc'])('accepts sortOrder=%s', async (sortOrder) => {
+    expect((await parse({ ...valid, sortOrder })).sortOrder).toBe(sortOrder);
+  });
+
+  it.each(['', 'Price', 'cheapest', 'arrivalTime'])(
+    'refuses sortBy=%p',
+    async (sortBy) => {
+      expect(await errorsOf({ ...valid, sortBy })).toEqual([
+        {
+          field: 'sortBy',
+          messages: ['sortBy must be one of: price, duration, departureTime'],
+        },
+      ]);
+    },
+  );
+
+  it.each(['', 'ASC', 'up', '1'])('refuses sortOrder=%p', async (sortOrder) => {
+    expect(await errorsOf({ ...valid, sortOrder })).toEqual([
+      { field: 'sortOrder', messages: ['sortOrder must be one of: asc, desc'] },
+    ]);
+  });
 });
