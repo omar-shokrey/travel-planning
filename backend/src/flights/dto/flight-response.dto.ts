@@ -4,7 +4,11 @@ import { CabinClass } from '../models/cabin-class.enum';
 import { FlightStatus } from '../models/flight-status.enum';
 import { CabinResponseDto } from './cabin-response.dto';
 
-/** Public fields of a flight (FLT-03) with its cabins (FLT-04). Times are UTC; `departureDateLocal` is the local date. */
+/**
+ * Public fields of a flight (FLT-03) with its cabins (FLT-04). Moments are
+ * UTC; `departureDateLocal` is the local date, and the six local fields show
+ * each time at its own airport (GEN-06).
+ */
 export class FlightResponseDto {
   @ApiProperty({
     example: '6740f1c2a4b5c6d7e8f90456',
@@ -35,21 +39,61 @@ export class FlightResponseDto {
   arrivalAirport: string;
 
   @ApiProperty({
-    example: '2027-06-15T11:30:00.000Z',
+    example: '2027-01-15T08:00:00.000Z',
     description:
       'Departure moment in UTC (the local time converted with the departure airport time zone)',
   })
   departureAt: string;
 
   @ApiProperty({
-    example: '2027-06-15T22:30:00.000Z',
+    example: '2027-01-15T20:00:00.000Z',
     description:
       'Arrival moment in UTC (the local time converted with the arrival airport time zone)',
   })
   arrivalAt: string;
 
   @ApiProperty({
-    example: '2027-06-15',
+    example: '2027-01-15T10:00',
+    description:
+      'Departure time at the departure airport, in its own time zone (GEN-06), YYYY-MM-DDTHH:mm: the format of departureLocal when the flight is created',
+  })
+  departureLocal: string;
+
+  @ApiProperty({
+    example: 'Africa/Cairo',
+    description: 'IANA time zone of the departure airport (GEN-06)',
+  })
+  departureTimeZone: string;
+
+  @ApiProperty({
+    example: '+02:00',
+    description:
+      'UTC offset of the departure airport at the departure moment (GEN-06), +HH:MM or -HH:MM; it follows daylight saving',
+  })
+  departureUtcOffset: string;
+
+  @ApiProperty({
+    example: '2027-01-15T15:00',
+    description:
+      'Arrival time at the arrival airport, in its own time zone (GEN-06), YYYY-MM-DDTHH:mm: the format of arrivalLocal when the flight is created',
+  })
+  arrivalLocal: string;
+
+  @ApiProperty({
+    example: 'America/New_York',
+    description: 'IANA time zone of the arrival airport (GEN-06)',
+  })
+  arrivalTimeZone: string;
+
+  @ApiProperty({
+    example: '-05:00',
+    description:
+      'UTC offset of the arrival airport at the arrival moment (GEN-06), +HH:MM or -HH:MM; it follows daylight saving',
+  })
+  arrivalUtcOffset: string;
+
+  @ApiProperty({
+    example: '2027-01-15',
     description: 'Departure date at the departure airport, YYYY-MM-DD',
   })
   departureDateLocal: string;
