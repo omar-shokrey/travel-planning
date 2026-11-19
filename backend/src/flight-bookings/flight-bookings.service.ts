@@ -20,13 +20,13 @@ import { FLIGHT_NOT_FOUND_MESSAGE } from '../flights/flights.constants';
 import { FlightStatus } from '../flights/models/flight-status.enum';
 import { Flight } from '../flights/models/flight.schema';
 import { planPassengers } from './booking-passengers';
+import { priceBooking } from './booking-price';
 import type { FlightBookingResponseDto } from './dto/flight-booking-response.dto';
 import type { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import {
   FLIGHT_BOOKING_HOLD_MINUTES,
   FLIGHT_CHANGED_MESSAGE,
-  INFANT_FARE_PERCENT,
 } from './flight-bookings.constants';
 import {
   type FlightBookingSource,
@@ -34,16 +34,10 @@ import {
 } from './mappers/flight-booking.mapper';
 import { FlightBooking } from './models/flight-booking.schema';
 
-/** FLT-12: an infant pays 10% of the fare, rounded to a whole minor unit. */
-export const infantFareOf = (fare: number): number =>
-  Math.round((fare * INFANT_FARE_PERCENT) / 100);
-
-/** Every seat at the full fare, every infant at the infant fare: whole minor units. */
-export const fareTotalOf = (
-  fare: number,
-  seats: number,
-  infants: number,
-): number => fare * seats + infants * infantFareOf(fare);
+// FLT-21: the fare helpers live in booking-price.ts with the one booking
+// price; they are re-exported here for the callers that import them from
+// the service.
+export { fareTotalOf, infantFareOf } from './booking-price';
 
 /** PAY-02: a booking that does not exist or is not the caller's (ACC-11). */
 export const BOOKING_NOT_FOUND_MESSAGE = 'Booking not found';
@@ -185,7 +179,12 @@ export class FlightBookingsService {
         throw new ConflictException(FLIGHT_CHANGED_MESSAGE);
       }
 
-      const fareTotal = fareTotalOf(cabin.price, seats, counts.infants);
+      // FLT-21: the same price function as the summary, with the fare of the
+      // flight the hold returned.
+      const { fareTotal, baggageTotal, total } = priceBooking(
+        cabin.price,
+        plan,
+      );
       booking = await this.bookings.create({
         _id: bookingId,
         userId: new Types.ObjectId(userId),
@@ -193,8 +192,8 @@ export class FlightBookingsService {
         holdExpiresAt,
         currency: PLATFORM_CURRENCY,
         fareTotal,
-        baggageTotal: plan.baggageTotal,
-        total: fareTotal + plan.baggageTotal,
+        baggageTotal,
+        total,
         segments: [
           {
             flightId: flight._id,
