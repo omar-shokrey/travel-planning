@@ -7,6 +7,7 @@ import { Types } from 'mongoose';
 import type { FieldError } from '../common/interfaces/error-response.interface';
 import type { AirlinesService } from './airlines.service';
 import type { CreateFlightDto } from './dto/create-flight.dto';
+import { FlightResponsesService } from './flight-responses.service';
 import { DUPLICATE_FLIGHT_MESSAGE } from './flights.constants';
 import { FlightsService } from './flights.service';
 import { FlightStatus } from './models/flight-status.enum';
@@ -66,8 +67,8 @@ function setup() {
   };
   const service = new FlightsService(
     flights as never,
-    airports as never,
     airlines as unknown as AirlinesService,
+    new FlightResponsesService(airports as never),
   );
   return { service, flights, airports, airlines };
 }
@@ -119,6 +120,14 @@ describe('FlightsService.create (FLT-03)', () => {
       arrivalAirport: 'JFK',
       departureAt: '2027-06-15T11:30:00.000Z',
       arrivalAt: '2027-06-15T22:30:00.000Z',
+      // GEN-06: what the moderator typed comes back, with each airport's
+      // zone and its offset at that moment.
+      departureLocal: '2027-06-15T14:30',
+      departureTimeZone: 'Africa/Cairo',
+      departureUtcOffset: '+03:00',
+      arrivalLocal: '2027-06-15T18:30',
+      arrivalTimeZone: 'America/New_York',
+      arrivalUtcOffset: '-04:00',
       departureDateLocal: '2027-06-15',
       status: 'scheduled',
       // A new flight has no cabin yet (FLT-04).

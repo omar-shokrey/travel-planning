@@ -9,6 +9,7 @@ import { AirlinesService } from './airlines.service';
 import { AirlinesController } from './airlines.controller';
 import { FlightCabinsController } from './flight-cabins.controller';
 import { FlightCabinsService } from './flight-cabins.service';
+import { FlightResponsesService } from './flight-responses.service';
 import { FlightsController } from './flights.controller';
 import { FlightsService } from './flights.service';
 
@@ -24,7 +25,14 @@ import { FlightsService } from './flights.service';
     ReferenceModule,
   ],
   controllers: [AirlinesController, FlightsController, FlightCabinsController],
-  providers: [AirlinesService, FlightsService, FlightCabinsService],
-  exports: [AirlinesService],
+  providers: [
+    AirlinesService,
+    FlightsService,
+    FlightCabinsService,
+    FlightResponsesService,
+  ],
+  // FlightResponsesService: flight responses with local times (GEN-06) for
+  // the flight-bookings module (FLT-23, FLT-25, FLT-29).
+  exports: [AirlinesService, FlightResponsesService],
 })
 export class FlightsModule {}
