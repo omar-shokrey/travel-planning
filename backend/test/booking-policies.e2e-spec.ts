@@ -83,7 +83,13 @@ describe('Booking policies (e2e, PAY-02)', () => {
       .send({
         flightId,
         cabin: CabinClass.Economy,
-        passengers: { adults: 1, children: 0, infants: 0 },
+        passengers: [
+          {
+            fullName: 'Policy Test Adult',
+            dateOfBirth: '1990-01-01',
+            passportNumber: 'POLICY001',
+          },
+        ],
       });
     expect(response.status).toBe(201);
     const id = (response.body as { id: string }).id;

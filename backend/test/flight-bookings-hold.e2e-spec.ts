@@ -1,5 +1,6 @@
 import './support/auth-env';
 import { getModelToken } from '@nestjs/mongoose';
+import { DateTime } from 'luxon';
 import { Types, type Model } from 'mongoose';
 import { LOGIN_REQUIRED_MESSAGE } from './../src/auth/auth.constants';
 import { FlightBookingStatus } from './../src/flight-bookings/enums/flight-booking-status.enum';
@@ -23,16 +24,33 @@ const MINUTE_MS = 60_000;
 const HOLD_MS = 10 * MINUTE_MS;
 
 const RESPONSE_KEYS = [
+  'baggageTotal',
   'createdAt',
   'currency',
   'fareTotal',
   'holdExpiresAt',
   'id',
   'passengerCounts',
+  'passengers',
   'segments',
   'status',
   'total',
 ];
+
+/** FLT-19: one passenger of the body. The type is derived from the date of birth. */
+let passportSerial = 0;
+const passenger = (dateOfBirth = '1990-01-01') => ({
+  fullName: 'Hold Test Passenger',
+  dateOfBirth,
+  passportNumber: `HOLD${String((passportSerial += 1)).padStart(6, '0')}`,
+});
+/** A child on any departure in the next months. */
+const CHILD_DOB = '2018-01-01';
+/** An infant on any departure in the next months: about 6 months old today. */
+const infantDob = (): string =>
+  DateTime.utc().minus({ months: 6 }).toISODate() as string;
+const adults = (count: number) =>
+  Array.from({ length: count }, () => passenger());
 
 interface BookingBody {
   id: string;
@@ -40,6 +58,7 @@ interface BookingBody {
   holdExpiresAt: string;
   currency: string;
   fareTotal: number;
+  baggageTotal: number;
   total: number;
   segments: {
     flightId: string;
@@ -51,7 +70,7 @@ interface BookingBody {
   createdAt: string;
 }
 
-describe('Flight seat hold (e2e, FLT-22)', () => {
+describe('Flight seat hold (e2e, FLT-22, FLT-19)', () => {
   let fx: FlightFixture;
   let bookings: Model<FlightBooking>;
   /** Every booking this suite created, deleted one by one in afterAll. */
@@ -64,7 +83,7 @@ describe('Flight seat hold (e2e, FLT-22)', () => {
   ): Record<string, unknown> => ({
     flightId,
     cabin: CabinClass.Economy,
-    passengers: { adults: 1, children: 0, infants: 0 },
+    passengers: [passenger()],
     ...fields,
   });
 
@@ -158,7 +177,7 @@ describe('Flight seat hold (e2e, FLT-22)', () => {
 
       const response = await hold(
         holdBody(flightId, {
-          passengers: { adults: 2, children: 0, infants: 1 },
+          passengers: [passenger(), passenger(), passenger(infantDob())],
         }),
         fx.user,
       );
@@ -175,6 +194,7 @@ describe('Flight seat hold (e2e, FLT-22)', () => {
       expect(body.currency).toBe('USD');
       // 2 seats at 10005 cents, the infant at round(1000.5) = 1001 cents.
       expect(body.fareTotal).toBe(2 * 10005 + 1001);
+      expect(body.baggageTotal).toBe(0);
       expect(body.total).toBe(body.fareTotal);
       expect(body.segments).toEqual([
         { flightId, cabin: 'economy', fare: 10005, seatsReserved: 2 },
@@ -229,7 +249,7 @@ describe('Flight seat hold (e2e, FLT-22)', () => {
 
       const response = await hold(
         holdBody(flightId, {
-          passengers: { adults: 1, children: 1, infants: 0 },
+          passengers: [passenger(), passenger(CHILD_DOB)],
         }),
         fx.user,
       );
@@ -336,6 +356,22 @@ describe('Flight seat hold (e2e, FLT-22)', () => {
 
         expect(response.status).toBe(404);
         expect(response.body.message).toBe(FLIGHT_NOT_FOUND_MESSAGE);
+
+        // An invalid body gets the same 404, not a 400 that would show the
+        // hidden airline's bag rule (FLT-19).
+        const invalid = await hold(
+          holdBody(flightId, {
+            passengers: [
+              {
+                ...passenger(CHILD_DOB),
+                extraBags: { bags: 9, weightKg: 999 },
+              },
+            ],
+          }),
+          fx.user,
+        );
+        expect(invalid.status).toBe(404);
+        expect(invalid.body.message).toBe(FLIGHT_NOT_FOUND_MESSAGE);
         expect((await countersOf(flightId)).heldSeats).toBe(0);
       } finally {
         await fx.airlines
@@ -358,20 +394,23 @@ describe('Flight seat hold (e2e, FLT-22)', () => {
     });
 
     it.each([
-      [
-        'no adult',
-        { passengers: { adults: 0, children: 1, infants: 0 } },
-        'passengers.adults',
-      ],
+      ['no adult', { passengers: [passenger(CHILD_DOB)] }, 'passengers'],
       [
         'more infants than adults',
-        { passengers: { adults: 1, children: 0, infants: 2 } },
-        'passengers.infants',
+        {
+          passengers: [
+            passenger(),
+            passenger(infantDob()),
+            passenger(infantDob()),
+          ],
+        },
+        'passengers',
       ],
+      ['10 seats', { passengers: adults(10) }, 'passengers'],
       [
-        '10 seats',
-        { passengers: { adults: 5, children: 5, infants: 0 } },
-        'passengers.children',
+        'a passenger type sent by the client',
+        { passengers: [{ ...passenger(), type: 'adult' }] },
+        'passengers.0.type',
       ],
       ['a price', { price: 1 }, 'price'],
       ['a status', { status: 'confirmed' }, 'status'],
@@ -464,7 +503,15 @@ describe('Flight seat hold (e2e, FLT-22)', () => {
       summary: string;
       tags: string[];
       security: Record<string, unknown>[];
-      requestBody: { content: Record<string, { schema: { $ref: string } }> };
+      requestBody: {
+        content: Record<
+          string,
+          {
+            schema: { $ref: string };
+            examples: Record<string, { value: unknown }>;
+          }
+        >;
+      };
       responses: Record<
         string,
         { content?: Record<string, { schema: { $ref: string } }> }
@@ -475,7 +522,9 @@ describe('Flight seat hold (e2e, FLT-22)', () => {
       { properties: Record<string, unknown> }
     >;
 
-    expect(operation.summary).toBe('Hold seats for payment (FLT-22)');
+    expect(operation.summary).toBe(
+      'Hold seats for payment, with the passengers and their extra bags (FLT-22, FLT-19)',
+    );
     expect(operation.tags).toEqual(['Flight bookings']);
     expect(operation.security).toEqual([{ cookie: [] }]);
     expect(Object.keys(operation.responses).sort()).toEqual([
@@ -495,11 +544,30 @@ describe('Flight seat hold (e2e, FLT-22)', () => {
     expect(Object.keys(schemas.HoldFlightBookingDto.properties).sort()).toEqual(
       ['cabin', 'flightId', 'passengers'],
     );
-    expect(Object.keys(schemas.PassengerCountsDto.properties).sort()).toEqual([
-      'adults',
-      'children',
-      'infants',
+    expect(Object.keys(schemas.PassengerDetailsDto.properties).sort()).toEqual([
+      'dateOfBirth',
+      'extraBags',
+      'fullName',
+      'passportNumber',
     ]);
+    expect(Object.keys(schemas.ExtraBagsDto.properties).sort()).toEqual([
+      'bags',
+      'weightKg',
+    ]);
+    // "Try it out" starts from a valid request: one adult, no extra bags.
+    expect(
+      operation.requestBody.content['application/json'].examples.oneAdult.value,
+    ).toEqual({
+      flightId: '6740f1c2a4b5c6d7e8f90456',
+      cabin: 'economy',
+      passengers: [
+        {
+          fullName: 'Sara Ahmed',
+          dateOfBirth: '1990-05-14',
+          passportNumber: 'A12345678',
+        },
+      ],
+    });
     expect(
       Object.keys(schemas.FlightBookingResponseDto.properties).sort(),
     ).toEqual([...RESPONSE_KEYS, 'reference'].sort());
