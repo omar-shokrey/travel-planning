@@ -2041,3 +2041,17 @@ Claude added PATCH /api/flights/:id for the airline moderator of the flight's ai
 Accepted, changed, or rejected:
 Accepted: the route and its design (local times, the airport lock, the read-only booking lookup, the notification sent after the save and logged rather than rolled back) and the conflict resolution that keeps both providers. Changed after the reviewer agent: a time counts as changed only when its minute changes, the write and the read-back became one findOneAndUpdate, the daylight-saving case of the notification text, the commit split, unused fields removed, a fixed e2e base time per run, a completed-booking case, and README wording. Rejected: nothing.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Omar Hossam
+Tool: Claude (Claude app, wrote the patch); Claude Code (VS Code extension, model Claude Opus 5.5, applied and checked it)
+Branch / Issue: refactor/PAY-01-stripe-env / #63
+Related Requirement: PAY-01 (Stripe payment in test mode); this is the shared-layer part only
+Prompt:
+I asked Claude to prepare PAY-01 (Stripe PaymentIntent and webhook) as two patches, one for the shared layer and one for the payments module, and then asked Claude Code to apply the shared-layer patch on a branch from the latest develop, run the checks, fix what failed, and open its own pull request before the feature.
+How the output was used:
+The patch adds STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET to backend/src/config/env.validation.ts. Both may stay empty, so the app still starts without Stripe. When set, the secret key must be a test-mode key (sk_test_ or a restricted rk_test_) and the webhook secret must start with whsec_; a live key stops the app at startup, because the platform never charges real money. It adds the matching cases to env.validation.spec.ts and, in specs/travel-platform.md, the holdExpiresAt copy on the payment and the (status, holdExpiresAt) index used by the payment expiry job. .env.example already listed both variables, and CI sets neither. Claude Code applied the patch, read the diff and ran its reviewer agent once, which found no blocking issue. After its suggestions, Claude Code added a restricted live key (rk_live_) to the refused cases and one sentence to the "Holds, concurrency and time-based changes" section of the specification describing the payment expiry job (cancel the PaymentIntent in Stripe first, then mark only a still-open payment cancelled, never touch the booking). On my laptop format (no file changed), lint (0 warnings), typecheck, the config unit tests (1 suite, 42 tests), the whole unit suite (213 suites, 3017 tests) and the build all passed; the end-to-end tests run in the CI of the pull request.
+Accepted, changed, or rejected:
+Accepted: the patch, including the refusal of live keys. Changed: the rk_live_ test case and the expiry sentence in the specification, both from the reviewer agent. Rejected: the reviewer's idea to remove the separate live-key test; it was kept, because a test is never removed to tidy up.
+================================================

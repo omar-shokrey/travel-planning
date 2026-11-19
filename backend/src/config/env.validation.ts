@@ -89,6 +89,28 @@ export class EnvironmentVariables {
     protocols: ['http', 'https'],
   })
   FXRATES_API_URL: string = 'https://api.fxratesapi.com';
+
+  /**
+   * Stripe secret key (PAY-01). It may stay empty: the app then starts and
+   * every payment route answers 503. Only a test-mode key is accepted
+   * (`sk_test_` or a restricted `rk_test_`): the platform never charges real
+   * money, and a live key stops the app at startup.
+   */
+  @Matches(/^((sk|rk)_test_\S+)?$/, {
+    message:
+      'STRIPE_SECRET_KEY must be empty or a Stripe test key (starts with sk_test_ or rk_test_)',
+  })
+  STRIPE_SECRET_KEY: string = '';
+
+  /**
+   * Signing secret of the Stripe webhook (PAY-01), from `stripe listen`
+   * (starts with `whsec_`). It may stay empty: the webhook then answers 503.
+   */
+  @Matches(/^(whsec_\S+)?$/, {
+    message:
+      'STRIPE_WEBHOOK_SECRET must be empty or a Stripe signing secret (starts with whsec_)',
+  })
+  STRIPE_WEBHOOK_SECRET: string = '';
 }
 
 /** Passed to ConfigModule as `validate`. Returns the checked values or throws. */
