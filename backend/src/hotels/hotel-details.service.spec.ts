@@ -4,6 +4,10 @@ import type { HotelAvailableRoomsService } from './hotel-available-rooms.service
 import { HotelDetailsService } from './hotel-details.service';
 
 const HOTEL_ID = '6740f1c2a4b5c6d7e8f90123';
+const NOW = new Date('2099-03-01T12:00:00.000Z');
+/** A stay far in the future, so "check-in in the past" never trips. */
+const DATES = { checkIn: '2099-03-10', checkOut: '2099-03-13' };
+const STAY = { from: DATES.checkIn, to: DATES.checkOut };
 
 const storedHotel = () => ({
   _id: new Types.ObjectId(HOTEL_ID),
@@ -40,7 +44,6 @@ const setup = (found: object | null) => {
     currency: 'USD',
   };
   const availableRooms = {
-    assertStay: jest.fn(),
     listAvailable: jest.fn().mockResolvedValue([freeRoom]),
   };
   const service = new HotelDetailsService(
@@ -90,38 +93,77 @@ describe('HotelDetailsService', () => {
       expect(availableRooms.listAvailable).not.toHaveBeenCalled();
     });
 
-    it('lists the free rooms for the stay when dates are sent (HTL-15)', async () => {
+    it('lists the free rooms for the stay when both dates are sent (HTL-15)', async () => {
       const { service, availableRooms, freeRoom } = setup(storedHotel());
-      const stay = { from: '2026-12-10', to: '2026-12-13' };
 
-      const result = await service.findActiveById(HOTEL_ID, {
-        checkIn: '2026-12-10',
-        checkOut: '2026-12-13',
-      });
+      const result = await service.findActiveById(HOTEL_ID, DATES, NOW);
 
-      expect(availableRooms.assertStay).toHaveBeenCalledWith(stay);
       expect(availableRooms.listAvailable).toHaveBeenCalledWith(
         new Types.ObjectId(HOTEL_ID),
-        stay,
+        STAY,
+        NOW,
       );
       expect(result.availableRooms).toEqual([freeRoom]);
     });
 
-    it('checks the stay before it reads the hotel (HTL-15)', async () => {
-      const { service, hotels, availableRooms } = setup(storedHotel());
-      availableRooms.assertStay.mockImplementation(() => {
-        throw new BadRequestException(
-          'The check-in date cannot be in the past',
-        );
+    it('shows an empty list, not null, when dates are sent and no room is free', async () => {
+      const { service, availableRooms } = setup(storedHotel());
+      availableRooms.listAvailable.mockResolvedValue([]);
+
+      const result = await service.findActiveById(HOTEL_ID, DATES, NOW);
+
+      expect(result.availableRooms).toEqual([]);
+    });
+
+    it('does not list rooms when only one date reaches it (the DTO answers 400 first)', async () => {
+      const { service, availableRooms } = setup(storedHotel());
+
+      const result = await service.findActiveById(HOTEL_ID, {
+        checkIn: DATES.checkIn,
       });
 
+      expect(result.availableRooms).toBeNull();
+      expect(availableRooms.listAvailable).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [
+        'a check-in in the past',
+        { checkIn: '2020-01-01', checkOut: '2020-01-02' },
+        'checkIn',
+        'checkIn cannot be in the past',
+      ],
+      [
+        'a stay of 367 nights',
+        { checkIn: '2099-01-01', checkOut: '2100-01-03' },
+        'checkOut',
+        'A stay can have at most 366 nights',
+      ],
+    ])(
+      'answers 400 for %s, as hotel search does, before it reads the hotel',
+      async (_label, dates, field, message) => {
+        const { service, hotels } = setup(storedHotel());
+
+        const error = await service
+          .findActiveById(HOTEL_ID, dates, NOW)
+          .catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect((error as BadRequestException).getResponse()).toEqual({
+          message: 'Validation failed',
+          errors: [{ field, messages: [message] }],
+        });
+        expect(hotels.findOne).not.toHaveBeenCalled();
+      },
+    );
+
+    it('answers 404 for a deactivated hotel even with dates, and lists no rooms', async () => {
+      const { service, availableRooms } = setup(null);
+
       await expect(
-        service.findActiveById(HOTEL_ID, {
-          checkIn: '2020-01-01',
-          checkOut: '2020-01-02',
-        }),
-      ).rejects.toThrow(BadRequestException);
-      expect(hotels.findOne).not.toHaveBeenCalled();
+        service.findActiveById(HOTEL_ID, DATES, NOW),
+      ).rejects.toThrow(new NotFoundException('Hotel not found'));
+      expect(availableRooms.listAvailable).not.toHaveBeenCalled();
     });
 
     it('shows the times and the cancellation policy the moderator set (HTL-09, HTL-10)', async () => {

@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model, Types } from 'mongoose';
 import {
@@ -11,34 +7,24 @@ import {
 } from '../common/dto/paginated-response.dto';
 import type { AvailableRoomResponseDto } from './dto/available-room-response.dto';
 import type { AvailableRoomsQueryDto } from './dto/available-rooms-query.dto';
-import { ROOM_QUERY_MAX_NIGHTS } from './hotels.constants';
+import { isFreeForStay, type SearchNight } from './hotel-search';
 import { toAvailableRoomResponse } from './mappers/available-room.mapper';
 import { Hotel } from './models/hotel.schema';
-import { RoomNightState } from './models/room-night-state.enum';
 import { RoomNight } from './models/room-night.schema';
 import { Room } from './models/room.schema';
-import {
-  coversNight,
-  nightCount,
-  nightsOf,
-  todayUtc,
-  type DateRange,
-} from './room-dates';
+import { nightCount, type DateRange } from './room-dates';
+import { assertStay } from './stay-rules';
 
-/** A stay: `from` is the check-in date, `to` the check-out date. */
-export type Stay = DateRange;
-
-/** A room of the hotel that is free for a whole stay. */
-export type FreeRoom = Pick<
-  Room,
-  'number' | 'type' | 'beds' | 'maxOccupancy' | 'pricePerNight'
-> & { _id: Types.ObjectId };
+/** The room fields the free-room rule and the response need. */
+const ROOM_FIELDS = 'number type beds maxOccupancy pricePerNight availability';
 
 /**
- * HTL-15: the rooms of a hotel that are free for a stay. A room is free when
- * it is active, its availability (HTL-04) covers every night of the stay, and
- * no night of the stay is booked, blocked (HTL-06) or held by a hold that has
- * not expired.
+ * HTL-15: the rooms of one hotel that are free for a stay. Whether a room is
+ * free is decided by `isFreeForStay` in `hotel-search.ts`, the rule hotel
+ * search (HTL-11) uses, so the two routes always agree. It only reads: a room
+ * listed here can be taken before the user books it, and the hold of HTL-18
+ * relies on the unique (`roomId`, `date`) index of `room_nights`, not on this
+ * list.
  */
 @Injectable()
 export class HotelAvailableRoomsService {
@@ -49,13 +35,17 @@ export class HotelAvailableRoomsService {
     private readonly roomNights: Model<RoomNight>,
   ) {}
 
-  /** HTL-15: one page of the free rooms of an active hotel, by room number. */
+  /**
+   * HTL-15: one page of the free rooms of an active hotel, by room number. A
+   * missing or deactivated hotel (ACC-15) answers 404.
+   */
   async findAvailable(
     hotelId: string,
     query: AvailableRoomsQueryDto,
+    now: Date = new Date(),
   ): Promise<PaginatedResponse<AvailableRoomResponseDto>> {
     const stay = { from: query.checkIn, to: query.checkOut };
-    this.assertStay(stay);
+    assertStay(stay);
 
     const hotel = await this.hotels
       .exists({ _id: hotelId, active: true })
@@ -64,90 +54,67 @@ export class HotelAvailableRoomsService {
       throw new NotFoundException('Hotel not found');
     }
 
-    const free = await this.findFreeRoomEntities(hotel._id, stay);
-    const nights = nightCount(stay);
-    const page = free
-      .slice(query.skip, query.skip + query.limit)
-      .map((room) => toAvailableRoomResponse(room, nights));
-
-    return paginate(page, free.length, query);
+    const free = await this.listAvailable(hotel._id, stay, now);
+    return paginate(
+      free.slice(query.skip, query.skip + query.limit),
+      free.length,
+      query,
+    );
   }
 
   /**
-   * HTL-02: every free room of a hotel the caller has already found, for the
-   * hotel page. The stay must have passed `assertStay`.
+   * Every free room of a hotel for the stay, by room number, without pages.
+   * The hotel page (HTL-02) calls it after it has found the active hotel and
+   * checked the stay with `assertStay`.
    */
   async listAvailable(
     hotelId: Types.ObjectId,
-    stay: Stay,
+    stay: DateRange,
+    now: Date = new Date(),
   ): Promise<AvailableRoomResponseDto[]> {
-    const nights = nightCount(stay);
-    return (await this.findFreeRoomEntities(hotelId, stay)).map((room) =>
-      toAvailableRoomResponse(room, nights),
-    );
-  }
-
-  /**
-   * 400 for a stay that starts in the past (UTC) or is longer than 366 nights.
-   * The order of the dates is checked by the query DTO.
-   */
-  assertStay(stay: Stay): void {
-    if (stay.from < todayUtc()) {
-      throw new BadRequestException('The check-in date cannot be in the past');
-    }
-    if (nightCount(stay) > ROOM_QUERY_MAX_NIGHTS) {
-      throw new BadRequestException(
-        `A stay can have at most ${ROOM_QUERY_MAX_NIGHTS} nights`,
-      );
-    }
-  }
-
-  /**
-   * The rooms of the hotel that are free for the whole stay, by room number.
-   * Hotel search (HTL-11) and booking (HTL-16) need the same rule; the hold
-   * of HTL-18 must still rely on the unique (`roomId`, `date`) index, because
-   * a room can be taken between this read and the hold.
-   */
-  async findFreeRoomEntities(
-    hotelId: Types.ObjectId,
-    stay: Stay,
-  ): Promise<FreeRoom[]> {
+    // Only rooms bookable on the first night can be free for the stay, as in
+    // hotel search; `isFreeForStay` checks every night below. Room numbers are
+    // free text, so they are compared with their digits as numbers (2 before
+    // 10), as in HTL-08.
     const rooms = await this.rooms
-      .find({ hotelId, active: true })
-      .select('number type beds maxOccupancy pricePerNight availability')
+      .find({
+        hotelId,
+        active: true,
+        availability: {
+          $elemMatch: { from: { $lte: stay.from }, to: { $gt: stay.from } },
+        },
+      })
+      .select(ROOM_FIELDS)
+      .collation({ locale: 'en', numericOrdering: true })
       .sort({ number: 1, _id: 1 })
       .lean()
       .exec();
+    if (rooms.length === 0) return [];
 
-    const nights = nightsOf(stay);
-    const bookable = rooms.filter((room) =>
-      nights.every((date) => coversNight(room.availability, date)),
-    );
-    if (bookable.length === 0) {
-      return [];
+    const nights = await this.roomNights
+      .find({
+        roomId: { $in: rooms.map((room) => room._id) },
+        date: { $gte: stay.from, $lt: stay.to },
+      })
+      .select('roomId date state holdExpiresAt')
+      .lean()
+      .exec();
+    const nightsByRoom = new Map<string, SearchNight[]>();
+    for (const night of nights) {
+      const key = night.roomId.toString();
+      nightsByRoom.set(key, [...(nightsByRoom.get(key) ?? []), night]);
     }
 
-    const taken = await this.roomNights
-      .distinct('roomId', {
-        roomId: { $in: bookable.map((room) => room._id) },
-        date: { $gte: stay.from, $lt: stay.to },
-        $or: [
-          { state: { $in: [RoomNightState.Booked, RoomNightState.Blocked] } },
-          { state: RoomNightState.Held, holdExpiresAt: { $gt: new Date() } },
-        ],
-      })
-      .exec();
-    const takenIds = new Set(taken.map((id) => id.toString()));
-
-    return bookable
-      .filter((room) => !takenIds.has(room._id.toString()))
-      .map(({ _id, number, type, beds, maxOccupancy, pricePerNight }) => ({
-        _id,
-        number,
-        type,
-        beds,
-        maxOccupancy,
-        pricePerNight,
-      }));
+    const count = nightCount(stay);
+    return rooms
+      .filter((room) =>
+        isFreeForStay(
+          room,
+          stay,
+          nightsByRoom.get(room._id.toString()) ?? [],
+          now,
+        ),
+      )
+      .map((room) => toAvailableRoomResponse(room, count));
   }
 }

@@ -9,7 +9,7 @@ import {
 } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
-import { HotelDetailsQueryDto } from './dto/available-rooms-query.dto';
+import { HotelDetailsQueryDto } from './dto/hotel-details-query.dto';
 import { HotelDetailsResponseDto } from './dto/hotel-details-response.dto';
 import { HotelDetailsService } from './hotel-details.service';
 
