@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import type { HotelRoomHoldsService } from '../hotels/hotel-room-holds.service';
 import type { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import { HotelBookingStatus } from './enums/hotel-booking-status.enum';
+import type { HotelBookingConfirmationService } from './hotel-booking-confirmation.service';
 import {
   BOOKING_NOT_FOUND_MESSAGE,
   HotelBookingsService,
@@ -80,6 +81,7 @@ const setup = (
   const service = new HotelBookingsService(
     bookings as never,
     roomHolds as unknown as HotelRoomHoldsService,
+    {} as HotelBookingConfirmationService,
   );
   return { service, bookings, roomHolds };
 };
@@ -249,6 +251,7 @@ describe('HotelBookingsService owner lookup and policy acceptance (PAY-02)', () 
     const service = new HotelBookingsService(
       bookings as never,
       {} as HotelRoomHoldsService,
+      {} as HotelBookingConfirmationService,
     );
     return { service, bookings };
   };
