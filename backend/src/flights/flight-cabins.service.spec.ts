@@ -9,6 +9,7 @@ import type { FieldError } from '../common/interfaces/error-response.interface';
 import type { AirlinesService } from './airlines.service';
 import type { CreateCabinDto } from './dto/create-cabin.dto';
 import { FlightCabinsService } from './flight-cabins.service';
+import { FlightResponsesService } from './flight-responses.service';
 import {
   CABIN_CHANGED_MESSAGE,
   CABIN_NOT_FOUND_MESSAGE,
@@ -118,11 +119,32 @@ function setup() {
       .fn()
       .mockResolvedValue({ _id: AIRLINE_ID, active: true }),
   };
+  /** The airports of the stored flight with their zones (GEN-06). */
+  const airports = {
+    find: jest.fn(() => ({
+      select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([
+        { _id: 'CAI', timeZone: 'Africa/Cairo' },
+        { _id: 'JFK', timeZone: 'America/New_York' },
+      ]),
+    })),
+  };
   const service = new FlightCabinsService(
     flights as never,
     airlines as unknown as AirlinesService,
+    new FlightResponsesService(airports as never),
   );
-  return { service, flights, airlines, reads, matches, modified, selects };
+  return {
+    service,
+    flights,
+    airlines,
+    airports,
+    reads,
+    matches,
+    modified,
+    selects,
+  };
 }
 
 /** The error a call rejects with, or fails when it resolves. */
@@ -187,6 +209,27 @@ describe('FlightCabinsService.addCabin (FLT-04)', () => {
       'business',
     ]);
     expect(result.id).toBe(FLIGHT_ID);
+  });
+
+  it('returns the flight with its local times, reading both airport zones in one query (GEN-06)', async () => {
+    const { service, airports, reads } = setup();
+    reads.push(stored());
+
+    const result = await service.addCabin(FLIGHT_ID, dto(), 'moderator-1');
+
+    expect(airports.find).toHaveBeenCalledTimes(1);
+    expect(airports.find).toHaveBeenCalledWith({
+      _id: { $in: ['CAI', 'JFK'] },
+    });
+    expect(result).toMatchObject({
+      departureAt: '2027-06-15T11:30:00.000Z',
+      arrivalAt: '2027-06-15T22:30:00.000Z',
+      departureLocal: '2027-06-15T14:30',
+      departureTimeZone: 'Africa/Cairo',
+      arrivalLocal: '2027-06-15T18:30',
+      arrivalTimeZone: 'America/New_York',
+      arrivalUtcOffset: '-04:00',
+    });
   });
 
   it('gives every new cabin a new id, and starts its counters at 0 whatever the request', async () => {

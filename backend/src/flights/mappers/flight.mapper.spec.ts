@@ -8,6 +8,9 @@ const cabinId = new Types.ObjectId('6740f1c2a4b5c6d7e8f90789');
 /** "Now" for every test: before the departure of the stored flight below. */
 const NOW = new Date('2027-01-10T00:00:00.000Z');
 
+/** The zones of the two airports, CAI and JFK (GEN-06). */
+const ZONES = { departure: 'Africa/Cairo', arrival: 'America/New_York' };
+
 /** A stored cabin with 12 seats booked and 3 held for a payment. */
 const storedCabin = {
   _id: cabinId,
@@ -20,18 +23,19 @@ const storedCabin = {
   maxBagKg: 32,
 };
 
-describe('toFlightResponse (FLT-03, FLT-04, FLT-30)', () => {
+describe('toFlightResponse (FLT-03, FLT-04, FLT-30, GEN-06)', () => {
   const id = new Types.ObjectId('6740f1c2a4b5c6d7e8f90456');
   const airlineId = new Types.ObjectId('6740f1c2a4b5c6d7e8f90123');
+  // Cairo 10:00 to New York 15:00 on 15 January (winter in both).
   const stored = {
     _id: id,
     airlineId,
     flightNumber: 'MS123',
     departureAirport: 'CAI',
     arrivalAirport: 'JFK',
-    departureAt: new Date('2027-06-15T11:30:00.000Z'),
-    arrivalAt: new Date('2027-06-15T22:30:00.000Z'),
-    departureDateLocal: '2027-06-15',
+    departureAt: new Date('2027-01-15T08:00:00.000Z'),
+    arrivalAt: new Date('2027-01-15T20:00:00.000Z'),
+    departureDateLocal: '2027-01-15',
     status: FlightStatus.Scheduled,
     cabins: [storedCabin],
     createdAt: new Date('2026-11-18T10:00:00.000Z'),
@@ -40,16 +44,22 @@ describe('toFlightResponse (FLT-03, FLT-04, FLT-30)', () => {
     __v: 0,
   };
 
-  it('returns the public fields: string ids, UTC ISO moments, the local date and the cabins', () => {
-    expect(toFlightResponse(stored, NOW)).toEqual({
+  it('returns the public fields: string ids, UTC ISO moments, the local times and date, and the cabins', () => {
+    expect(toFlightResponse(stored, NOW, ZONES)).toEqual({
       id: '6740f1c2a4b5c6d7e8f90456',
       airlineId: '6740f1c2a4b5c6d7e8f90123',
       flightNumber: 'MS123',
       departureAirport: 'CAI',
       arrivalAirport: 'JFK',
-      departureAt: '2027-06-15T11:30:00.000Z',
-      arrivalAt: '2027-06-15T22:30:00.000Z',
-      departureDateLocal: '2027-06-15',
+      departureAt: '2027-01-15T08:00:00.000Z',
+      arrivalAt: '2027-01-15T20:00:00.000Z',
+      departureLocal: '2027-01-15T10:00',
+      departureTimeZone: 'Africa/Cairo',
+      departureUtcOffset: '+02:00',
+      arrivalLocal: '2027-01-15T15:00',
+      arrivalTimeZone: 'America/New_York',
+      arrivalUtcOffset: '-05:00',
+      departureDateLocal: '2027-01-15',
       status: 'scheduled',
       cabins: [
         {
@@ -69,16 +79,47 @@ describe('toFlightResponse (FLT-03, FLT-04, FLT-30)', () => {
   });
 
   it('never returns _id or __v', () => {
-    const response = toFlightResponse(stored, NOW);
+    const response = toFlightResponse(stored, NOW, ZONES);
 
     expect(response).not.toHaveProperty('_id');
     expect(response).not.toHaveProperty('__v');
   });
 
+  it('keeps the stored UTC moments unchanged next to the local times', () => {
+    const response = toFlightResponse(stored, NOW, ZONES);
+
+    expect(response.departureAt).toBe(stored.departureAt.toISOString());
+    expect(response.arrivalAt).toBe(stored.arrivalAt.toISOString());
+    expect(stored.departureAt.toISOString()).toBe('2027-01-15T08:00:00.000Z');
+  });
+
+  it('shows each time in the zone it is given, with the offset at that moment', () => {
+    const summer = {
+      ...stored,
+      departureAirport: 'NRT',
+      departureAt: new Date('2027-07-15T03:00:00.000Z'),
+      arrivalAt: new Date('2027-07-15T19:00:00.000Z'),
+    };
+
+    expect(
+      toFlightResponse(summer, NOW, {
+        departure: 'Asia/Tokyo',
+        arrival: 'America/New_York',
+      }),
+    ).toMatchObject({
+      departureLocal: '2027-07-15T12:00',
+      departureTimeZone: 'Asia/Tokyo',
+      departureUtcOffset: '+09:00',
+      arrivalLocal: '2027-07-15T15:00',
+      arrivalTimeZone: 'America/New_York',
+      arrivalUtcOffset: '-04:00',
+    });
+  });
+
   it('reads a lean flight stored before FLT-04, with no cabins field, as no cabins', () => {
     const { cabins: _cabins, ...withoutCabins } = stored;
 
-    expect(toFlightResponse(withoutCabins, NOW).cabins).toEqual([]);
+    expect(toFlightResponse(withoutCabins, NOW, ZONES).cabins).toEqual([]);
   });
 
   it('keeps the order of the stored cabins', () => {
@@ -92,6 +133,7 @@ describe('toFlightResponse (FLT-03, FLT-04, FLT-30)', () => {
       toFlightResponse(
         { ...stored, cabins: [economy, storedCabin] },
         NOW,
+        ZONES,
       ).cabins.map((cabin) => cabin.cabin),
     ).toEqual(['economy', 'business']);
   });
@@ -121,7 +163,8 @@ describe('toFlightResponse status (FLT-30)', () => {
     'answers a stored scheduled flight %s as %s, at the now it is given',
     (_case, now, expected) => {
       expect(
-        toFlightResponse(flight(FlightStatus.Scheduled), new Date(now)).status,
+        toFlightResponse(flight(FlightStatus.Scheduled), new Date(now), ZONES)
+          .status,
       ).toBe(expected);
     },
   );
@@ -131,14 +174,15 @@ describe('toFlightResponse status (FLT-30)', () => {
       toFlightResponse(
         flight(FlightStatus.Cancelled),
         new Date('2027-07-01T00:00:00.000Z'),
+        ZONES,
       ).status,
     ).toBe('cancelled');
   });
 
   it('keeps a stored departed flight departed', () => {
-    expect(toFlightResponse(flight(FlightStatus.Departed), NOW).status).toBe(
-      'departed',
-    );
+    expect(
+      toFlightResponse(flight(FlightStatus.Departed), NOW, ZONES).status,
+    ).toBe('departed');
   });
 });
 

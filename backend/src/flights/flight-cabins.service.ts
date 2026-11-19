@@ -22,11 +22,8 @@ import {
   FLIGHT_NOT_SCHEDULED_MESSAGE,
   FOREIGN_FLIGHT_MESSAGE,
 } from './flights.constants';
-import {
-  type CabinSource,
-  type FlightSource,
-  toFlightResponse,
-} from './mappers/flight.mapper';
+import type { CabinSource, FlightSource } from './mappers/flight.mapper';
+import { FlightResponsesService } from './flight-responses.service';
 import { effectiveStatus, scheduledFlightFilter } from './flight-status';
 import { FlightStatus } from './models/flight-status.enum';
 import { Flight } from './models/flight.schema';
@@ -82,6 +79,7 @@ export class FlightCabinsService {
   constructor(
     @InjectModel(Flight.name) private readonly flights: Model<Flight>,
     private readonly airlines: AirlinesService,
+    private readonly responses: FlightResponsesService,
   ) {}
 
   /**
@@ -222,7 +220,7 @@ export class FlightCabinsService {
       .exec();
   }
 
-  /** The flight after a successful change, as the API returns it. */
+  /** The flight after a successful change, as the API returns it (with its local times, GEN-06). */
   private async reload(
     flightId: string,
     now: Date,
@@ -234,6 +232,6 @@ export class FlightCabinsService {
     if (!flight) {
       throw new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE);
     }
-    return toFlightResponse(flight, now);
+    return this.responses.toResponse(flight, now);
   }
 }

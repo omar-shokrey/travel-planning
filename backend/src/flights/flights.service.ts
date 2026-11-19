@@ -7,10 +7,10 @@ import { InjectModel } from '@nestjs/mongoose';
 import { DateTime } from 'luxon';
 import type { Model } from 'mongoose';
 import type { FieldError } from '../common/interfaces/error-response.interface';
-import { Airport } from '../reference/models/airport.schema';
 import { AirlinesService } from './airlines.service';
 import type { CreateFlightDto } from './dto/create-flight.dto';
 import type { FlightResponseDto } from './dto/flight-response.dto';
+import { FlightResponsesService } from './flight-responses.service';
 import { DUPLICATE_FLIGHT_MESSAGE } from './flights.constants';
 import { toFlightResponse } from './mappers/flight.mapper';
 import { FlightStatus } from './models/flight-status.enum';
@@ -64,8 +64,8 @@ const formatOf = (value: string): string =>
 export class FlightsService {
   constructor(
     @InjectModel(Flight.name) private readonly flights: Model<Flight>,
-    @InjectModel(Airport.name) private readonly airports: Model<Airport>,
     private readonly airlines: AirlinesService,
+    private readonly responses: FlightResponsesService,
   ) {}
 
   /**
@@ -80,7 +80,7 @@ export class FlightsService {
     userId: string,
   ): Promise<FlightResponseDto> {
     const airline = await this.airlines.findAssignedAirlineOrThrow(userId);
-    const zones = await this.timeZonesOf([
+    const zones = await this.responses.timeZonesOf([
       dto.departureAirport,
       dto.arrivalAirport,
     ]);
@@ -130,9 +130,13 @@ export class FlightsService {
     }
     errors.throwIfAny();
 
-    // Both are set here: a missing one added an error above.
+    // All four are set here: a missing one added an error above.
     const departureAt = departure as DateTime;
     const arrivalAt = arrival as DateTime;
+    const flightZones = {
+      departure: departureZone as string,
+      arrival: arrivalZone as string,
+    };
     try {
       const flight = await this.flights.create({
         airlineId: airline._id,
@@ -144,7 +148,8 @@ export class FlightsService {
         departureDateLocal: departureAt.toFormat('yyyy-MM-dd'),
         status: FlightStatus.Scheduled,
       });
-      return toFlightResponse(flight, new Date());
+      // The zones were read above, so the response needs no second query (GEN-06).
+      return toFlightResponse(flight, new Date(), flightZones);
     } catch (error) {
       // The unique (airlineId, flightNumber, departureDateLocal) index, for
       // every status: a cancelled flight still holds its number and date.
@@ -153,18 +158,6 @@ export class FlightsService {
       }
       throw error;
     }
-  }
-
-  /** The IANA time zone of each known airport code, read in one query. */
-  private async timeZonesOf(
-    codes: readonly string[],
-  ): Promise<Map<string, string>> {
-    const airports = await this.airports
-      .find({ _id: { $in: [...new Set(codes)] } })
-      .select('timeZone')
-      .lean<{ _id: string; timeZone: string }[]>()
-      .exec();
-    return new Map(airports.map((airport) => [airport._id, airport.timeZone]));
   }
 
   /**
