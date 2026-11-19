@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { PLATFORM_CURRENCY } from '../common/constants/currency';
+import { AirlinesService } from '../flights/airlines.service';
 import { FlightSeatHoldsService } from '../flights/flight-seat-holds.service';
 import type { FlightBookingResponseDto } from './dto/flight-booking-response.dto';
 import type { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
@@ -33,6 +34,7 @@ export class FlightBookingsService {
     @InjectModel(FlightBooking.name)
     private readonly bookings: Model<FlightBooking>,
     private readonly seatHolds: FlightSeatHoldsService,
+    private readonly airlines: AirlinesService,
   ) {}
 
   /**
@@ -45,6 +47,12 @@ export class FlightBookingsService {
    * The fare is the cabin price of the flight document the hold returned, so
    * a price edit at the same moment cannot give a total that differs from
    * the price the seats were taken at.
+   *
+   * PAY-02: the airline's cancellation tiers and extra-bag rule and the
+   * cabin's free allowance are copied into the segment at the same time, so
+   * the policy the user is shown and accepts is the one a refund uses. The
+   * airline is read inside the same try as the save: if the read fails, the
+   * seats are released too.
    */
   async hold(
     userId: string,
@@ -74,6 +82,12 @@ export class FlightBookingsService {
           `Flight ${flight._id.toString()} returned no ${dto.cabin} cabin after the hold`,
         );
       }
+      // PAY-02: the policy the user will accept is copied now, with the fare,
+      // so a later change by the airline never changes this booking.
+      const airline = await this.airlines.findEntityOrThrow(
+        flight.airlineId.toString(),
+      );
+      const policy = airline.policy;
       const fareTotal = fareTotalOf(cabin.price, seats, infants);
       booking = await this.bookings.create({
         _id: bookingId,
@@ -90,6 +104,16 @@ export class FlightBookingsService {
             cabin: dto.cabin,
             fare: cabin.price,
             seatsReserved: seats,
+            cancellationTiers: (policy?.cancellationTiers ?? []).map(
+              ({ daysBefore, refundPercent }) => ({
+                daysBefore,
+                refundPercent,
+              }),
+            ),
+            extraBagPrice: policy?.extraBagPrice,
+            maxExtraBags: policy?.maxExtraBags ?? 0,
+            freeBags: cabin.freeBags,
+            maxBagKg: cabin.maxBagKg,
           },
         ],
         passengerCounts: { adults, children, infants },

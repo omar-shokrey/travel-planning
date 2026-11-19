@@ -1,5 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { SchemaTypes, type HydratedDocument, type Types } from 'mongoose';
+import {
+  CancellationTier,
+  CancellationTierSchema,
+} from '../../flights/models/airline-policy.schema';
 import { CabinClass } from '../../flights/models/cabin-class.enum';
 import { FlightBookingStatus } from '../enums/flight-booking-status.enum';
 import {
@@ -17,8 +21,12 @@ const wholeNumber = (field: string) => ({
 /**
  * One flight of a booking (FLT-22), as in `BOOKING_SEGMENT` of the data
  * model. The flight times are always read from the flight; the fare is a
- * copy of the cabin price when the seats were held (FLT-05). The extra bag
- * price and the cancellation tiers are added by FLT-19 and FLT-26.
+ * copy of the cabin price when the seats were held (FLT-05). PAY-02 copies
+ * the airline's policy and the cabin's free allowance at the same moment, so
+ * the policy the user is shown and accepts is the one a refund (FLT-26) and
+ * the extra bags (FLT-19) use, whatever the airline changes later. A segment
+ * saved before PAY-02 has no copy: empty tiers, no extra bag rule, and no
+ * free allowance.
  */
 @Schema({ _id: false })
 export class BookingSegment {
@@ -44,6 +52,31 @@ export class BookingSegment {
     validate: wholeNumber('seatsReserved'),
   })
   seatsReserved: number;
+
+  /** PAY-02: copy of the airline's cancellation tiers, highest `daysBefore` first. Empty means no refund. */
+  @Prop({ type: [CancellationTierSchema], default: [] })
+  cancellationTiers: CancellationTier[];
+
+  /** PAY-02: copy of the airline's price of one extra bag, minor units. Unset when the airline has no rule. */
+  @Prop({ type: Number, min: 1, validate: wholeNumber('extraBagPrice') })
+  extraBagPrice?: number;
+
+  /** PAY-02: copy of the most extra bags one passenger may buy. 0 when the airline has no rule. */
+  @Prop({
+    type: Number,
+    default: 0,
+    min: 0,
+    validate: wholeNumber('maxExtraBags'),
+  })
+  maxExtraBags: number;
+
+  /** PAY-02: copy of the cabin's free checked bags per passenger (FLT-04). */
+  @Prop({ type: Number, min: 0, validate: wholeNumber('freeBags') })
+  freeBags?: number;
+
+  /** PAY-02: copy of the cabin's maximum weight of one bag in kg, also for an extra bag (FLT-04, FLT-08). */
+  @Prop({ type: Number, min: 1, validate: wholeNumber('maxBagKg') })
+  maxBagKg?: number;
 }
 
 export const BookingSegmentSchema =

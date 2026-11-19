@@ -1,5 +1,6 @@
-import { ConflictException, Logger } from '@nestjs/common';
+import { ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
+import type { AirlinesService } from '../flights/airlines.service';
 import type { FlightSeatHoldsService } from '../flights/flight-seat-holds.service';
 import { CabinClass } from '../flights/models/cabin-class.enum';
 import type { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
@@ -52,7 +53,18 @@ const heldFlight = (price = 25000) => ({
   ],
 });
 
-function setup() {
+/** The airline's policy (FLT-08, FLT-09), as stored: highest threshold first. */
+const airlinePolicy = () => ({
+  cancellationTiers: [
+    { daysBefore: 30, refundPercent: 100 },
+    { daysBefore: 7, refundPercent: 50 },
+  ],
+  extraBagPrice: 4500,
+  maxExtraBags: 2,
+});
+
+/** `null`: an airline stored without a policy. */
+function setup(policy: Record<string, unknown> | null = airlinePolicy()) {
   const calls: string[] = [];
   const seatHolds = {
     hold: jest.fn(() => {
@@ -71,11 +83,18 @@ function setup() {
       return Promise.resolve({ toObject: () => saved });
     }),
   };
+  const airlines = {
+    findEntityOrThrow: jest.fn(() => {
+      calls.push('airline');
+      return Promise.resolve({ _id: AIRLINE_ID, policy: policy ?? undefined });
+    }),
+  };
   const service = new FlightBookingsService(
     bookings as never,
     seatHolds as unknown as FlightSeatHoldsService,
+    airlines as unknown as AirlinesService,
   );
-  return { service, seatHolds, bookings, calls };
+  return { service, seatHolds, bookings, airlines, calls };
 }
 
 beforeEach(() => {
@@ -106,7 +125,7 @@ describe('FlightBookingsService.hold (FLT-22)', () => {
 
     await service.hold(USER_ID, dto());
 
-    expect(calls).toEqual(['hold', 'create']);
+    expect(calls).toEqual(['hold', 'airline', 'create']);
     expect(seatHolds.hold).toHaveBeenCalledWith(
       FLIGHT_ID.toString(),
       CabinClass.Economy,
@@ -139,6 +158,14 @@ describe('FlightBookingsService.hold (FLT-22)', () => {
           cabin: CabinClass.Economy,
           fare: 30005,
           seatsReserved: 3,
+          cancellationTiers: [
+            { daysBefore: 30, refundPercent: 100 },
+            { daysBefore: 7, refundPercent: 50 },
+          ],
+          extraBagPrice: 4500,
+          maxExtraBags: 2,
+          freeBags: 1,
+          maxBagKg: 23,
         },
       ],
       passengerCounts: { adults: 2, children: 1, infants: 1 },
@@ -193,7 +220,7 @@ describe('FlightBookingsService.hold (FLT-22)', () => {
     });
 
     await expect(service.hold(USER_ID, dto())).rejects.toBe(failure);
-    expect(calls).toEqual(['hold', 'create', 'release']);
+    expect(calls).toEqual(['hold', 'airline', 'create', 'release']);
     expect(seatHolds.release).toHaveBeenCalledWith(
       FLIGHT_ID,
       CabinClass.Economy,
@@ -213,5 +240,85 @@ describe('FlightBookingsService.hold (FLT-22)', () => {
     await expect(service.hold(USER_ID, dto())).rejects.toBe(failure);
     expect(error).toHaveBeenCalledTimes(1);
     error.mockRestore();
+  });
+});
+
+describe('FlightBookingsService.hold copies the policy (PAY-02)', () => {
+  /** The one segment the booking was saved with. */
+  const savedSegment = (bookings: ReturnType<typeof setup>['bookings']) =>
+    (
+      bookings.create.mock.calls[0][0] as {
+        segments: Record<string, unknown>[];
+      }
+    ).segments[0];
+
+  it("copies the airline's tiers and extra-bag rule and the held cabin's free allowance", async () => {
+    const { service, airlines, bookings } = setup();
+
+    await service.hold(USER_ID, dto());
+
+    expect(airlines.findEntityOrThrow).toHaveBeenCalledWith(
+      AIRLINE_ID.toString(),
+    );
+    expect(savedSegment(bookings)).toMatchObject({
+      cancellationTiers: [
+        { daysBefore: 30, refundPercent: 100 },
+        { daysBefore: 7, refundPercent: 50 },
+      ],
+      extraBagPrice: 4500,
+      maxExtraBags: 2,
+      // The economy cabin, not the business one of the same flight.
+      freeBags: 1,
+      maxBagKg: 23,
+    });
+  });
+
+  it('copies the tiers as plain values, so the booking keeps them when the airline changes', async () => {
+    const policy = airlinePolicy();
+    const { service, bookings } = setup(policy);
+
+    await service.hold(USER_ID, dto());
+    policy.cancellationTiers[0].refundPercent = 0;
+
+    expect(savedSegment(bookings).cancellationTiers).toEqual([
+      { daysBefore: 30, refundPercent: 100 },
+      { daysBefore: 7, refundPercent: 50 },
+    ]);
+  });
+
+  it.each([
+    ['no policy at all', null],
+    ['an empty policy', { cancellationTiers: [] }],
+  ])(
+    'gives no tiers, no extra-bag price and 0 extra bags for an airline with %s',
+    async (_label, policy) => {
+      const { service, bookings } = setup(policy);
+
+      await service.hold(USER_ID, dto());
+
+      const segment = savedSegment(bookings);
+      expect(segment.cancellationTiers).toEqual([]);
+      expect(segment.extraBagPrice).toBeUndefined();
+      expect(segment.maxExtraBags).toBe(0);
+      expect(segment).toMatchObject({ freeBags: 1, maxBagKg: 23 });
+    },
+  );
+
+  it('releases the seats and rethrows when the airline cannot be read', async () => {
+    const { service, seatHolds, airlines, bookings, calls } = setup();
+    const missing = new NotFoundException('Airline not found');
+    airlines.findEntityOrThrow.mockImplementationOnce(() => {
+      calls.push('airline');
+      return Promise.reject(missing);
+    });
+
+    await expect(service.hold(USER_ID, dto())).rejects.toBe(missing);
+    expect(calls).toEqual(['hold', 'airline', 'release']);
+    expect(bookings.create).not.toHaveBeenCalled();
+    expect(seatHolds.release).toHaveBeenCalledWith(
+      FLIGHT_ID,
+      CabinClass.Economy,
+      3,
+    );
   });
 });
