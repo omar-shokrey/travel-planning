@@ -70,8 +70,9 @@ export class PostsController {
     return this.posts.create(dto, userId);
   }
 
-  // Declared before any `GET /posts/:id` route (BLG-02), so `mine` is never
-  // read as a post id.
+  // `GET /posts/:id` (BLG-02) is in PostPageController, which BlogModule
+  // registers after this controller. Express matches routes in registration
+  // order, so `mine` is matched first and is never read as a post id.
   @Get('mine')
   @Roles(Role.User)
   @ApiOperation({

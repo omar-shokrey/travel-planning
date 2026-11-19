@@ -37,8 +37,9 @@ const SUMMARY_PROJECTION = Object.fromEntries(
 
 /**
  * The public lists of published posts: the tag page (BLG-08), the search and
- * the newest posts (BLG-09; the browse page, BLG-02, extends the latter), and
- * the posts of the author page (BLG-12).
+ * the newest posts (BLG-09), both of which BLG-02 can narrow to one tag, and
+ * the posts of the author page (BLG-12). It also reads the author names that
+ * the lists and the post page (BLG-02) show.
  * Every list starts from `publishedFilter()`, the one place that says which
  * posts the public may see.
  */
@@ -72,11 +73,18 @@ export class PublishedPostsService {
     );
   }
 
-  /** BLG-09 without a keyword: the newest published, not hidden posts. */
+  /**
+   * BLG-09 without a keyword: the newest published, not hidden posts. BLG-02:
+   * with a `tag`, only the ones that have it, the same posts as `listByTag`.
+   */
   listNewest(
     query: PaginationQueryDto,
+    tag?: string,
   ): Promise<PaginatedResponse<PostSummaryResponseDto>> {
-    return this.listNewestMatching({}, query);
+    return this.listNewestMatching(
+      tag === undefined ? {} : { tags: tag },
+      query,
+    );
   }
 
   /**
@@ -84,11 +92,13 @@ export class PublishedPostsService {
    * keyword, ignoring letter case. Ordered by interaction score (likes +
    * comments) descending, then newest first, then by id, so a page never
    * shifts between two reads. The authors are found first by name, then
-   * their posts by id: no name is copied into the posts.
+   * their posts by id: no name is copied into the posts. BLG-02: with a
+   * `tag`, a post must also have that tag; both conditions must hold.
    */
   async search(
     keyword: string,
     query: PaginationQueryDto,
+    tag?: string,
   ): Promise<PaginatedResponse<PostSummaryResponseDto>> {
     const pattern = containsKeyword(keyword);
     const authors = await this.users
@@ -105,6 +115,7 @@ export class PublishedPostsService {
       .exec();
     const match: QueryFilter<BlogPost> = {
       ...this.publishedFilter(),
+      ...(tag !== undefined && { tags: tag }),
       $or: [
         { title: pattern },
         { tags: pattern },
@@ -180,31 +191,38 @@ export class PublishedPostsService {
   }
 
   /**
-   * The rows of a page, with the author names read in one query by the set
-   * of author ids. A missing or deactivated author is shown as "Deleted user".
+   * BLG-02: the names that may be shown for these authors, read in one query:
+   * author id (as a string) to name. A missing or deactivated author is not in
+   * the map, and the mappers show "Deleted user" for it. Used by the lists
+   * and by the post page, so they all follow the same rule.
    */
-  private async toSummaries(
-    posts: PostSummarySource[],
-  ): Promise<PostSummaryResponseDto[]> {
-    const authorIds = [
-      ...new Map(
-        posts.map((post) => [post.authorId.toString(), post.authorId]),
-      ).values(),
+  async authorNamesOf(
+    authorIds: readonly Types.ObjectId[],
+  ): Promise<Map<string, string>> {
+    const unique = [
+      ...new Map(authorIds.map((id) => [id.toString(), id])).values(),
     ];
     const authors =
-      authorIds.length === 0
+      unique.length === 0
         ? []
         : await this.users
             .find({
-              _id: { $in: authorIds },
+              _id: { $in: unique },
               status: { $ne: UserStatus.Deactivated },
             })
             .select('name')
             .lean<{ _id: Types.ObjectId; name: string }[]>()
             .exec();
-    const names = new Map(
+    return new Map(
       authors.map((author) => [author._id.toString(), author.name]),
     );
+  }
+
+  /** The rows of a page, with the author names read in one query. */
+  private async toSummaries(
+    posts: PostSummarySource[],
+  ): Promise<PostSummaryResponseDto[]> {
+    const names = await this.authorNamesOf(posts.map((post) => post.authorId));
     return posts.map((post) => toPostSummary(post, names));
   }
 }
