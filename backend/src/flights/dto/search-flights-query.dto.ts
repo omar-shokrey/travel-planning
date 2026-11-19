@@ -41,8 +41,15 @@ const wholeNumber = ({ value }: { value: unknown }): unknown =>
     ? Number(value.trim())
     : value;
 
-const priceDescription = (bound: 'Lowest' | 'Highest'): string =>
-  `${bound} price of one seat, inclusive, in minor units of ${PLATFORM_CURRENCY} (cents): a whole number from 0 to ${CABIN_PRICE_MAX}. A flight is listed when one of its cabins fits the passengers and is inside the price range; only those cabins are returned. minPrice above maxPrice answers 400; equal values are valid.`;
+/**
+ * No `example` on the price range: Swagger UI's "Try it out" sends every
+ * example, which would narrow a plain search. The example is in the text.
+ */
+const priceDescription = (
+  bound: 'Lowest' | 'Highest',
+  exampleCents: number,
+): string =>
+  `${bound} price of one seat, inclusive, in minor units of ${PLATFORM_CURRENCY} (cents): a whole number from 0 to ${CABIN_PRICE_MAX}. A flight is listed when one of its cabins fits the passengers and is inside the price range; only those cabins are returned. minPrice above maxPrice answers 400; equal values are valid. For example, ${exampleCents} is ${(exampleCents / 100).toFixed(2)} ${PLATFORM_CURRENCY}.`;
 
 /**
  * FLT-11: a flight search, as a guest or a user sends it in the query string:
@@ -113,11 +120,10 @@ export class SearchFlightsQueryDto extends PaginationQueryDto {
   passengers: number;
 
   @ApiPropertyOptional({
-    example: 10000,
     type: 'integer',
     minimum: 0,
     maximum: CABIN_PRICE_MAX,
-    description: priceDescription('Lowest'),
+    description: priceDescription('Lowest', 10000),
   })
   @IsOptional()
   @Transform(wholeNumber)
@@ -129,11 +135,10 @@ export class SearchFlightsQueryDto extends PaginationQueryDto {
   minPrice?: number;
 
   @ApiPropertyOptional({
-    example: 50000,
     type: 'integer',
     minimum: 0,
     maximum: CABIN_PRICE_MAX,
-    description: priceDescription('Highest'),
+    description: priceDescription('Highest', 50000),
   })
   @IsOptional()
   @Transform(wholeNumber)
@@ -147,7 +152,7 @@ export class SearchFlightsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     enum: FLIGHT_SEARCH_SORTS,
     default: 'departureTime',
-    example: 'price',
+    example: 'departureTime',
     description:
       'The order of the results: `price` (the price of one seat in the cheapest cabin listed for the flight), `duration` (arrival minus departure) or `departureTime` (the default). Flights that are equal on it keep a fixed order (by id), so pages never repeat or skip a flight.',
   })

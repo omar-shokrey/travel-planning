@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ValidationPipe,
 } from '@nestjs/common';
+import { DECORATORS } from '@nestjs/swagger';
 import type { FieldError } from '../../common/interfaces/error-response.interface';
 import { validationExceptionFactory } from '../../common/pipes/validation-exception.factory';
 import {
@@ -334,5 +335,31 @@ describe('SearchFlightsQueryDto: price range and order (FLT-15)', () => {
     expect(await errorsOf({ ...valid, sortOrder })).toEqual([
       { field: 'sortOrder', messages: ['sortOrder must be one of: asc, desc'] },
     ]);
+  });
+
+  describe('Swagger: "Try it out" sends every example, so no optional field may narrow a plain search', () => {
+    /** The options @ApiPropertyOptional() stored for a field. */
+    const swaggerOf = (field: string): Record<string, unknown> =>
+      Reflect.getMetadata(
+        DECORATORS.API_MODEL_PROPERTIES,
+        SearchFlightsQueryDto.prototype,
+        field,
+      ) as Record<string, unknown>;
+
+    it.each(['minPrice', 'maxPrice'])('%s has no example', (field) => {
+      expect(swaggerOf(field)).toBeDefined();
+      expect(swaggerOf(field)).not.toHaveProperty('example');
+    });
+
+    it.each([
+      ['sortBy', 'departureTime'],
+      ['sortOrder', 'asc'],
+    ] as const)('%s has the default %p as its example', (field, value) => {
+      expect(swaggerOf(field)).toMatchObject({
+        default: value,
+        example: value,
+      });
+      expect(new SearchFlightsQueryDto()[field]).toBe(value);
+    });
   });
 });
