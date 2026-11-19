@@ -1,4 +1,13 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  StreamableFile,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBody,
@@ -9,6 +18,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -16,6 +26,7 @@ import { PLATFORM_CURRENCY } from '../common/constants/currency';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
+import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import {
   FLIGHT_NOT_BOOKABLE_MESSAGE,
   NOT_ENOUGH_SEATS_MESSAGE,
@@ -29,11 +40,16 @@ import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import {
   ADULT_MIN_AGE,
   CHILD_MIN_AGE,
+  E_TICKET_NOT_CONFIRMED_MESSAGE,
   FLIGHT_BOOKING_HOLD_MINUTES,
   FLIGHT_BOOKING_SEATS_MAX,
   FLIGHT_CHANGED_MESSAGE,
 } from './flight-bookings.constants';
-import { FlightBookingsService } from './flight-bookings.service';
+import { FlightBookingETicketService } from './flight-booking-e-ticket.service';
+import {
+  BOOKING_NOT_FOUND_MESSAGE,
+  FlightBookingsService,
+} from './flight-bookings.service';
 
 /** FLT-12(a): the Swagger example of a round trip, for the hold and the summary. */
 const ROUND_TRIP_EXAMPLE = {
@@ -61,7 +77,10 @@ const ROUND_TRIP_EXAMPLE = {
 @ApiCookieAuth()
 @Controller('flight-bookings')
 export class FlightBookingsController {
-  constructor(private readonly flightBookings: FlightBookingsService) {}
+  constructor(
+    private readonly flightBookings: FlightBookingsService,
+    private readonly eTickets: FlightBookingETicketService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.OK)
@@ -189,5 +208,38 @@ export class FlightBookingsController {
     @CurrentUser('id') userId: string,
   ): Promise<FlightBookingResponseDto> {
     return this.flightBookings.hold(userId, dto);
+  }
+
+  @Get(':id/e-ticket')
+  @Roles(Role.User)
+  @ApiOperation({
+    summary: 'Download the e-ticket of a confirmed booking (FLT-23)',
+    description:
+      'Registered users only, for their own booking, once it is confirmed (after the payment succeeded, PAY-01). A PDF with the booking reference, each flight (airline, flight number, route, local departure and arrival with the time zones), the cabin and seats, each passenger with their type and a masked passport number (last 3 characters), the baggage, and the total paid in USD. The file name carries the reference.',
+  })
+  @ApiProduces('application/pdf')
+  @ApiOkResponse({
+    description: 'The e-ticket PDF',
+    schema: { type: 'string', format: 'binary' },
+  })
+  @ApiBadRequestResponse({ description: 'The id is not a valid id' })
+  @ApiUnauthorizedResponse({ description: 'Not logged in' })
+  @ApiForbiddenResponse({ description: 'Not a registered user' })
+  @ApiNotFoundResponse({
+    description: `"${BOOKING_NOT_FOUND_MESSAGE}": no such booking, or it belongs to another user`,
+  })
+  @ApiConflictResponse({
+    description: `"${E_TICKET_NOT_CONFIRMED_MESSAGE}": the booking is waiting for payment, expired, cancelled or completed (only a confirmed booking has one)`,
+  })
+  async eTicket(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<StreamableFile> {
+    const { filename, pdf } = await this.eTickets.eTicket(id, userId);
+    return new StreamableFile(pdf, {
+      type: 'application/pdf',
+      disposition: `attachment; filename="${filename}"`,
+      length: pdf.length,
+    });
   }
 }
