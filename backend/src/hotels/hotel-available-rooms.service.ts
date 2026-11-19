@@ -27,7 +27,8 @@ const ROOM_FIELDS = 'number type beds maxOccupancy pricePerNight availability';
 /**
  * HTL-15: the rooms of one hotel that are free for a stay. Whether a room is
  * free is decided by the rule in `hotel-search.ts` (`roomsThatCanBeFree`,
- * `nightsOfTheStay` and `isFreeForStay`), the one hotel search (HTL-11) uses,
+ * `nightsOfTheStay`, `groupNightsByRoom` and `isFreeForStay`), the one hotel
+ * search (HTL-11) uses,
  * so the two routes always agree. It only reads: a room
  * listed here can be taken before the user books it, and the hold of HTL-18
  * relies on the unique (`roomId`, `date`) index of `room_nights`, not on this
