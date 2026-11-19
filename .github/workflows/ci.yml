@@ -10,6 +10,12 @@ jobs:
   backend:
     name: backend
     runs-on: ubuntu-latest
+    # The e2e suites run in one process (--runInBand) and each one boots the
+    # whole app, so memory grows with every suite. At 62 suites the default
+    # heap (about 2 GB) ran out and Node crashed (exit 134). 4 GB fits the
+    # runner. No test changes: only the memory limit.
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
     services:
       mongo:
         image: mongo:8.0
