@@ -15,9 +15,10 @@ import { AvailableRoomsQueryDto } from './dto/available-rooms-query.dto';
 import { HotelAvailableRoomsService } from './hotel-available-rooms.service';
 
 /**
- * The rooms that guests and users can book for their dates (HTL-15).
- * Registered before HotelDetailsController, so `GET /hotels/:id/rooms/available`
- * is matched by this route and not by another `:id` route.
+ * The rooms that guests and users can book for their dates (HTL-15). Its
+ * place among the controllers does not matter: a `:id` parameter matches one
+ * path segment, so `GET /hotels/:id` never answers
+ * `GET /hotels/:id/rooms/available`.
  */
 @ApiTags('hotels')
 @Controller('hotels')

@@ -54,19 +54,18 @@ describe('HotelsModule', () => {
     expect(controllers[controllers.length - 1]).toBe(HotelDetailsController);
   });
 
-  it('registers search and the available rooms before the hotel page', () => {
+  it('registers search before the hotel page: the one path that depends on the order', () => {
     const details = controllers.indexOf(HotelDetailsController);
 
     expect(controllers.indexOf(HotelSearchController)).toBeGreaterThanOrEqual(
       0,
     );
     expect(controllers.indexOf(HotelSearchController)).toBeLessThan(details);
-    expect(
-      controllers.indexOf(HotelAvailableRoomsController),
-    ).toBeGreaterThanOrEqual(0);
-    expect(controllers.indexOf(HotelAvailableRoomsController)).toBeLessThan(
-      details,
-    );
+    expect(firstMatch('hotels/search')?.controller).toBe(HotelSearchController);
+  });
+
+  it('registers the available rooms', () => {
+    expect(controllers).toContain(HotelAvailableRoomsController);
   });
 
   it('sends each GET path to the route that owns it', () => {
@@ -75,8 +74,28 @@ describe('HotelsModule', () => {
     expect(firstMatch(`hotels/${id}/rooms/available`)?.controller).toBe(
       HotelAvailableRoomsController,
     );
-    expect(firstMatch('hotels/search')?.controller).toBe(HotelSearchController);
+    expect(firstMatch(`hotels/${id}/availability`)?.path).toBe(
+      'hotels/:id/availability',
+    );
     expect(firstMatch(`hotels/${id}`)?.controller).toBe(HotelDetailsController);
+  });
+
+  it('never lets GET /hotels/:id answer a longer path, whatever the order', () => {
+    const id = '6740f1c2a4b5c6d7e8f90123';
+    const details = getRoutes().filter(
+      (route) => route.controller === HotelDetailsController,
+    );
+
+    expect(details.map((route) => route.path)).toEqual(['hotels/:id']);
+    for (const url of [
+      `hotels/${id}/rooms/available`,
+      `hotels/${id}/availability`,
+    ]) {
+      const pattern = new RegExp(
+        `^${details[0].path.replace(/:[^/]+/g, '[^/]+')}$`,
+      );
+      expect(pattern.test(url)).toBe(false);
+    }
   });
 
   it('provides the available-rooms service and still exports only HotelsService', () => {
