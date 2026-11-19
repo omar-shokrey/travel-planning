@@ -218,3 +218,120 @@ describe('FlightBooking schema (FLT-22)', () => {
     );
   });
 });
+
+describe('FlightBooking schema, passengers and baggage (FLT-19)', () => {
+  const passenger = (fields: Record<string, unknown> = {}) => ({
+    fullName: 'Sara Ahmed',
+    dateOfBirth: '1990-05-14',
+    passportNumber: 'A12345678',
+    type: 'adult',
+    ...fields,
+  });
+
+  /** The validation messages, to check that no personal value is repeated. */
+  async function messagesOf(fields: Record<string, unknown>): Promise<string> {
+    const error = (await new FlightBookingModel(fields)
+      .validate()
+      .catch((caught: unknown) => caught)) as
+      { errors?: Record<string, { message: string }> } | undefined;
+    return Object.values(error?.errors ?? {})
+      .map(({ message }) => message)
+      .join(' | ');
+  }
+
+  it('accepts passengers with extra bags and a baggage total', async () => {
+    expect(
+      await invalidPaths(
+        valid({
+          baggageTotal: 4500,
+          total: 57000,
+          passengers: [
+            passenger({ baggage: [{ segment: 0, bags: 1, weightKg: 20 }] }),
+          ],
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('defaults to no passengers, no bags and a baggage total of 0 (bookings saved before FLT-19)', () => {
+    const booking = new FlightBookingModel(
+      valid({ passengers: [passenger()] }),
+    );
+    const before = new FlightBookingModel(valid());
+
+    expect(booking.passengers[0].baggage).toEqual([]);
+    expect(before.passengers).toEqual([]);
+    expect(before.baggageTotal).toBe(0);
+  });
+
+  it('stores the date of birth as a YYYY-MM-DD text, never a Date', async () => {
+    const booking = new FlightBookingModel(
+      valid({ passengers: [passenger()] }),
+    );
+
+    expect(booking.passengers[0].dateOfBirth).toBe('1990-05-14');
+    expect(
+      await invalidPaths(
+        valid({ passengers: [passenger({ dateOfBirth: '14/05/1990' })] }),
+      ),
+    ).toEqual(['passengers.0.dateOfBirth']);
+  });
+
+  it('keeps the type to adult, child or infant', async () => {
+    expect(
+      await invalidPaths(
+        valid({ passengers: [passenger({ type: 'senior' })] }),
+      ),
+    ).toEqual(['passengers.0.type']);
+  });
+
+  it('keeps the baggage total and the bags in whole numbers', async () => {
+    expect(await invalidPaths(valid({ baggageTotal: 10.5 }))).toEqual([
+      'baggageTotal',
+    ]);
+    expect(await invalidPaths(valid({ baggageTotal: -1 }))).toEqual([
+      'baggageTotal',
+    ]);
+    expect(
+      await invalidPaths(
+        valid({
+          passengers: [
+            passenger({ baggage: [{ segment: 2, bags: 0, weightKg: 1.5 }] }),
+          ],
+        }),
+      ),
+    ).toEqual([
+      'passengers.0.baggage.0.bags',
+      'passengers.0.baggage.0.segment',
+      'passengers.0.baggage.0.weightKg',
+    ]);
+  });
+
+  it('has at most 18 passengers', async () => {
+    const many = Array.from({ length: 19 }, (_, index) =>
+      passenger({ passportNumber: `P${10000 + index}` }),
+    );
+    expect(await invalidPaths(valid({ passengers: many }))).toEqual([
+      'passengers',
+    ]);
+  });
+
+  it('never repeats a personal value in a validation message', async () => {
+    const messages = await messagesOf(
+      valid({
+        passengers: [
+          passenger({
+            dateOfBirth: 'born-1990',
+            passportNumber: 'secret-pass',
+            fullName: 'N'.repeat(101),
+          }),
+        ],
+      }),
+    );
+
+    expect(messages).not.toBe('');
+    for (const value of ['born-1990', 'secret-pass', 'N'.repeat(101)]) {
+      expect(messages).not.toContain(value);
+    }
+  });
+});

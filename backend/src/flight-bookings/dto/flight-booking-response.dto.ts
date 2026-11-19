@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CabinClass } from '../../flights/models/cabin-class.enum';
 import { FlightBookingStatus } from '../enums/flight-booking-status.enum';
+import { PassengerType } from '../enums/passenger-type.enum';
 
 /** One flight of a booking as the API returns it (FLT-22). */
 export class FlightBookingSegmentResponseDto {
@@ -40,7 +41,44 @@ export class PassengerCountsResponseDto {
   infants: number;
 }
 
-/** A flight booking as the API returns it to its owner (FLT-22). */
+/** The extra bags of one passenger (FLT-19). */
+export class ExtraBagsResponseDto {
+  @ApiProperty({ example: 1 })
+  bags: number;
+
+  @ApiProperty({ description: 'Total weight of these bags, kg', example: 20 })
+  weightKg: number;
+}
+
+/** One passenger of a booking, shown only to the owner (FLT-19). */
+export class PassengerResponseDto {
+  @ApiProperty({ example: 'Sara Ahmed' })
+  fullName: string;
+
+  @ApiProperty({ description: 'YYYY-MM-DD', example: '1990-05-14' })
+  dateOfBirth: string;
+
+  @ApiProperty({
+    enum: PassengerType,
+    enumName: 'PassengerType',
+    description:
+      'Derived by the server from the date of birth on the departure date (FLT-12)',
+    example: PassengerType.Adult,
+  })
+  type: PassengerType;
+
+  @ApiProperty({ example: 'A12345678' })
+  passportNumber: string;
+
+  @ApiProperty({
+    type: ExtraBagsResponseDto,
+    nullable: true,
+    description: 'The extra bags of this passenger; `null` when none',
+  })
+  extraBags: ExtraBagsResponseDto | null;
+}
+
+/** A flight booking as the API returns it to its owner (FLT-22, FLT-19). */
 export class FlightBookingResponseDto {
   @ApiProperty({ example: '6740f1c2a4b5c6d7e8f90789' })
   id: string;
@@ -80,7 +118,13 @@ export class FlightBookingResponseDto {
 
   @ApiProperty({
     description:
-      'What the user pays, in minor units. Equal to fareTotal until baggage (FLT-19).',
+      "Extra bag fees of every passenger in minor units: bags × the airline's extra bag price (FLT-19)",
+    example: 0,
+  })
+  baggageTotal: number;
+
+  @ApiProperty({
+    description: 'What the user pays in minor units: fareTotal + baggageTotal',
     example: 52500,
   })
   total: number;
@@ -88,8 +132,14 @@ export class FlightBookingResponseDto {
   @ApiProperty({ type: [FlightBookingSegmentResponseDto] })
   segments: FlightBookingSegmentResponseDto[];
 
-  @ApiProperty({ type: PassengerCountsResponseDto })
+  @ApiProperty({
+    type: PassengerCountsResponseDto,
+    description: 'How many passengers of each type, derived from passengers',
+  })
   passengerCounts: PassengerCountsResponseDto;
+
+  @ApiProperty({ type: [PassengerResponseDto] })
+  passengers: PassengerResponseDto[];
 
   @ApiProperty({ example: '2026-11-19T10:00:00.000Z' })
   createdAt: string;

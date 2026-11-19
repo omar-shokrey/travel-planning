@@ -6,11 +6,19 @@ import {
 } from '../../flights/models/airline-policy.schema';
 import { CabinClass } from '../../flights/models/cabin-class.enum';
 import { FlightBookingStatus } from '../enums/flight-booking-status.enum';
+import { PassengerType } from '../enums/passenger-type.enum';
 import {
   FLIGHT_BOOKING_ADULTS_MIN,
+  FLIGHT_BOOKING_PASSENGERS_MAX,
   FLIGHT_BOOKING_SEATS_MAX,
   FLIGHT_BOOKING_SEGMENTS_MAX,
+  PASSENGER_FULL_NAME_MAX_LENGTH,
+  PASSPORT_NUMBER_MAX_LENGTH,
+  PASSPORT_NUMBER_PATTERN,
 } from '../flight-bookings.constants';
+
+/** A calendar date with no time (`YYYY-MM-DD`). */
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /** A validator that refuses 1.5 seats or 12.5 cents: `min` alone would let them in. */
 const wholeNumber = (field: string) => ({
@@ -117,12 +125,97 @@ export const PassengerCountsSchema =
   SchemaFactory.createForClass(PassengerCounts);
 
 /**
+ * FLT-19: the extra bags of one passenger on one segment, as in
+ * `PASSENGER_BAGGAGE` of the data model. `segment` is 0 for the outbound
+ * flight; FLT-12 adds 1 for the return flight.
+ */
+@Schema({ _id: false })
+export class PassengerBaggage {
+  @Prop({
+    type: Number,
+    required: true,
+    min: 0,
+    max: FLIGHT_BOOKING_SEGMENTS_MAX - 1,
+    validate: wholeNumber('segment'),
+  })
+  segment: number;
+
+  @Prop({ type: Number, required: true, min: 1, validate: wholeNumber('bags') })
+  bags: number;
+
+  /** The total weight of these bags, in kg. */
+  @Prop({
+    type: Number,
+    required: true,
+    min: 1,
+    validate: wholeNumber('weightKg'),
+  })
+  weightKg: number;
+}
+
+export const PassengerBaggageSchema =
+  SchemaFactory.createForClass(PassengerBaggage);
+
+/**
+ * FLT-19: one passenger, as in `PASSENGER` of the data model. The type is
+ * derived by the server (FLT-12(b)). The messages never repeat a value,
+ * because these are personal data.
+ */
+@Schema({ _id: false })
+export class Passenger {
+  @Prop({
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: [
+      PASSENGER_FULL_NAME_MAX_LENGTH,
+      `fullName must have at most ${PASSENGER_FULL_NAME_MAX_LENGTH} characters`,
+    ],
+  })
+  fullName: string;
+
+  /** `YYYY-MM-DD`, never a `Date`, so no time zone can shift it. */
+  @Prop({
+    type: String,
+    required: true,
+    match: [
+      DATE_ONLY_PATTERN,
+      'dateOfBirth must be a date in the form YYYY-MM-DD',
+    ],
+  })
+  dateOfBirth: string;
+
+  /** Upper-case letters and digits. */
+  @Prop({
+    type: String,
+    required: true,
+    maxlength: [
+      PASSPORT_NUMBER_MAX_LENGTH,
+      `passportNumber must have at most ${PASSPORT_NUMBER_MAX_LENGTH} characters`,
+    ],
+    match: [
+      PASSPORT_NUMBER_PATTERN,
+      'passportNumber must contain only upper-case letters and digits',
+    ],
+  })
+  passportNumber: string;
+
+  @Prop({ type: String, required: true, enum: Object.values(PassengerType) })
+  type: PassengerType;
+
+  /** Extra bags per segment. Empty when the passenger bought none. */
+  @Prop({ type: [PassengerBaggageSchema], default: [] })
+  baggage: PassengerBaggage[];
+}
+
+export const PassengerSchema = SchemaFactory.createForClass(Passenger);
+
+/**
  * A flight booking, as in `FLIGHT_BOOKING` of the data model in
- * `specs/travel-platform.md`, with what FLT-22 needs: the seats are held for
- * 10 minutes while the payment is pending. `policyAcceptedAt` is set by
- * PAY-02. The fields of later issues (passengers and baggage FLT-19,
- * `baggageTotal`, `cancelledAt`, `cancelledBy`, `refundPercent` FLT-26) are
- * added by them.
+ * `specs/travel-platform.md`: the seats are held for 10 minutes while the
+ * payment is pending (FLT-22), with the passengers and their extra bags
+ * (FLT-19). `policyAcceptedAt` is set by PAY-02. The fields of later issues
+ * (`cancelledAt`, `cancelledBy`, `refundPercent` FLT-26) are added by them.
  */
 @Schema({ collection: 'flight_bookings', timestamps: true })
 export class FlightBooking {
@@ -169,7 +262,20 @@ export class FlightBooking {
   })
   fareTotal: number;
 
-  /** Minor units: what the user pays. Equal to `fareTotal` until baggage (FLT-19). */
+  /**
+   * FLT-19: minor units, the extra bag fees of every passenger. 0 for a
+   * booking without extra bags, and for one saved before FLT-19.
+   */
+  @Prop({
+    type: Number,
+    required: true,
+    default: 0,
+    min: 0,
+    validate: wholeNumber('baggageTotal'),
+  })
+  baggageTotal: number;
+
+  /** Minor units: what the user pays, `fareTotal + baggageTotal`. */
   @Prop({
     type: Number,
     required: true,
@@ -189,8 +295,24 @@ export class FlightBooking {
   })
   segments: BookingSegment[];
 
+  /** How many adults, children and infants: derived from `passengers` (FLT-19). */
   @Prop({ type: PassengerCountsSchema, required: true })
   passengerCounts: PassengerCounts;
+
+  /**
+   * FLT-19: every passenger with their details and extra bags. A booking
+   * saved before FLT-19 has none; the service always saves at least one.
+   */
+  @Prop({
+    type: [PassengerSchema],
+    default: [],
+    validate: {
+      validator: (passengers: Passenger[]): boolean =>
+        passengers.length <= FLIGHT_BOOKING_PASSENGERS_MAX,
+      message: `A booking has at most ${FLIGHT_BOOKING_PASSENGERS_MAX} passengers`,
+    },
+  })
+  passengers: Passenger[];
 
   createdAt: Date;
   updatedAt: Date;

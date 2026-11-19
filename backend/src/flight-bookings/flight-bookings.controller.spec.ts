@@ -6,7 +6,7 @@ import { CabinClass } from '../flights/models/cabin-class.enum';
 import { FlightBookingsController } from './flight-bookings.controller';
 import type { FlightBookingsService } from './flight-bookings.service';
 
-describe('FlightBookingsController (FLT-22)', () => {
+describe('FlightBookingsController (FLT-22, FLT-19)', () => {
   it('passes the logged-in user and the body to hold and returns its answer', async () => {
     const answer = { id: 'booking-1' };
     const service = { hold: jest.fn().mockResolvedValue(answer) };
@@ -16,7 +16,13 @@ describe('FlightBookingsController (FLT-22)', () => {
     const dto = {
       flightId: '6740f1c2a4b5c6d7e8f90456',
       cabin: CabinClass.Economy,
-      passengers: { adults: 1, children: 0, infants: 0 },
+      passengers: [
+        {
+          fullName: 'Sara Ahmed',
+          dateOfBirth: '1990-05-14',
+          passportNumber: 'A12345678',
+        },
+      ],
     };
 
     await expect(controller.hold(dto, 'user-1')).resolves.toBe(answer);
