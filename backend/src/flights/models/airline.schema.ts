@@ -17,8 +17,9 @@ export class Airline {
   active: boolean;
 
   /**
-   * The cancellation tiers (FLT-09), later also the baggage rules. An airline
-   * stored before FLT-09 has none, so readers treat a missing policy as empty.
+   * The cancellation tiers (FLT-09) and the extra-bag rule (FLT-08). An
+   * airline stored before FLT-09 has no policy and one stored before FLT-08
+   * has no extra-bag fields, so readers treat what is missing as not set.
    */
   @Prop({ type: AirlinePolicySchema, default: () => ({}) })
   policy?: AirlinePolicy;

@@ -24,6 +24,9 @@ describe('toAirlineResponse', () => {
       logoUrl: imageUrl(source.logo),
       active: true,
       cancellationTiers: [],
+      extraBagPrice: null,
+      extraBagCurrency: 'USD',
+      maxExtraBags: 0,
       createdAt: '2026-11-05T11:00:00.000Z',
       updatedAt: '2026-11-06T12:30:00.000Z',
     });
@@ -44,9 +47,12 @@ describe('toAirlineResponse', () => {
       'cancellationTiers',
       'code',
       'createdAt',
+      'extraBagCurrency',
+      'extraBagPrice',
       'id',
       'logo',
       'logoUrl',
+      'maxExtraBags',
       'name',
       'updatedAt',
     ]);
@@ -77,5 +83,39 @@ describe('toAirlineResponse', () => {
     expect(
       toAirlineResponse({ ...source, policy: undefined }).cancellationTiers,
     ).toEqual([]);
+  });
+
+  it('returns the extra-bag rule flat, next to the tiers (FLT-08)', () => {
+    const response = toAirlineResponse({
+      ...source,
+      policy: { cancellationTiers: [], extraBagPrice: 5000, maxExtraBags: 2 },
+    });
+
+    expect(response.extraBagPrice).toBe(5000);
+    expect(response.extraBagCurrency).toBe('USD');
+    expect(response.maxExtraBags).toBe(2);
+    expect(response).not.toHaveProperty('policy');
+  });
+
+  it('keeps 0 extra bags as 0, with the stored price (FLT-08)', () => {
+    const response = toAirlineResponse({
+      ...source,
+      policy: { cancellationTiers: [], extraBagPrice: 2500, maxExtraBags: 0 },
+    });
+
+    expect(response.extraBagPrice).toBe(2500);
+    expect(response.maxExtraBags).toBe(0);
+  });
+
+  it('shows no extra-bag rule for an airline stored before FLT-08, or before its moderator set one', () => {
+    for (const stored of [
+      source,
+      { ...source, policy: undefined },
+      { ...source, policy: { cancellationTiers: [] } },
+    ]) {
+      const response = toAirlineResponse(stored);
+      expect(response.extraBagPrice).toBeNull();
+      expect(response.maxExtraBags).toBe(0);
+    }
   });
 });

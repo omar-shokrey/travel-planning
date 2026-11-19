@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { PLATFORM_CURRENCY } from '../../common/constants/currency';
 import { CancellationTierResponseDto } from './cancellation-tier-response.dto';
 
 /** Public fields returned for an airline profile. */
@@ -33,6 +34,28 @@ export class AirlineResponseDto {
     ],
   })
   cancellationTiers: CancellationTierResponseDto[];
+
+  @ApiProperty({
+    type: 'integer',
+    nullable: true,
+    example: 5000,
+    description: `FLT-08: price of one extra bag, per passenger and per bag, in minor units of ${PLATFORM_CURRENCY} (cents). \`null\` until the airline moderator sets the rule. Each extra bag has the same maximum weight as the free bags of the passenger's cabin, the cabin's \`maxBagKg\` (FLT-04).`,
+  })
+  extraBagPrice: number | null;
+
+  @ApiProperty({
+    example: PLATFORM_CURRENCY,
+    description: `Currency of \`extraBagPrice\`: always the platform currency, ${PLATFORM_CURRENCY} (PAY-04)`,
+  })
+  extraBagCurrency: string;
+
+  @ApiProperty({
+    type: 'integer',
+    example: 2,
+    description:
+      "FLT-08: the most extra bags one passenger may buy. 0 means no extra bag is sold, also while the airline moderator has not set the rule. Each extra bag has the same maximum weight as the free bags of the passenger's cabin, the cabin's `maxBagKg` (FLT-04).",
+  })
+  maxExtraBags: number;
 
   @ApiProperty({
     description: 'When the airline profile was created, in UTC',
