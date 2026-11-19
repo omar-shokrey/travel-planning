@@ -386,7 +386,7 @@ export class ItinerariesController {
   @ApiOperation({
     summary: 'Budget summary of an itinerary',
     description:
-      'ITN-14. The total budget of your own itinerary, by category and by day. Totals include budget entries, activity costs (under activities) and transport costs (under intercity_transport), each as one amount per currency. Nothing is converted (ITN-18).',
+      'ITN-14. The total budget of your own itinerary, by category and by day. Totals include budget entries, activity costs (under activities) and transport costs (under intercity_transport), each as one amount per currency. ITN-18: every total also has `converted`, the same money in your preferred currency (USD when you have none), at the daily exchange rates named in `conversion`.',
   })
   @ApiParam({ name: 'id', description: 'Itinerary id' })
   @ApiOkResponse({ type: BudgetSummaryResponseDto })

@@ -706,6 +706,8 @@ describe('Budget entries and totals (e2e, ITN-14)', () => {
     expect(Object.keys(schemas.BudgetSummaryResponseDto.properties)).toEqual([
       'itineraryId',
       'total',
+      'converted',
+      'conversion',
       'byCategory',
       'byDay',
     ]);

@@ -6,6 +6,9 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { PLATFORM_CURRENCY } from '../common/constants/currency';
+import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
+import { UsersService } from '../users/users.service';
 import type { BudgetSummaryResponseDto } from './dto/budget-summary-response.dto';
 import type { CreateBudgetEntryDto } from './dto/create-budget-entry.dto';
 import type { ItineraryDetailResponseDto } from './dto/itinerary-detail-response.dto';
@@ -50,6 +53,8 @@ export class BudgetsService {
     @InjectModel(Itinerary.name)
     private readonly itineraries: Model<Itinerary>,
     private readonly itinerariesService: ItinerariesService,
+    private readonly usersService: UsersService,
+    private readonly exchangeRates: ExchangeRatesService,
   ) {}
 
   /**
@@ -149,7 +154,10 @@ export class BudgetsService {
     return toItineraryDetailResponse(itinerary);
   }
 
-  /** ITN-14: the total budget of your own itinerary, by category and by day. */
+  /**
+   * ITN-14: the total budget of your own itinerary, by category and by day.
+   * ITN-18: with every total also converted to your currency.
+   */
   async summary(
     itineraryId: string,
     userId: string,
@@ -159,7 +167,13 @@ export class BudgetsService {
       userId,
       'You can only see the budget of your own itineraries',
     );
-    return toBudgetSummaryResponse(itinerary);
+    // ITN-18: shown in the preferred currency (ACC-09), USD (PAY-04) when
+    // the user has none. The rates never fail the request: without them the
+    // converted totals are null.
+    const user = await this.usersService.findEntityById(userId);
+    const currency = user?.preferredCurrency ?? PLATFORM_CURRENCY;
+    const rates = await this.exchangeRates.latest();
+    return toBudgetSummaryResponse(itinerary, { currency, rates });
   }
 
   /** Finds the itinerary that holds this entry: 404, then 403 if it is not yours. */

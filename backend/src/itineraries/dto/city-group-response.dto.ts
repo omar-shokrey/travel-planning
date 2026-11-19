@@ -29,7 +29,7 @@ export class CityGroupResponseDto {
 
   @ApiProperty({
     description:
-      'Budget subtotal of the group: activity costs, budget entries and transport costs of its days, one total per currency, sorted by currency. Conversion to one currency is ITN-18.',
+      'Budget subtotal of the group: activity costs, budget entries and transport costs of its days, one total per currency, sorted by currency. The budget summary gives these totals in your currency (ITN-18).',
     type: [MoneyResponseDto],
     example: [{ amount: 45000, currency: 'EGP' }],
   })
