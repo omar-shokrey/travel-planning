@@ -8,6 +8,8 @@ import { Flight, FlightSchema } from './models/flight.schema';
 import { AirlinesService } from './airlines.service';
 import { AirlinesController } from './airlines.controller';
 import { FlightCabinsController } from './flight-cabins.controller';
+import { FlightDetailsController } from './flight-details.controller';
+import { FlightDetailsService } from './flight-details.service';
 import { FlightCabinsService } from './flight-cabins.service';
 import { FlightResponsesService } from './flight-responses.service';
 import { FlightSearchController } from './flight-search.controller';
@@ -31,6 +33,7 @@ import { FlightsService } from './flights.service';
   // any GET /flights/:id (FLT-17). flights.module.spec.ts checks the order.
   controllers: [
     FlightSearchController,
+    FlightDetailsController,
     AirlinesController,
     FlightsController,
     FlightCabinsController,
@@ -41,6 +44,7 @@ import { FlightsService } from './flights.service';
     FlightCabinsService,
     FlightResponsesService,
     FlightSearchService,
+    FlightDetailsService,
     FlightSeatHoldsService,
   ],
   // FlightResponsesService: flight responses with local times (GEN-06) for

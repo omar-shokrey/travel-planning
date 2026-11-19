@@ -4,6 +4,7 @@ import {
   MODULE_METADATA,
   PATH_METADATA,
 } from '@nestjs/common/constants';
+import { FlightDetailsController } from './flight-details.controller';
 import { FlightSearchController } from './flight-search.controller';
 import { FlightsModule } from './flights.module';
 
@@ -45,6 +46,15 @@ describe('FlightsModule', () => {
     for (const index of idIndexes) {
       expect(searchIndex).toBeLessThan(index);
     }
+  });
+
+  it('registers GET /flights/:id (FLT-17) in a controller after the search', () => {
+    const detailsIndex = controllers.indexOf(FlightDetailsController);
+
+    expect(getRoutesOf(FlightDetailsController)).toEqual(['flights/:id']);
+    expect(detailsIndex).toBeGreaterThan(
+      controllers.indexOf(FlightSearchController),
+    );
   });
 
   it('puts the search controller first among the controllers of /flights', () => {

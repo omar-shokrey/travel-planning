@@ -1,6 +1,6 @@
 # flights
 
-Owns airline profile persistence for FLT-01: the `airlines` collection, `Airline` schema, `AirlinesService`, controller, request and response DTOs, and response mapper. The implemented scope in this module is airline profile creation, retrieval, and update (FLT-01), the airline cancellation policy (FLT-09), the airline extra baggage rule (FLT-08: `PUT /api/airlines/:id/baggage-policy`), flight creation (FLT-03: the `flights` collection, `Flight` schema, `FlightsService` and `FlightsController`), the cabin categories of a flight (FLT-04: the embedded `FlightCabin` schema, `FlightCabinsService` and `FlightCabinsController`), flight search (FLT-11: `FlightSearchService` and `FlightSearchController`), and the flight status rule (FLT-30: `flight-status.ts`).
+Owns airline profile persistence for FLT-01: the `airlines` collection, `Airline` schema, `AirlinesService`, controller, request and response DTOs, and response mapper. The implemented scope in this module is airline profile creation, retrieval, and update (FLT-01), the airline cancellation policy (FLT-09), the airline extra baggage rule (FLT-08: `PUT /api/airlines/:id/baggage-policy`), flight creation (FLT-03: the `flights` collection, `Flight` schema, `FlightsService` and `FlightsController`), the cabin categories of a flight (FLT-04: the embedded `FlightCabin` schema, `FlightCabinsService` and `FlightCabinsController`), flight search (FLT-11: `FlightSearchService` and `FlightSearchController`, with the price range and order of FLT-15), the flight details (FLT-17: `GET /api/flights/:id`, `FlightDetailsService` and `FlightDetailsController`), and the flight status rule (FLT-30: `flight-status.ts`).
 
 ## Built so far
 
@@ -13,6 +13,7 @@ Owns airline profile persistence for FLT-01: the `airlines` collection, `Airline
 | `PUT /api/airlines/:id/baggage-policy`      | FLT-04, FLT-08 | Airline moderator for that airline         |
 | `POST /api/flights`                         | FLT-03, FLT-02 | Airline moderator with an assigned airline |
 | `GET /api/flights/search`                   | FLT-11, FLT-15 | Anyone (guest)                             |
+| `GET /api/flights/:id`                      | FLT-17         | Anyone (guest)                             |
 | `POST /api/flights/:id/cabins`              | FLT-04         | Airline moderator of the flight's airline  |
 | `PATCH /api/flights/:id/cabins/:cabinId`    | FLT-04, FLT-05 | Airline moderator of the flight's airline  |
 
@@ -21,7 +22,7 @@ Creation accepts `name`, `code`, and a required multipart `logo`. Updates accept
 ## Deactivated airlines (ACC-15)
 
 - An admin deactivates or reactivates an airline through `PATCH /api/admin/providers/airline/:id/deactivate` and `/reactivate`. `AirlinesService.setActive(id, active)` writes the flag for the admin module, with one conditional update (an airline without the field counts as active). No airlines route exposes it.
-- **Every feature that shows or books flights must respect the airline's `active`:** flight search (FLT-11) leaves out flights of an airline with `active: false`, and flight booking (FLT-21) refuses them. Confirmed bookings stay valid. The search does it in its query (see "Flight search (FLT-11)"); the booking does not exist yet, and this is the rule for whoever builds it.
+- **Every feature that shows or books flights must respect the airline's `active`:** flight search (FLT-11) leaves out flights of an airline with `active: false`, and flight booking (FLT-21) refuses them. Confirmed bookings stay valid. The search does it in its query (see "Flight search (FLT-11)"), and the flight details (FLT-17) answer 404 for such a flight, like an unknown one; the booking does not exist yet, and this is the rule for whoever builds it.
 
 ## Design decisions
 
@@ -102,7 +103,7 @@ GEN-06: flight times are shown in each airport's local time zone. Every flight r
 - **Local uses the input format**, `YYYY-MM-DDTHH:mm` (the format of `departureLocal` and `arrivalLocal` in FLT-03), so the moderator gets back what they typed. Seconds, which the input allows, are not shown. A time that happens twice is stored as its second occurrence, as the FLT-03 section explains, so it comes back as the same wall-clock time with the standard-time offset (New York 01:30 on 2027-11-07 is `06:30Z`, shown as `01:30` and `-05:00`).
 - **One place turns stored flights into responses: `FlightResponsesService`** (`flight-responses.service.ts`, exported by `FlightsModule`). `toResponse(flight, now)` maps one flight; `toResponses(flights, now)` reads the time zones of all the airports of a list in **one** query (`{ _id: { $in: codes } }`, `timeZone` only, lean), never one per flight, then maps each flight with `toFlightResponse(flight, now, zones)`, which stays pure. `timeZonesOf(codes)` is the one zone lookup: `FlightsService.create` uses it for its input conversion too, and passes the zones it read to `toFlightResponse`, so creating a flight still makes one zone query. Adding or editing a cabin (FLT-04) returns through `toResponse`.
 - **No fallback zone.** If an airport of a stored flight is missing from the airports list, the service throws an error naming the code (500). It never guesses a zone and never shows UTC as if it were local.
-- **The rule for later issues:** every route that returns a flight (FLT-17 details, FLT-23 e-ticket, FLT-25 my bookings, FLT-29 passenger export) uses `FlightResponsesService`, or `toLocalTime` for a single time, so local times are shown everywhere. The search (FLT-11) already does: it reads the two time zones with `timeZonesOf` (the same query that checks that the airports exist) and maps each result with `toFlightResponse`.
+- **The rule for later issues:** every route that returns a flight (FLT-23 e-ticket, FLT-25 my bookings, FLT-29 passenger export) uses `FlightResponsesService`, or `toLocalTime` for a single time, so local times are shown everywhere. The search (FLT-11) and the flight details (FLT-17) already do: each reads the time zones with `timeZonesOf` (for the search, the same query that checks that the airports exist) and maps each flight with `toFlightResponse`.
 - **Tests:** `flight-local-time.spec.ts` (fixed instants: Cairo, New York in winter and summer, Tokyo on the next date, Kolkata, Kathmandu, the repeated New York hour, an unknown zone), `mappers/flight.mapper.spec.ts` (the six fields, the UTC fields unchanged), `flight-responses.service.spec.ts` (one query for a list of three flights with four airports, an empty list with no query, a missing zone), the GEN-06 cases of `flights.service.spec.ts` and `flight-cabins.service.spec.ts`, and `test/flights-local-times.e2e-spec.ts` (create in winter and summer, add a cabin, Swagger).
 
 ## Flight cabins (FLT-04)
@@ -165,6 +166,20 @@ FLT-15: "filter flight results by an inclusive minimum and maximum price while p
 - **Sorted and paged in the database, in the same query.** For `price` and `duration` an `$addFields` stage computes the key (`lowestPrice`, `durationMs`) after the seat and price filter, and `$facet` sorts by it, then by `_id`, before `$skip` and `$limit`; the key is removed from the answer. Equal flights (same price, same duration) keep one fixed order by `_id`, so pages never repeat or skip a flight (tested across pages). `total` counts the same filtered flights. No second query and no sorting in memory. With the default order the pipeline is exactly the FLT-11 one.
 - **Tests:** `dto/search-flights-query.dto.spec.ts` (each price form, the bounds, the enums and defaults), `flight-search.service.spec.ts` (the exact `$filter` condition for each combination of bounds, the sort key and direction, the tie-break, min > max before any query), and the "price range and order (FLT-15)" block of `test/flight-search.e2e-spec.ts` (inclusive bounds, a dearer cabin in range, a maximum alone, nothing in range, the other criteria kept, each order in both directions, paging with equal prices, the 400s).
 
+## Flight details (FLT-17)
+
+FLT-17: "a flight details page showing airline, flight number, airports, local departure and arrival times, duration, each cabin category with price, seats remaining and baggage allowance, and the airline's cancellation policy." `GET /api/flights/:id` (`FlightDetailsController`, `FlightDetailsService`) answers `FlightDetailsResponseDto` (200).
+
+- **Open to everyone.** `@Public()`, no role and no lock in Swagger; the id goes through `ParseObjectIdPipe` (400 for a malformed id). `FlightDetailsController` comes after `FlightSearchController` in `FlightsModule`, so `/flights/search` is never read as an id (`flights.module.spec.ts`, and an e2e test that calls `/api/flights/search`).
+- **The answer** (`toFlightDetails`, a pure mapper with a spec). The flight as every flight response shows it (`toFlightResponse`: `id`, `flightNumber`, both airports, `departureAt` and `arrivalAt` in UTC ending in `Z`, each time at its own airport with its zone and offset, GEN-06, `departureDateLocal`, `status`), without `airlineId`, `createdAt` and `updatedAt`, plus:
+  - `airline`: `id`, `name`, `code`, `logoUrl`;
+  - `durationMinutes`: arrival minus departure, in whole minutes;
+  - `cabins`: every category with `id`, `cabin`, `price` and `currency` (USD cents), `seatsRemaining` (`totalSeats - bookedSeats - heldSeats`, never below 0), `freeBags` and `maxBagKg`. `bookedSeats`, `heldSeats` and `totalSeats` never leave the API;
+  - the airline's rules, flat as in `AirlineResponseDto`, from the shared `toAirlinePolicyFields` (`airline.mapper.ts`): `extraBagPrice`, `extraBagCurrency` and `maxExtraBags` (FLT-08; an extra bag weighs at most the cabin's `maxBagKg`) and `cancellationTiers` (FLT-09). They are the airline's, the same for every cabin, so they are given once and not repeated in each cabin.
+- **404** "Flight not found" for an unknown id and for a flight of a deactivated airline (ACC-15: its listings are hidden; an airline without the field counts as active). **A cancelled or departed flight is shown**, with its status (FLT-30), so a passenger who booked it can still open it.
+- **Two reads by id** (the flight, then its airline) and one airports query for the time zones (`timeZonesOf`). No write.
+- **Tests:** `mappers/flight-details.mapper.spec.ts` (exact keys, no counters, seats never below 0, duration, defaults of an airline without a policy), `flight-details.service.spec.ts` (404s, the active rule, the reads), `flight-details.controller.spec.ts` (public), `mappers/airline.mapper.spec.ts` (the shared policy fields), and `test/flight-details.e2e-spec.ts` (a guest and every role, the full answer, 404 and 400, `/search` not read as an id, a deactivated and reactivated airline, cancelled and departed flights, a flight without cabins, Swagger).
+
 ## Flight status (FLT-30)
 
 FLT-30: a flight is `scheduled`, `cancelled` or `departed`; it becomes departed once its departure time has passed, and only scheduled flights are searchable, editable or bookable. The rule is three pure functions in `flight-status.ts`, used by every route that reads or changes a flight.
@@ -188,7 +203,7 @@ FLT-30: a flight is `scheduled`, `cancelled` or `departed`; it becomes departed 
   | FLT-05 edit a flight   | Put `scheduledFlightFilter(now)` in the same `updateOne` that changes the flight.                                                                           |
   | FLT-06 cancel a flight | Put `scheduledFlightFilter(now)` in the same `updateOne` that sets `status: 'cancelled'`, so a departed or already cancelled flight is never cancelled.     |
   | FLT-11 search          | Done: `scheduledFlightFilter(now)` in the first `$match` of the search aggregation, plus the active-airline rule (ACC-15) in its airline `$lookup`.         |
-  | FLT-17 flight details  | Show `effectiveStatus(flight, now)` (the mapper already does).                                                                                              |
+  | FLT-17 flight details  | Done: shows `effectiveStatus(flight, now)` through `toFlightResponse`; a cancelled or departed flight is shown, with its status.                            |
   | FLT-22 book seats      | Put `scheduledFlightFilter(now)` in the same conditional seat update that reserves the seats, so a flight that departs during the booking cannot be booked. |
 
 - **No new index.** The search (FLT-11) filters by route and local date first (`departureAirport`, `arrivalAirport`, `departureDateLocal`, `status`), which leaves few flights for the `departureAt` condition; the cabin writes go by `_id`.
