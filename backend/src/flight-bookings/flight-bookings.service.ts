@@ -39,6 +39,15 @@ import { FlightBooking } from './models/flight-booking.schema';
 // the service.
 export { fareTotalOf, infantFareOf } from './booking-price';
 
+/**
+ * FLT-19 and FLT-21: the one light, read-only read of the flight before
+ * anything is held. The status, departure and cabins serve the checks; the
+ * number, airports, times and timestamps let the summary show the flight
+ * (FlightResponsesService). Whole `cabins`, so each keeps its `_id`.
+ */
+const PLANNED_FLIGHT_FIELDS =
+  'airlineId flightNumber departureAirport arrivalAirport departureAt arrivalAt departureDateLocal status cabins createdAt updatedAt';
+
 /** PAY-02: a booking that does not exist or is not the caller's (ACC-11). */
 export const BOOKING_NOT_FOUND_MESSAGE = 'Booking not found';
 
@@ -69,9 +78,8 @@ export class FlightBookingsService {
    * FLT-22 and FLT-19: the user proceeds to payment with the details of every
    * passenger and their extra bags.
    *
-   * 1. A light read of the flight (its status, local departure date and the
-   *    cabin's maximum bag weight) and a read of the airline's extra-bag
-   *    rule. A missing flight or airline, a deactivated airline (ACC-15), a
+   * 1. `planBooking` (shared with the summary, FLT-21): a light read of the
+   *    flight and a read of the airline's extra-bag rule. A missing flight or airline, a deactivated airline (ACC-15), a
    *    flight that can no longer be booked (FLT-30) and a missing cabin get
    *    the hold's 404 or 409 here, before any 400.
    * 2. Each passenger's type is derived from the date of birth on the
@@ -104,53 +112,13 @@ export class FlightBookingsService {
       now.getTime() + FLIGHT_BOOKING_HOLD_MINUTES * 60 * 1000,
     );
 
-    const planned = await this.flights
-      .findById(dto.flightId)
-      .select(
-        'airlineId status departureAt departureDateLocal cabins.cabin cabins.maxBagKg',
-      )
-      .lean()
-      .exec();
-    if (!planned) {
-      throw new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE);
-    }
-    // The same answers as the hold, before any 400, so a flight that cannot
-    // be booked never reveals its airline's bag rule (ACC-15, FLT-30). The
-    // hold checks all of them again in its atomic update.
-    const airline = await this.airlines
-      .findEntityOrThrow(planned.airlineId.toString())
-      .catch((error: unknown) => {
-        throw error instanceof NotFoundException
-          ? new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE)
-          : error;
-      });
-    // An airline stored before ACC-15 has no `active` field and counts as active.
-    if (airline.active === false) {
-      throw new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE);
-    }
-    if (effectiveStatus(planned, now) !== FlightStatus.Scheduled) {
-      throw new ConflictException(FLIGHT_NOT_BOOKABLE_MESSAGE);
-    }
-    const plannedCabin = (planned.cabins ?? []).find(
-      (stored) => stored.cabin === dto.cabin,
-    );
-    if (!plannedCabin) {
-      throw new NotFoundException(cabinNotOnFlightMessage(dto.cabin));
-    }
+    const {
+      flight: planned,
+      airline,
+      cabin: plannedCabin,
+      plan,
+    } = await this.planBooking(dto, now);
     const policy = airline.policy;
-
-    const { plan, errors } = planPassengers(
-      dto.passengers,
-      planned.departureDateLocal,
-      {
-        extraBagPrice: policy?.extraBagPrice,
-        maxExtraBags: policy?.maxExtraBags ?? 0,
-        maxBagKg: plannedCabin.maxBagKg,
-      },
-    );
-    if (!plan) {
-      throw new BadRequestException({ message: 'Validation failed', errors });
-    }
     const { seats, counts } = plan;
 
     const flight: HeldFlightWithDate = await this.seatHolds.hold(
@@ -245,6 +213,65 @@ export class FlightBookingsService {
       throw error;
     }
     return toFlightBookingResponse(booking.toObject());
+  }
+
+  /**
+   * FLT-21: the checks the hold and the summary share, at one `now`, before
+   * anything is held. One light read of the flight (with what the summary
+   * shows: its times, airports, number and cabins) and one read of the
+   * airline, then, in this order: 404 "Flight not found" (missing flight or
+   * airline, or a deactivated airline, ACC-15), 409 "This flight can no
+   * longer be booked" (FLT-30), 404 for a missing cabin, all before any 400;
+   * then the passengers are typed, checked and their bags priced
+   * (`planPassengers`), with a 400 on the field paths. Writes nothing.
+   */
+  private async planBooking(dto: HoldFlightBookingDto, now: Date) {
+    const flight = await this.flights
+      .findById(dto.flightId)
+      .select(PLANNED_FLIGHT_FIELDS)
+      .lean()
+      .exec();
+    if (!flight) {
+      throw new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE);
+    }
+    // The same answers as the hold, before any 400, so a flight that cannot
+    // be booked never reveals its airline's bag rule (ACC-15, FLT-30). The
+    // hold checks all of them again in its atomic update.
+    const airline = await this.airlines
+      .findEntityOrThrow(flight.airlineId.toString())
+      .catch((error: unknown) => {
+        throw error instanceof NotFoundException
+          ? new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE)
+          : error;
+      });
+    // An airline stored before ACC-15 has no `active` field and counts as active.
+    if (airline.active === false) {
+      throw new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE);
+    }
+    if (effectiveStatus(flight, now) !== FlightStatus.Scheduled) {
+      throw new ConflictException(FLIGHT_NOT_BOOKABLE_MESSAGE);
+    }
+    const cabin = (flight.cabins ?? []).find(
+      (stored) => stored.cabin === dto.cabin,
+    );
+    if (!cabin) {
+      throw new NotFoundException(cabinNotOnFlightMessage(dto.cabin));
+    }
+    const policy = airline.policy;
+
+    const { plan, errors } = planPassengers(
+      dto.passengers,
+      flight.departureDateLocal,
+      {
+        extraBagPrice: policy?.extraBagPrice,
+        maxExtraBags: policy?.maxExtraBags ?? 0,
+        maxBagKg: cabin.maxBagKg,
+      },
+    );
+    if (!plan) {
+      throw new BadRequestException({ message: 'Validation failed', errors });
+    }
+    return { flight, airline, cabin, plan };
   }
 
   /**

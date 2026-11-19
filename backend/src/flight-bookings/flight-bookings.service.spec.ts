@@ -222,7 +222,7 @@ describe('FlightBookingsService.hold (FLT-22, FLT-19)', () => {
     expect(calls).toEqual(['flight', 'airline', 'hold', 'create']);
     expect(flights.findById).toHaveBeenCalledWith(FLIGHT_ID.toString());
     expect(select).toHaveBeenCalledWith(
-      'airlineId status departureAt departureDateLocal cabins.cabin cabins.maxBagKg',
+      'airlineId flightNumber departureAirport arrivalAirport departureAt arrivalAt departureDateLocal status cabins createdAt updatedAt',
     );
     expect(seatHolds.hold).toHaveBeenCalledWith(
       FLIGHT_ID.toString(),
