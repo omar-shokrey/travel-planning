@@ -56,6 +56,44 @@ export const CABIN_FREE_BAGS_MAX = 10;
  */
 export const CABIN_BAG_WEIGHT_MAX_KG = 100;
 
+/*
+ * The extra-bag rule of an airline (FLT-08). The workbook only says that the
+ * price is above 0 and the maximum number of extra bags is 0 or more. The
+ * upper limits are ours, engineering safeguards against a typing mistake, as
+ * for the cabins.
+ */
+
+/**
+ * The highest price of one extra bag, in minor units (USD cents): 1,000,000
+ * cents is 10,000 USD, far above any real bag fee, so only an extra zero or
+ * two is refused.
+ */
+export const EXTRA_BAG_PRICE_MAX = 1_000_000;
+
+/**
+ * The most extra bags one passenger may buy. 0 is allowed: the airline then
+ * sells no extra bag. 10 is the same ceiling as the free bags of a cabin.
+ */
+export const MAX_EXTRA_BAGS_MAX = 10;
+
+/**
+ * The most passengers one flight search may ask seats for (FLT-11). The
+ * workbook gives no limit: 9 is ours, the usual most passengers per booking
+ * on airline sites; a larger group books in parts. Passengers here are seats:
+ * infants (under 2) occupy no seat and are not counted (FLT-12, FLT-19).
+ */
+export const FLIGHT_SEARCH_PASSENGERS_MAX = 9;
+
+/** The 400 answer of a well-formed airport code that is not in the airports list (FLT-03, FLT-11). */
+export const unknownAirportMessage = (
+  field: 'departureAirport' | 'arrivalAirport',
+  code: string,
+): string => `${field} ${code} is not in the airports list`;
+
+/** The 400 answer of identical airports (FLT-03, FLT-11). */
+export const SAME_AIRPORTS_MESSAGE =
+  'arrivalAirport must be different from departureAirport';
+
 /**
  * How many times a cabin edit is tried when a booking moves the cabin's seat
  * counters between the read and the write (FLT-04). Ours: a booking takes a

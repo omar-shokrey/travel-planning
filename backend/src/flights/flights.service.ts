@@ -11,7 +11,11 @@ import { AirlinesService } from './airlines.service';
 import type { CreateFlightDto } from './dto/create-flight.dto';
 import type { FlightResponseDto } from './dto/flight-response.dto';
 import { FlightResponsesService } from './flight-responses.service';
-import { DUPLICATE_FLIGHT_MESSAGE } from './flights.constants';
+import {
+  DUPLICATE_FLIGHT_MESSAGE,
+  SAME_AIRPORTS_MESSAGE,
+  unknownAirportMessage,
+} from './flights.constants';
 import { toFlightResponse } from './mappers/flight.mapper';
 import { FlightStatus } from './models/flight-status.enum';
 import { Flight } from './models/flight.schema';
@@ -91,20 +95,17 @@ export class FlightsService {
     if (!departureZone) {
       errors.add(
         'departureAirport',
-        `departureAirport ${dto.departureAirport} is not in the airports list`,
+        unknownAirportMessage('departureAirport', dto.departureAirport),
       );
     }
     if (!arrivalZone) {
       errors.add(
         'arrivalAirport',
-        `arrivalAirport ${dto.arrivalAirport} is not in the airports list`,
+        unknownAirportMessage('arrivalAirport', dto.arrivalAirport),
       );
     }
     if (dto.departureAirport === dto.arrivalAirport) {
-      errors.add(
-        'arrivalAirport',
-        'arrivalAirport must be different from departureAirport',
-      );
+      errors.add('arrivalAirport', SAME_AIRPORTS_MESSAGE);
     }
 
     const departure =

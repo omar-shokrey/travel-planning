@@ -1,4 +1,5 @@
 import type { Types } from 'mongoose';
+import { PLATFORM_CURRENCY } from '../../common/constants/currency';
 import { imageUrl } from '../../uploads/uploads.constants';
 import type { AirlineResponseDto } from '../dto/airline-response.dto';
 import type { Airline } from '../models/airline.schema';
@@ -29,6 +30,11 @@ export function toAirlineResponse(airline: AirlineSource): AirlineResponseDto {
         refundPercent: tier.refundPercent,
       }),
     ),
+    // FLT-08, flat next to the tiers. An airline stored before FLT-08, or
+    // one whose moderator has not set the rule, sells no extra bag.
+    extraBagPrice: airline.policy?.extraBagPrice ?? null,
+    extraBagCurrency: PLATFORM_CURRENCY,
+    maxExtraBags: airline.policy?.maxExtraBags ?? 0,
     createdAt: airline.createdAt.toISOString(),
     updatedAt: airline.updatedAt.toISOString(),
   };

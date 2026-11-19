@@ -12,6 +12,7 @@ import { Airline, AirlineDocument } from './models/airline.schema';
 import { CreateAirlineDto } from './dto/create-airline.dto';
 import { UpdateAirlineDto } from './dto/update-airline.dto';
 import { AirlineResponseDto } from './dto/airline-response.dto';
+import { UpdateBaggagePolicyDto } from './dto/update-baggage-policy.dto';
 import { UpdateCancellationPolicyDto } from './dto/update-cancellation-policy.dto';
 import { sortTiersByDaysBefore } from '../common/cancellation-tiers';
 import { toAirlineResponse } from './mappers/airline.mapper';
@@ -128,9 +129,45 @@ export class AirlinesService {
   }
 
   /**
+   * Sets the extra-bag rule of an airline (FLT-08): the price of one extra bag
+   * and the most extra bags per passenger. Only the airline moderator assigned
+   * to it may do it, checked as for the cancellation policy (FLT-09). The
+   * update sets only these two fields of the policy, so this route and the
+   * cancellation-policy route never overwrite each other. An airline with no
+   * policy yet gets one. Bookings are not touched: a booking keeps the extra
+   * bag price it was made under.
+   */
+  async setBaggagePolicy(
+    id: string,
+    userId: string,
+    dto: UpdateBaggagePolicyDto,
+  ): Promise<AirlineResponseDto> {
+    const airline = await this.findEntityOrThrow(id);
+    await this.assertAssignedModerator(airline, userId);
+
+    const updated = await this.airlineModel
+      .findByIdAndUpdate(
+        id,
+        {
+          $set: {
+            'policy.extraBagPrice': dto.extraBagPrice,
+            'policy.maxExtraBags': dto.maxExtraBags,
+          },
+        },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
+    if (!updated) {
+      throw new NotFoundException('Airline not found');
+    }
+    return toAirlineResponse(updated);
+  }
+
+  /**
    * 403 unless the user is the airline moderator assigned to this airline.
-   * Used by `update` (FLT-01) and `setCancellationPolicy` (FLT-09), so both
-   * answer the same way, also for an account that no longer exists.
+   * Used by `update` (FLT-01), `setCancellationPolicy` (FLT-09) and
+   * `setBaggagePolicy` (FLT-08), so all three answer the same way, also for
+   * an account that no longer exists.
    */
   private async assertAssignedModerator(
     airline: AirlineDocument,
