@@ -19,7 +19,11 @@ import {
   ITINERARY_CHANGED_MESSAGE,
 } from './itineraries.constants';
 import { ItinerariesService } from './itineraries.service';
-import { toBudgetSummaryResponse } from './mappers/budget-summary.mapper';
+import {
+  type SummaryConversion,
+  toBudgetSummaryResponse,
+} from './mappers/budget-summary.mapper';
+import { withConvertedAmounts } from './mappers/itinerary-conversion.mapper';
 import { toItineraryDetailResponse } from './mappers/itinerary.mapper';
 import type { BudgetEntry } from './models/budget-entry.schema';
 import type { ItineraryDay } from './models/itinerary-day.schema';
@@ -167,13 +171,30 @@ export class BudgetsService {
       userId,
       'You can only see the budget of your own itineraries',
     );
-    // ITN-18: shown in the preferred currency (ACC-09), USD (PAY-04) when
-    // the user has none. The rates never fail the request: without them the
-    // converted totals are null.
+    return toBudgetSummaryResponse(itinerary, await this.conversionFor(userId));
+  }
+
+  /**
+   * ITN-03 with ITN-18: your itinerary as you open it, with every budget
+   * amount also in your currency.
+   */
+  async findOneConverted(
+    itineraryId: string,
+    userId: string,
+  ): Promise<ItineraryDetailResponseDto> {
+    const detail = await this.itinerariesService.findOne(itineraryId, userId);
+    return withConvertedAmounts(detail, await this.conversionFor(userId));
+  }
+
+  /**
+   * ITN-18: the user's preferred currency (ACC-09), USD (PAY-04) when there
+   * is none, and the rates. The rates never fail a request: without them
+   * every converted amount is null.
+   */
+  private async conversionFor(userId: string): Promise<SummaryConversion> {
     const user = await this.usersService.findEntityById(userId);
     const currency = user?.preferredCurrency ?? PLATFORM_CURRENCY;
-    const rates = await this.exchangeRates.latest();
-    return toBudgetSummaryResponse(itinerary, { currency, rates });
+    return { currency, rates: await this.exchangeRates.latest() };
   }
 
   /** Finds the itinerary that holds this entry: 404, then 403 if it is not yours. */

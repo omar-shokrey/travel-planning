@@ -30,7 +30,11 @@ describe('ItinerariesController', () => {
   };
   const activities = { add: jest.fn() };
   const transportCosts = { add: jest.fn() };
-  const budgets = { add: jest.fn(), summary: jest.fn() };
+  const budgets = {
+    add: jest.fn(),
+    summary: jest.fn(),
+    findOneConverted: jest.fn(),
+  };
   const controller = new ItinerariesController(
     service as unknown as ItinerariesService,
     activities as unknown as ActivitiesService,
@@ -59,16 +63,17 @@ describe('ItinerariesController', () => {
     const query = new PaginationQueryDto();
     const page = { items: [], meta: { page: 1, limit: 10, total: 0 } };
     service.findMine.mockResolvedValue(page);
-    service.findOne.mockResolvedValue({ id, days: [] });
+    budgets.findOneConverted.mockResolvedValue({ id, days: [] });
 
     await expect(controller.findMine(query, userId)).resolves.toBe(page);
+    // ITN-18: the detail comes with the amounts in the user's currency.
     await expect(controller.findOne(id, userId)).resolves.toEqual({
       id,
       days: [],
     });
 
     expect(service.findMine).toHaveBeenCalledWith(query, userId);
-    expect(service.findOne).toHaveBeenCalledWith(id, userId);
+    expect(budgets.findOneConverted).toHaveBeenCalledWith(id, userId);
   });
 
   it('passes the day, the ids and the logged-in user to the service', async () => {

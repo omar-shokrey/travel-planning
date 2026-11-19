@@ -15,6 +15,8 @@ interface GroupBody {
   endDate: string;
   dayCount: number;
   budgetSubtotal: { amount: number; currency: string }[];
+  /** ITN-18, when the owner opens the itinerary. */
+  budgetSubtotalConverted?: { amount: number; currency: string } | null;
 }
 
 describe('City groups (e2e, ITN-09)', () => {
@@ -51,8 +53,16 @@ describe('City groups (e2e, ITN-09)', () => {
 
   it('groups consecutive days in the same city with their dates and day count', async () => {
     const itinerary = await fixture.createItinerary(owner, [A, A, B, A]);
+    const groups = await read(itinerary.id);
 
-    expect(await read(itinerary.id)).toEqual([
+    // ITN-18 adds budgetSubtotalConverted; its value depends on the rates
+    // cached at that moment and is checked in itinerary-budget-conversion.
+    expect(groups.every((group) => 'budgetSubtotalConverted' in group)).toBe(
+      true,
+    );
+    expect(
+      groups.map(({ budgetSubtotalConverted: _converted, ...group }) => group),
+    ).toEqual([
       {
         cityId: A,
         firstDayNumber: 1,
@@ -190,6 +200,7 @@ describe('City groups (e2e, ITN-09)', () => {
       'endDate',
       'dayCount',
       'budgetSubtotal',
+      'budgetSubtotalConverted',
     ]);
   });
 });

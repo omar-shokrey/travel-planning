@@ -252,6 +252,67 @@ describe('Budget summary in the user currency (e2e, ITN-18)', () => {
     expect(stored?.rates).toEqual(RATES);
   });
 
+  it('converts every budget amount when the owner opens the itinerary', async () => {
+    const { itineraryId, dayIds } = await trip();
+    await http()
+      .post(`/api/itineraries/${itineraryId}/days/${dayIds[0]}/activities`)
+      .set('Cookie', owner.cookie)
+      .send({ name: 'Museum', cost: 5000, currency: 'EGP' })
+      .expect(201);
+    await http()
+      .post(`/api/itineraries/${itineraryId}/transport-costs`)
+      .set('Cookie', owner.cookie)
+      .send({
+        dayId: dayIds[1],
+        mode: 'train',
+        fromCityId: fixture.cityA,
+        toCityId: fixture.cityB,
+        amount: 2000,
+        currency: FIXTURE_CURRENCY,
+      })
+      .expect(201);
+    await prefer('EGP');
+
+    const response = await http()
+      .get(`/api/itineraries/${itineraryId}`)
+      .set('Cookie', owner.cookie)
+      .expect(200);
+    const [first, second] = response.body.days;
+
+    // USD 10.00 = EGP 500.00; EGP stays; USD 20.00 = EGP 1,000.00.
+    expect(first.budgetEntries[0].converted).toEqual({
+      amount: 50000,
+      currency: 'EGP',
+    });
+    expect(second.budgetEntries[0].converted).toEqual({
+      amount: 25000,
+      currency: 'EGP',
+    });
+    expect(first.activities[0].converted).toEqual({
+      amount: 5000,
+      currency: 'EGP',
+    });
+    expect(second.transportCosts[0].converted).toEqual({
+      amount: 100000,
+      currency: 'EGP',
+    });
+    expect(
+      response.body.cityGroups.map(
+        (group: { budgetSubtotalConverted: Money | null }) =>
+          group.budgetSubtotalConverted,
+      ),
+    ).toEqual([
+      { amount: 55000, currency: 'EGP' },
+      { amount: 125000, currency: 'EGP' },
+    ]);
+    expect(response.body.conversion).toMatchObject({
+      currency: 'EGP',
+      rateDate: RATE_DATE,
+      missingCurrencies: [],
+    });
+    await prefer(null);
+  });
+
   it('documents the converted totals in Swagger', async () => {
     const response = await http().get('/api/docs-json').expect(200);
     const schemas = response.body.components.schemas as Record<

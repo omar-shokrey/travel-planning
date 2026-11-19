@@ -42,14 +42,17 @@ function byCategory(
   });
 }
 
-/** ITN-18: which rates were used, and the currencies that have none. */
-function conversionOf(
+/**
+ * ITN-18: which rates were used, and which of `currencies` (or the user's
+ * currency) have no rate. `null` when there are no rates at all.
+ */
+export function conversionOf(
   conversion: SummaryConversion,
-  lines: readonly CostLine[],
+  currencies: readonly string[],
 ): BudgetConversionResponseDto | null {
   const { currency, rates } = conversion;
   if (!rates) return null;
-  const used = new Set([currency, ...lines.map((line) => line.currency)]);
+  const used = new Set([currency, ...currencies]);
   return {
     currency,
     rateDate: rates.rateDate,
@@ -87,7 +90,10 @@ export function toBudgetSummaryResponse(
     itineraryId: itinerary._id.toString(),
     total,
     converted: convert(total),
-    conversion: conversionOf(conversion, all),
+    conversion: conversionOf(
+      conversion,
+      all.map((line) => line.currency),
+    ),
     byCategory: byCategory(all, convert),
     byDay: days.map(({ day, index, lines }) => {
       const dayTotal = totalPerCurrency(lines);

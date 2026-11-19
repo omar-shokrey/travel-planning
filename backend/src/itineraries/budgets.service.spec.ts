@@ -438,6 +438,42 @@ describe('BudgetsService (ITN-14)', () => {
     });
   });
 
+  describe('findOneConverted (ITN-18)', () => {
+    it('gives your itinerary with each budget amount in your currency', async () => {
+      const { itinerary } = stored();
+      preferredCurrency = 'USD';
+
+      const detail = await service.findOneConverted(
+        itinerary.id as string,
+        ownerId,
+      );
+
+      expect(findUser).toHaveBeenCalledWith(ownerId);
+      // EGP 20.00 at 50 per dollar is USD 0.40.
+      expect(detail.days[1].budgetEntries[0].converted).toEqual({
+        amount: 40,
+        currency: 'USD',
+      });
+      expect(detail.cityGroups[0].budgetSubtotalConverted).toEqual({
+        amount: 40,
+        currency: 'USD',
+      });
+      expect(detail.conversion).toMatchObject({
+        currency: 'USD',
+        rateDate: '2026-11-18',
+      });
+    });
+
+    it('answers 403 for the itinerary of another user and reads no rates', async () => {
+      const { itinerary } = stored(otherUserId);
+
+      await expect(
+        service.findOneConverted(itinerary.id as string, ownerId),
+      ).rejects.toThrow(ForbiddenException);
+      expect(latestRates).not.toHaveBeenCalled();
+    });
+  });
+
   describe('summary', () => {
     it('returns the totals of your own itinerary', async () => {
       const { itinerary } = stored();
