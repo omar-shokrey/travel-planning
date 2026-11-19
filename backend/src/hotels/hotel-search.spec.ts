@@ -1,4 +1,13 @@
-import { canHost, isFreeForStay, takesTheNight } from './hotel-search';
+import { Types } from 'mongoose';
+import {
+  canHost,
+  groupNightsByRoom,
+  isFreeForStay,
+  nightsOfTheStay,
+  roomsThatCanBeFree,
+  STAY_NIGHT_FIELDS,
+  takesTheNight,
+} from './hotel-search';
 import { RoomNightState } from './models/room-night-state.enum';
 
 const NOW = new Date('2026-12-01T10:00:00.000Z');
@@ -114,5 +123,75 @@ describe('canHost (HTL-11)', () => {
 
   it('accepts fewer guests than rooms', () => {
     expect(canHost(rooms(2, 2), 2, 1)).toBe(true);
+  });
+});
+
+describe('roomsThatCanBeFree (HTL-11, HTL-15)', () => {
+  it('reads only active rooms bookable on the first night', () => {
+    expect(roomsThatCanBeFree(stay)).toEqual({
+      active: true,
+      availability: {
+        $elemMatch: { from: { $lte: '2026-12-20' }, to: { $gt: '2026-12-20' } },
+      },
+    });
+  });
+});
+
+describe('nightsOfTheStay (HTL-11, HTL-15)', () => {
+  it('reads the nights of these rooms from check-in up to the day before check-out', () => {
+    const ids = [new Types.ObjectId(), new Types.ObjectId()];
+
+    expect(nightsOfTheStay(ids, stay)).toEqual({
+      roomId: { $in: ids },
+      date: { $gte: '2026-12-20', $lt: '2026-12-23' },
+    });
+  });
+
+  it('reads every field isFreeForStay needs', () => {
+    expect(STAY_NIGHT_FIELDS.split(' ').sort()).toEqual([
+      'date',
+      'holdExpiresAt',
+      'roomId',
+      'state',
+    ]);
+  });
+});
+
+describe('groupNightsByRoom (HTL-11, HTL-15)', () => {
+  const first = new Types.ObjectId();
+  const second = new Types.ObjectId();
+  const night = (roomId: Types.ObjectId, date: string) => ({
+    roomId,
+    date,
+    state: RoomNightState.Booked,
+  });
+
+  it('groups the nights by room id, keeping the order they were read in', () => {
+    const nights = [
+      night(first, '2026-12-21'),
+      night(second, '2026-12-20'),
+      night(first, '2026-12-20'),
+    ];
+
+    const byRoom = groupNightsByRoom(nights);
+
+    expect([...byRoom.keys()]).toEqual([first.toString(), second.toString()]);
+    expect(byRoom.get(first.toString())).toEqual([nights[0], nights[2]]);
+    expect(byRoom.get(second.toString())).toEqual([nights[1]]);
+  });
+
+  it('gives an empty map for no nights', () => {
+    expect(groupNightsByRoom([]).size).toBe(0);
+  });
+
+  it('groups a year of nights of one room in one list', () => {
+    const nights = Array.from({ length: 366 }, (_, day) =>
+      night(first, `day-${day}`),
+    );
+
+    const byRoom = groupNightsByRoom(nights);
+
+    expect(byRoom.get(first.toString())).toHaveLength(366);
+    expect(byRoom.get(first.toString())?.[365]).toBe(nights[365]);
   });
 });
