@@ -171,6 +171,7 @@ the order and which route answers each GET path.
 - **Order and pages.** By hotel name (case is ignored), then id, 10 per page (GEN-05). Every matching hotel is counted for `total`, so the hotels and their rooms of the city or country are read in one go and paged in memory. That is fine for the size of the data; a very large country would need the free-room check in the database.
 - **Limits (engineering limits, not workbook rules).** `guests` 1 to `HOTEL_SEARCH_GUESTS_MAX` (100), `rooms` 1 to `HOTEL_SEARCH_ROOMS_MAX` (20).
 - **Reading only.** The search writes nothing. A room in the results can be gone when the user books it; booking (HTL-16) takes the nights in its own concurrency-safe way.
+- **Used by the itineraries module (ITN-25).** `HotelsModule` exports `HotelSearchService`, and `ItineraryHotelsService` calls `search()` with the city and the dates of a city group, so the hotels of a group follow the free-room rule above and cannot disagree with this route. Nothing else of the module is exported for it; `HotelAvailableRoomsService` stays private.
 
 ## Available rooms for the searched dates (HTL-15)
 
