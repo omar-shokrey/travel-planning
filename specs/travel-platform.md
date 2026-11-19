@@ -493,6 +493,7 @@ erDiagram
         int amount "minor units"
         string currency "platform currency"
         string status "requires_payment, succeeded, failed, cancelled"
+        date holdExpiresAt "copy of the booking hold"
     }
     REFUND {
         ObjectId _id PK
@@ -516,10 +517,10 @@ erDiagram
     PAYMENT ||..o| REFUND : "refunded by"
 ```
 
-- A payment stores only the Stripe payment id, amount, currency and status (PAY-01). A booking has one payment, and a retry reuses the same payment intent.
+- A payment stores only the Stripe payment id, amount, currency and status (PAY-01), plus a copy of the booking's `holdExpiresAt`, so the expiry job can cancel the PaymentIntent when the hold ends without reading the booking. A booking has one payment, and a retry reuses the same payment intent.
 - A booking has at most one refund, because only whole cancellations exist (FLT-26, HTL-21). Its status is shown on the booking details (PAY-03).
 - `stripe_events` stores the id of every processed webhook event. When Stripe sends the same event again, the id already exists and the handler ignores it.
-- Indexes: unique `stripePaymentIntentId`; unique (`bookingType`, `bookingId`) on `payments` and on `refunds`; TTL on `stripe_events.processedAt`.
+- Indexes: unique `stripePaymentIntentId`; unique (`bookingType`, `bookingId`) on `payments` and on `refunds`; (`status`, `holdExpiresAt`) on `payments` for the expiry job; TTL on `stripe_events.processedAt`.
 
 ### Itineraries
 
@@ -703,6 +704,7 @@ erDiagram
 - Flight seats: one conditional update on the flight document reserves the seats, so concurrent requests can never book more seats than exist (FLT-22).
 - Hotel rooms: the unique (`roomId`, `date`) index decides who gets a night, and a multi-room request is one transaction (HTL-18).
 - Hold expiry: a scheduled job (`@nestjs/schedule`) finds `pending_payment` bookings whose `holdExpiresAt` has passed, sets them to `expired` with an update that only matches if they are still `pending_payment`, and then releases the seats or nights. The payment webhook confirms a booking with the same condition, so a booking cannot be both confirmed and released.
+- Payment expiry (PAY-01): a second job in the payments module finds open payments (`requires_payment` or `failed`) whose copy of `holdExpiresAt` has passed and cancels their PaymentIntent in Stripe first. Only when Stripe cancelled it does the payment become `cancelled`, with an update that matches only a payment that is still open; if Stripe refuses because the payment just succeeded, the payment is left for the webhook. It never changes the booking: the booking job above expires it.
 - The same job moves confirmed hotel reservations to `completed` after check-out and flights to `departed` after the departure time (HTL-23, FLT-30).
 - Webhooks: the Stripe event id in `stripe_events` makes a repeated event harmless.
 - If a cached counter ever disagrees with the documents it summarises, it is recomputed from them.

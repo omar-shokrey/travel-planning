@@ -25,6 +25,13 @@ const invalidCases: [Record<string, string>, RegExp][] = [
   [{ FXRATES_API_URL: 'not a url' }, /FXRATES_API_URL/],
   [{ FXRATES_API_URL: 'api.fxratesapi.com' }, /FXRATES_API_URL/],
   [{ FXRATES_API_URL: '' }, /FXRATES_API_URL/],
+  [{ STRIPE_SECRET_KEY: 'sk_live_abc123' }, /STRIPE_SECRET_KEY/],
+  [{ STRIPE_SECRET_KEY: 'rk_live_abc123' }, /STRIPE_SECRET_KEY/],
+  [{ STRIPE_SECRET_KEY: 'pk_test_abc123' }, /STRIPE_SECRET_KEY/],
+  [{ STRIPE_SECRET_KEY: 'sk_test_' }, /STRIPE_SECRET_KEY/],
+  [{ STRIPE_SECRET_KEY: 'sk_test_has space' }, /STRIPE_SECRET_KEY/],
+  [{ STRIPE_WEBHOOK_SECRET: 'abc123' }, /STRIPE_WEBHOOK_SECRET/],
+  [{ STRIPE_WEBHOOK_SECRET: 'whsec_' }, /STRIPE_WEBHOOK_SECRET/],
 ];
 
 const errorMessage = (env: Record<string, unknown>): string => {
@@ -50,6 +57,31 @@ describe('validateEnv', () => {
     expect(env.COOKIE_SAME_SITE).toBe('lax');
     expect(env.FXRATES_API_KEY).toBe('');
     expect(env.FXRATES_API_URL).toBe('https://api.fxratesapi.com');
+    expect(env.STRIPE_SECRET_KEY).toBe('');
+    expect(env.STRIPE_WEBHOOK_SECRET).toBe('');
+  });
+
+  it('reads the Stripe settings (PAY-01), and both may stay empty', () => {
+    const env = validateEnv({
+      ...base,
+      STRIPE_SECRET_KEY: 'sk_test_abc123',
+      STRIPE_WEBHOOK_SECRET: 'whsec_abc123',
+    });
+    expect(env.STRIPE_SECRET_KEY).toBe('sk_test_abc123');
+    expect(env.STRIPE_WEBHOOK_SECRET).toBe('whsec_abc123');
+    expect(
+      validateEnv({ ...base, STRIPE_SECRET_KEY: 'rk_test_abc123' })
+        .STRIPE_SECRET_KEY,
+    ).toBe('rk_test_abc123');
+    expect(
+      validateEnv({ ...base, STRIPE_SECRET_KEY: '' }).STRIPE_SECRET_KEY,
+    ).toBe('');
+  });
+
+  it('refuses a live Stripe key: the platform only works in test mode', () => {
+    expect(
+      errorMessage({ ...base, STRIPE_SECRET_KEY: 'sk_live_abc123' }),
+    ).toMatch(/STRIPE_SECRET_KEY/);
   });
 
   it('reads the exchange-rate settings (ITN-18), and an empty key is allowed', () => {
