@@ -56,6 +56,24 @@ describe('FlightBooking schema (FLT-22)', () => {
     expect(doc.toObject()).not.toHaveProperty('reference');
   });
 
+  it('has no policyAcceptedAt until the policies are accepted (PAY-02)', async () => {
+    const pending = new FlightBookingModel(valid());
+
+    expect(pending.policyAcceptedAt).toBeUndefined();
+    expect(pending.toObject()).not.toHaveProperty('policyAcceptedAt');
+    expect(FlightBookingSchema.path('policyAcceptedAt').options).toMatchObject({
+      type: Date,
+    });
+    expect(FlightBookingSchema.path('policyAcceptedAt').isRequired).toBeFalsy();
+
+    const acceptedAt = new Date('2026-11-19T10:02:00.000Z');
+    const accepted = new FlightBookingModel(
+      valid({ policyAcceptedAt: acceptedAt }),
+    );
+    await expect(accepted.validate()).resolves.toBeUndefined();
+    expect(accepted.policyAcceptedAt).toEqual(acceptedAt);
+  });
+
   it('requires every field except the reference', async () => {
     expect(await invalidPaths({})).toEqual([
       'currency',
@@ -113,6 +131,41 @@ describe('FlightBooking schema (FLT-22)', () => {
     expect(
       await invalidPaths(valid({ segments: [segment({ fare: 0 })] })),
     ).toEqual(['segments.0.fare']);
+  });
+
+  it('gives a segment without a policy copy no tiers and 0 extra bags (PAY-02)', async () => {
+    const doc = new FlightBookingModel(valid());
+
+    await expect(doc.validate()).resolves.toBeUndefined();
+    expect(doc.segments[0].cancellationTiers).toEqual([]);
+    expect(doc.segments[0].maxExtraBags).toBe(0);
+    expect(doc.segments[0].extraBagPrice).toBeUndefined();
+    expect(doc.segments[0].freeBags).toBeUndefined();
+    expect(doc.segments[0].maxBagKg).toBeUndefined();
+  });
+
+  it('keeps the copied policy in whole numbers (PAY-02)', async () => {
+    expect(
+      await invalidPaths(
+        valid({
+          segments: [
+            segment({
+              cancellationTiers: [{ daysBefore: 7, refundPercent: 50.5 }],
+              extraBagPrice: 10.5,
+              maxExtraBags: 1.5,
+              freeBags: -1,
+              maxBagKg: 0,
+            }),
+          ],
+        }),
+      ),
+    ).toEqual([
+      'segments.0.cancellationTiers.0.refundPercent',
+      'segments.0.extraBagPrice',
+      'segments.0.freeBags',
+      'segments.0.maxBagKg',
+      'segments.0.maxExtraBags',
+    ]);
   });
 
   it('has one or two segments, each with a known cabin and whole seats', async () => {

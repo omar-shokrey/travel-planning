@@ -22,8 +22,10 @@ Flight bookings (`flight_bookings`). The flights and their cabin seat counters b
 
 ## The booking document
 
-- `FlightBooking` follows `FLIGHT_BOOKING` of the data model with only what FLT-22 needs: `userId`, `status` (`FlightBookingStatus`, the five GEN-11 values shared with hotel reservations), `holdExpiresAt` (required while `pending_payment`), `currency`, `fareTotal`, `total`, `segments`, `passengerCounts`, `reference` and the timestamps. Money fields are validated as whole numbers of 0 or more (`fare` at least 1, like the cabin price).
+- `FlightBooking` follows `FLIGHT_BOOKING` of the data model with only what FLT-22 needs: `userId`, `status` (`FlightBookingStatus`, the five GEN-11 values shared with hotel reservations), `holdExpiresAt` (required while `pending_payment`), `currency`, `fareTotal`, `total`, `segments`, `passengerCounts`, `policyAcceptedAt` (PAY-02, set once when the user accepts the policies), `reference` and the timestamps. Money fields are validated as whole numbers of 0 or more (`fare` at least 1, like the cabin price).
 - `segments` holds exactly one segment now (`flightId`, `airlineId`, `cabin`, `fare`, `seatsReserved`); the schema allows two so FLT-12 can add the return flight without a change. The flight times are always read from the flight.
+- **The airline's policy is copied into each segment at hold time (PAY-02):** `cancellationTiers` (highest `daysBefore` first, empty means no refund), `extraBagPrice` (unset when the airline sells no extra bags), `maxExtraBags` (0 when the airline has no rule), and the held cabin's `freeBags` and `maxBagKg`. `FlightBookingsService.hold` reads the airline (`AirlinesService.findEntityOrThrow`) after the seats are held, inside the same `try` as the save, so a failed read releases the seats too. Why: what the user is shown and accepts before payment is exactly what a refund (FLT-26) and the extra bags (FLT-19) use, whatever the airline changes later, as hotel reservations already do. A booking saved before PAY-02 has no copy: the policies route shows empty tiers, `extraBagPrice` `null`, `maxExtraBags` 0 and `freeBags`/`maxBagKg` `null`, and never reads the live airline for it.
+- **For the payments module (PAY-02):** `findOwnedEntityOrThrow(id, userId)` (404 "Booking not found" for a missing booking or another user's, ACC-11) and `acceptPolicies(id, userId, now)` (one conditional update: owner, `pending_payment`, `holdExpiresAt > now`, not accepted before; `null` when nothing matched). `FlightBookingsModule` exports `FlightBookingsService` for them and never imports the payments module.
 - `passengerCounts` keeps how many adults, children and infants the booking is for, because infants have no seat but pay, and FLT-19 must check its passenger list against it.
 - `reference` stays empty until FLT-23 sets it, so its unique index is `sparse`.
 - Indexes from the spec: unique sparse `reference`; (`userId`, `status`) for "my bookings" (FLT-25); `segments.flightId` for the bookings of a flight (FLT-06, FLT-29); (`status`, `holdExpiresAt`) for the expiry job.
@@ -45,9 +47,9 @@ Confirm only with an update that matches `status: pending_payment` **and** `hold
 - **Passenger details and baggage (FLT-19)**: names, dates of birth, passports, extra bags and `baggageTotal`, added to the same `/hold` body.
 - **Booking summary (FLT-21)**, shown before the hold.
 - **Round trip and passenger types (FLT-12)**: the return segment, held in the same request.
-- **Payment and policy acceptance (PAY-01, PAY-02)**: the Stripe payment and `policyAcceptedAt`.
+- **Payment (PAY-01)**: the Stripe payment. It calls `BookingPoliciesService.findPayableOrThrow` first (see the payments README). Showing and accepting the policies (PAY-02) is done in the payments module.
 - **Confirmation and reference (FLT-23)**: see the rule above.
-- **Reading and cancelling bookings (FLT-25, FLT-26)**: ownership checks, `cancelledAt`, `cancelledBy`, `refundPercent` and the copied cancellation tiers.
+- **Reading and cancelling bookings (FLT-25, FLT-26)**: ownership checks, `cancelledAt`, `cancelledBy` and `refundPercent`. The cancellation tiers are already copied into each segment (by PAY-02); the refund uses those, never the airline's current ones.
 
 ## Tests
 

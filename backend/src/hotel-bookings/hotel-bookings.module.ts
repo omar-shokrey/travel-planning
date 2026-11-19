@@ -17,5 +17,9 @@ import {
   ],
   controllers: [HotelBookingsController],
   providers: [HotelBookingsService],
+  // HotelBookingsService: the owner lookup and the policy acceptance for the
+  // payments module (PAY-02). The payments module imports this one, never the
+  // other way round.
+  exports: [HotelBookingsService],
 })
 export class HotelBookingsModule {}

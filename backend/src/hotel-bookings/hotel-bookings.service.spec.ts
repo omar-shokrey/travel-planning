@@ -1,9 +1,12 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import type { HotelRoomHoldsService } from '../hotels/hotel-room-holds.service';
 import type { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import { HotelBookingStatus } from './enums/hotel-booking-status.enum';
-import { HotelBookingsService } from './hotel-bookings.service';
+import {
+  BOOKING_NOT_FOUND_MESSAGE,
+  HotelBookingsService,
+} from './hotel-bookings.service';
 
 const USER_ID = new Types.ObjectId().toString();
 const HOTEL_ID = new Types.ObjectId();
@@ -225,5 +228,82 @@ describe('HotelBookingsService (HTL-16, HTL-18)', () => {
     await expect(service.create(USER_ID, dto())).rejects.toBe(failure);
     const heldFor = (roomHolds.hold.mock.calls[0] as unknown[])[3];
     expect(roomHolds.release).toHaveBeenCalledWith(heldFor);
+  });
+});
+
+describe('HotelBookingsService owner lookup and policy acceptance (PAY-02)', () => {
+  const BOOKING_ID = '6740f1c2a4b5c6d7e8f90789';
+  const OWNER_ID = '6740f1c2a4b5c6d7e8f90123';
+  const AT = new Date('2026-11-19T10:02:00.000Z');
+
+  /** A fake model whose `findOne` and `findOneAndUpdate` resolve to `found`. */
+  const ownedSetup = (found: unknown) => {
+    const query = () => ({
+      lean: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue(found),
+    });
+    const bookings = {
+      findOne: jest.fn(query),
+      findOneAndUpdate: jest.fn(query),
+    };
+    const service = new HotelBookingsService(
+      bookings as never,
+      {} as HotelRoomHoldsService,
+    );
+    return { service, bookings };
+  };
+
+  it("finds the user's own reservation by id and owner", async () => {
+    const stored = { _id: BOOKING_ID, status: 'pending_payment' };
+    const { service, bookings } = ownedSetup(stored);
+
+    await expect(
+      service.findOwnedEntityOrThrow(BOOKING_ID, OWNER_ID),
+    ).resolves.toBe(stored);
+    expect(bookings.findOne).toHaveBeenCalledWith({
+      _id: BOOKING_ID,
+      userId: new Types.ObjectId(OWNER_ID),
+    });
+  });
+
+  it("answers 404 for a missing reservation or another user's, with the same message", async () => {
+    const { service } = ownedSetup(null);
+
+    const error: unknown = await service
+      .findOwnedEntityOrThrow(BOOKING_ID, OWNER_ID)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect((error as Error).message).toBe('Booking not found');
+    expect(BOOKING_NOT_FOUND_MESSAGE).toBe('Booking not found');
+  });
+
+  it('accepts with one conditional update: owner, pending, live hold, not accepted before', async () => {
+    const accepted = { _id: BOOKING_ID, policyAcceptedAt: AT };
+    const { service, bookings } = ownedSetup(accepted);
+
+    await expect(
+      service.acceptPolicies(BOOKING_ID, OWNER_ID, AT),
+    ).resolves.toBe(accepted);
+    expect(bookings.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(bookings.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: BOOKING_ID,
+        userId: new Types.ObjectId(OWNER_ID),
+        status: 'pending_payment',
+        holdExpiresAt: { $gt: AT },
+        policyAcceptedAt: { $exists: false },
+      },
+      { $set: { policyAcceptedAt: AT } },
+      { returnDocument: 'after' },
+    );
+  });
+
+  it('returns null when nothing matched', async () => {
+    const { service } = ownedSetup(null);
+
+    await expect(
+      service.acceptPolicies(BOOKING_ID, OWNER_ID, AT),
+    ).resolves.toBeNull();
   });
 });

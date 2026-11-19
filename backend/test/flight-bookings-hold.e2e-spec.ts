@@ -241,6 +241,46 @@ describe('Flight seat hold (e2e, FLT-22)', () => {
         bookedSeats: 2,
       });
     });
+
+    it("copies the airline's policy and the cabin's baggage rule into the booking (PAY-02)", async () => {
+      const flightId = await flightWith({ freeBags: 2, maxBagKg: 32 });
+      const policy = {
+        cancellationTiers: [
+          { daysBefore: 30, refundPercent: 100 },
+          { daysBefore: 7, refundPercent: 50 },
+        ],
+        extraBagPrice: 4500,
+        maxExtraBags: 2,
+      };
+      await fx.airlines
+        .findByIdAndUpdate(fx.airlineId, { $set: { policy } })
+        .exec();
+      try {
+        const response = await hold(holdBody(flightId), fx.user);
+        expect(response.status).toBe(201);
+
+        const stored = await bookings
+          .findById((response.body as BookingBody).id)
+          .lean()
+          .orFail()
+          .exec();
+        expect(stored.segments[0]).toMatchObject({
+          cancellationTiers: policy.cancellationTiers,
+          extraBagPrice: 4500,
+          maxExtraBags: 2,
+          freeBags: 2,
+          maxBagKg: 32,
+        });
+        expect(stored.policyAcceptedAt).toBeUndefined();
+      } finally {
+        // Back to the policy the fixture's airline was created with.
+        await fx.airlines
+          .findByIdAndUpdate(fx.airlineId, {
+            $set: { policy: { cancellationTiers: [] } },
+          })
+          .exec();
+      }
+    });
   });
 
   describe('flights that cannot be booked', () => {
