@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { UsersModule } from '../users/users.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { ReferenceModule } from '../reference/reference.module';
@@ -8,6 +9,7 @@ import { Flight, FlightSchema } from './models/flight.schema';
 import { AirlinesService } from './airlines.service';
 import { AirlinesController } from './airlines.controller';
 import { FlightCabinsController } from './flight-cabins.controller';
+import { FlightBookingLookup } from './flight-booking-lookup.service';
 import { FlightCabinsService } from './flight-cabins.service';
 import { FlightResponsesService } from './flight-responses.service';
 import { FlightSearchController } from './flight-search.controller';
@@ -24,6 +26,8 @@ import { FlightsService } from './flights.service';
     ]),
     UsersModule,
     UploadsModule,
+    // The in-app notification of a time change (FLT-05, GEN-01).
+    NotificationsModule,
     // The Airport model, read only, for the airports list and time zones (FLT-02).
     ReferenceModule,
   ],
@@ -41,6 +45,7 @@ import { FlightsService } from './flights.service';
     FlightCabinsService,
     FlightResponsesService,
     FlightSearchService,
+    FlightBookingLookup,
     FlightSeatHoldsService,
   ],
   // FlightResponsesService: flight responses with local times (GEN-06) for

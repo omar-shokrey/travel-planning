@@ -94,6 +94,10 @@ export const unknownAirportMessage = (
 export const SAME_AIRPORTS_MESSAGE =
   'arrivalAirport must be different from departureAirport';
 
+/** The same rule when only the departure airport is changed (FLT-05). */
+export const SAME_DEPARTURE_AIRPORT_MESSAGE =
+  'departureAirport must be different from arrivalAirport';
+
 /**
  * How many times a cabin edit is tried when a booking moves the cabin's seat
  * counters between the read and the write (FLT-04). Ours: a booking takes a
@@ -113,6 +117,24 @@ export const CABIN_CHANGED_MESSAGE =
   'The cabin was changed by another request. Try again.';
 export const EMPTY_CABIN_UPDATE_MESSAGE =
   'Send at least one of totalSeats, price, freeBags or maxBagKg';
+
+/** The answers of the flight edit (FLT-05). */
+export const EMPTY_FLIGHT_UPDATE_MESSAGE =
+  'Send at least one of departureAirport, arrivalAirport, departureLocal or arrivalLocal';
+export const AIRPORTS_LOCKED_MESSAGE =
+  'The airports of a flight that has bookings cannot be changed';
+
+/*
+ * The flight bookings the flight edit reads (FLT-05), until the booking module
+ * (FLT-19, FLT-21) exists: the collection and the statuses of the data model
+ * in specs/travel-platform.md ("Flight bookings"). `FlightBookingLookup` is
+ * the only reader.
+ */
+export const FLIGHT_BOOKINGS_COLLECTION = 'flight_bookings';
+/** Paid: the passenger flies, and is told about a time change. */
+export const FLIGHT_BOOKING_CONFIRMED = 'confirmed';
+/** Seats held while the payment runs (FLT-22): it still holds the flight. */
+export const FLIGHT_BOOKING_PENDING_PAYMENT = 'pending_payment';
 
 /**
  * The 409 answer when the flight already has a cabin of this class (FLT-04),
