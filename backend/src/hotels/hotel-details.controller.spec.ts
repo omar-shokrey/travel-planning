@@ -1,3 +1,6 @@
+import { RequestMethod } from '@nestjs/common';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
 import { HotelDetailsController } from './hotel-details.controller';
 import type { HotelDetailsService } from './hotel-details.service';
 
@@ -25,5 +28,15 @@ describe('HotelDetailsController', () => {
     await controller.findOne(HOTEL_ID, query);
 
     expect(service.findActiveById).toHaveBeenCalledWith(HOTEL_ID, query);
+  });
+
+  it('is the public GET /hotels/:id', () => {
+    const handler = HotelDetailsController.prototype.findOne;
+
+    expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(
+      RequestMethod.GET,
+    );
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe(':id');
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, handler)).toBe(true);
   });
 });
