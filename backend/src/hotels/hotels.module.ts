@@ -9,6 +9,7 @@ import { HotelDetailsController } from './hotel-details.controller';
 import { HotelDetailsService } from './hotel-details.service';
 import { HotelPoliciesController } from './hotel-policies.controller';
 import { HotelPoliciesService } from './hotel-policies.service';
+import { HotelRoomHoldsService } from './hotel-room-holds.service';
 import { HotelRoomStatusController } from './hotel-room-status.controller';
 import { HotelRoomStatusService } from './hotel-room-status.service';
 import { HotelRoomsController } from './hotel-rooms.controller';
@@ -51,9 +52,12 @@ import { HotelsService } from './hotels.service';
     HotelRoomStatusService,
     HotelSearchService,
     HotelAvailableRoomsService,
+    HotelRoomHoldsService,
   ],
   // HotelSearchService: the hotels of a city group of an itinerary (ITN-25),
   // so that the itinerary and the search use the one free-room rule (HTL-11).
-  exports: [HotelsService, HotelSearchService],
+  // HotelRoomHoldsService: the reservation of rooms (HTL-16, HTL-18), which
+  // finds and holds rooms only through the hotels module that owns them.
+  exports: [HotelsService, HotelSearchService, HotelRoomHoldsService],
 })
 export class HotelsModule {}

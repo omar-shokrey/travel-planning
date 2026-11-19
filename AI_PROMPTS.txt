@@ -1999,3 +1999,17 @@ Accepted, changed, or rejected:
 Accepted: the route and its design, and exporting HotelSearchService from the hotels module so that
 the hotels of a group follow the same rule as hotel search. Changed: nothing.
 ================================================
+
+================================================
+Date: 2026-11-19
+Student: Omar Hossam
+Tool: Claude (Claude app, with access to the repository, GitHub and my laptop's folders)
+Branch / Issue: feature/HTL-16-book-rooms-and-hold / #55 (also the hold of #57)
+Related Requirement: HTL-16 (depends on HTL-11, HTL-03 and HTL-15); the 10-minute hold of HTL-18
+Prompt:
+After I merged the ITN-25 pull request (#219), I asked Claude for a prompt for Ali Ahmed's AI to develop HTL-16. Then I asked Claude to develop HTL-16 itself, and said I would create the branch, test, commit and open the pull request.
+How the output was used:
+Claude read the HTL-16 and HTL-18 rows of the requirements workbook, section 8 of the project description, the data model in the specification, the hotels module (the free-room rule of hotel search, the available rooms, room blocks and edits) and Mado's closed pull request #190, which it used as a reference only (not merged or cherry-picked). It added POST /api/hotel-bookings for registered users: one or more rooms of one hotel for the same dates, with the adults and the children's ages of each room, at least one adult per reservation, no room above its maximum occupancy, and a total of nights x each room's price at that moment. The reservation is saved as pending_payment and all its rooms are held for 10 minutes, all or nothing, through the unique (roomId, date) index of room_nights. The hold lives in a new HotelRoomHoldsService in the hotels module, which reuses the one free-room rule, and checks the hotel and the rooms again after the nights are written. Not included, on purpose: the job that expires unpaid reservations (needs ScheduleModule, shared with flight seat holds), the confirmation after payment (HTL-17) and the acceptance of the policies (PAY-02). It wrote the schema, DTOs, mapper, service and controller in the hotel-bookings module, unit tests for each, an end-to-end suite on the -test database (including five requests for one room at the same moment) and README sections for both modules. Claude could not install packages or run the tests in its own workspace, so it only checked the changed files with Prettier 3.8 (the repository locks 3.9) and read the types carefully; lint, typecheck, build and the unit and end-to-end tests are run on my laptop and by the CI of the pull request.
+Accepted, changed, or rejected:
+Accepted: the design (hold in the booking call, no transaction because CI has one MongoDB server, write first then verify) and the new export of HotelRoomHoldsService from the hotels module. Rejected from the reference: its expiry job, its acceptPolicies field and its dependence on the older HTL-15 and HTL-11 code. Changed: one line of the end-to-end test (the five-requests race) was rewritten after `npm run lint` reported a no-unsafe-optional-chaining warning. On my laptop, format, lint (0 warnings), typecheck, the 7 unit suites of the change (75 tests), the 25 end-to-end tests of the new file and the build all passed.
+================================================
