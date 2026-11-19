@@ -1,9 +1,40 @@
 # Hotels
 
-The hotels module owns the `hotels` collection. `HotelsService` creates profiles
-and lets a moderator update only the hotel in their user assignment. It reads
-cities from `ReferenceModule` and copies each city's country code into the
-hotel, so callers cannot choose a mismatched country.
+The hotels module owns the `hotels`, `rooms` and `room_nights` collections. It
+implements the hotel profile and photos (HTL-01), the hotel page (HTL-02), rooms
+and their availability, blocks and status (HTL-03 to HTL-06, HTL-08), the
+policies (HTL-09, HTL-10), hotel search (HTL-11) and the free rooms of a hotel
+for the searched dates (HTL-15). `HotelsService` creates profiles and lets a
+moderator update only the hotel in their user assignment. It reads cities from
+`ReferenceModule` and copies each city's country code into the hotel, so
+callers cannot choose a mismatched country. Reservations (HTL-16 to HTL-22) are
+not built yet.
+
+## Routes
+
+| Method and path                                    | Who                 | Requirement    |
+| -------------------------------------------------- | ------------------- | -------------- |
+| `POST /api/hotels`                                 | Admin               | HTL-01         |
+| `PATCH /api/hotels/:id`                            | Its hotel moderator | HTL-01         |
+| `POST /api/hotels/:id/photos`                      | Its hotel moderator | HTL-01, GEN-08 |
+| `DELETE /api/hotels/:id/photos/:filename`          | Its hotel moderator | HTL-01, GEN-08 |
+| `GET /api/hotels/search`                           | Public              | HTL-11         |
+| `GET /api/hotels/:id/rooms/available`              | Public              | HTL-15         |
+| `GET /api/hotels/:id`                              | Public              | HTL-02, HTL-15 |
+| `POST /api/hotels/:id/rooms`                       | Its hotel moderator | HTL-03         |
+| `PATCH /api/hotels/:id/rooms/:roomId`              | Its hotel moderator | HTL-05         |
+| `DELETE /api/hotels/:id/rooms/:roomId`             | Its hotel moderator | HTL-06         |
+| `POST /api/hotels/:id/rooms/:roomId/availability`  | Its hotel moderator | HTL-04         |
+| `PATCH /api/hotels/:id/rooms/:roomId/availability` | Its hotel moderator | HTL-05, HTL-06 |
+| `PATCH /api/hotels/:id/rooms/:roomId/deactivate`   | Its hotel moderator | HTL-06         |
+| `PATCH /api/hotels/:id/rooms/:roomId/reactivate`   | Its hotel moderator | HTL-06         |
+| `GET /api/hotels/:id/availability`                 | Its hotel moderator | HTL-08         |
+| `PUT /api/hotels/:id/policies`                     | Its hotel moderator | HTL-09, HTL-10 |
+
+`GET /api/hotels/:id` is held by `HotelDetailsController`, which stays last in
+`HotelsModule`, so the fixed GET paths (`search`, `:id/rooms/available`,
+`:id/availability`) are matched first. `hotels.module.spec.ts` checks the
+order.
 
 ## Profile (HTL-01)
 
@@ -25,15 +56,15 @@ hotel, so callers cannot choose a mismatched country.
 ## Deactivated hotels (ACC-15)
 
 - An admin deactivates or reactivates a hotel through `PATCH /api/admin/providers/hotel/:id/deactivate` and `/reactivate`. `HotelsService.setActive(id, active)` writes the flag for the admin module, with one conditional update. No hotels route exposes it.
-- **Every feature that shows or books hotels must respect `active`:** hotel search (HTL-11) leaves out hotels with `active: false` (the `(cityId, active)` index is there for it), and hotel booking (HTL-16) refuses them. Confirmed bookings of a deactivated hotel stay valid. These routes do not exist yet; this is the rule for whoever builds them.
+- **Every feature that shows or books hotels must respect `active`:** hotel search (HTL-11) leaves out hotels with `active: false` (the `(cityId, active)` index is there for it), and the hotel page (HTL-02) and the free rooms of a hotel (HTL-15) answer 404 for them. Hotel booking (HTL-16) must refuse them; it does not exist yet, so this is the rule for whoever builds it. Confirmed bookings of a deactivated hotel stay valid.
 
 ## Hotel details (HTL-02)
 
 - `GET /api/hotels/:id` is public: guests and users open the hotel page without login.
 - It lives in its own `HotelDetailsController` and `HotelDetailsService`, so it does not collide with the profile and search work in the same module. The controller is registered last in `HotelsModule`: a controller with a fixed path such as `GET /hotels/search` must be matched before `GET /hotels/:id`, or "search" would be read as an id and answer 400.
 - Only an active hotel is shown. A deactivated hotel answers 404, the same as a missing one, because ACC-15 hides it from the public.
-- The response is `HotelDetailsResponseDto`: the `HotelResponseDto` of HTL-01 (profile, photos with their URLs, amenities, `averageRating` and `ratingCount`) plus `policy` (HTL-09, HTL-10).
-- The check-in and check-out times and the cancellation policy come in `policy` (HTL-09, HTL-10). The other parts of the hotel page come from the issues that own their data: the reviews are read from `GET /api/hotels/:id/reviews` (HTL-24). The rooms free for chosen dates are on the page itself when `checkIn` and `checkOut` are sent (see HTL-15).
+- The response is `HotelDetailsResponseDto`: the `HotelResponseDto` of HTL-01 (profile, photos with their URLs, amenities, `averageRating` and `ratingCount`) plus `policy` (HTL-09, HTL-10) and `availableRooms` (HTL-15).
+- The check-in and check-out times and the cancellation policy come in `policy` (HTL-09, HTL-10). The available rooms are on the page itself: with `checkIn` and `checkOut`, `availableRooms` lists every room free for the stay; without dates it is `null` (see "Available rooms for the searched dates" below). The reviews come from the issue that owns them, `GET /api/hotels/:id/reviews` (HTL-24), which is not built yet.
 
 ## Check-in and check-out times (HTL-09)
 
@@ -112,7 +143,7 @@ hotel, so callers cannot choose a mismatched country.
 - Blocking a night that a reservation has booked or holds answers 409 before anything is written. A hold whose time has passed no longer counts and is removed before the night is blocked, as the spec says for every new hold.
 - The response of both room routes is `ManagedRoomResponseDto`: the HTL-03 room plus `blocked`, the blocked nights joined into date ranges. `RoomResponseDto` and its mapper are unchanged.
 - One request can block at most 366 nights (`ROOM_BLOCK_MAX_NIGHTS`), one document per night. The workbook gives no limit.
-- Deactivating and reactivating use `PATCH /api/hotels/:id/rooms/:roomId/deactivate` and `/reactivate`. The endpoint table has no route for them; the names follow the provider routes of ACC-15. A room with a reserved night from today (UTC) on cannot be deactivated; past stays do not count. A deactivated room keeps its blocks and availability. HTL-11 (search) and HTL-16 (reservation) must leave out rooms whose `active` is false.
+- Deactivating and reactivating use `PATCH /api/hotels/:id/rooms/:roomId/deactivate` and `/reactivate`. The endpoint table has no route for them; the names follow the provider routes of ACC-15. A room with a reserved night from today (UTC) on cannot be deactivated; past stays do not count. A deactivated room keeps its blocks and availability. Hotel search (HTL-11) and the available rooms (HTL-15) leave out rooms whose `active` is false, and the reservation (HTL-16) must too.
 - `DELETE /api/hotels/:id/rooms/:roomId` deletes a room only if no `room_nights` document with a reservation (`bookingId`) was ever stored for it, and removes its blocks with it. When the reservations of HTL-16 exist, the check should also look at `hotel_bookings`, because an expired hold may have been cleaned up.
 - The checks and the writes of deactivation and deletion are separate steps. A hold inserted between them could end up on a deactivated or deleted room; the hold of HTL-18 must therefore check that the room still exists and is active.
 
@@ -131,20 +162,21 @@ hotel, so callers cannot choose a mismatched country.
 
 - **Route.** `GET /api/hotels/search` is public: guests and users get the same answer. `HotelSearchController` is registered before `HotelDetailsController`, so `search` is never read as a hotel id.
 - **Where.** Exactly one of `cityId` and `countryCode`; neither or both answer 400. A city or country with no hotel gives an empty page, not 404.
-- **Dates.** `checkIn` and `checkOut` are `YYYY-MM-DD`; check-out must be after check-in, check-in cannot be before today in UTC (the module's `todayUtc`, as for availability), and a stay has at most `ROOM_QUERY_MAX_NIGHTS` (366) nights. The stay is the nights from `checkIn` up to `checkOut`, not included, as everywhere else in the module.
-- **Which rooms are free.** An active room (HTL-06) is free when every night of the stay is inside one of its availability ranges (HTL-04; ranges that touch count as one) and no night has a `room_nights` document that takes it: blocked (HTL-06), booked, or held by a hold that has not expired (HTL-18). An expired hold no longer counts, as in HTL-08. The database query only reads rooms bookable on the first night; the other nights are checked in `hotel-search.ts`, plain functions with unit tests.
+- **Dates.** `checkIn` and `checkOut` are `YYYY-MM-DD`; check-out must be after check-in (the query DTO), check-in cannot be before today in UTC and a stay has at most `ROOM_QUERY_MAX_NIGHTS` (366) nights (`assertStay` in `stay-rules.ts`, shared with HTL-15 and the hotel page, so all three answer the same 400 for the same stay). The stay is the nights from `checkIn` up to `checkOut`, not included, as everywhere else in the module.
+- **Which rooms are free.** An active room (HTL-06) is free when every night of the stay is inside one of its availability ranges (HTL-04; ranges that touch count as one) and no night has a `room_nights` document that takes it: blocked (HTL-06), booked, or held by a hold that has not expired (HTL-18). An expired hold no longer counts, as in HTL-08. The database query only reads rooms bookable on the first night; the other nights are checked in `hotel-search.ts`, plain functions with unit tests. `isFreeForStay` there is the module's one free-room rule: the available rooms (HTL-15) call it too.
 - **Which hotels are listed.** Active hotels (ACC-15) with at least `rooms` free rooms whose `rooms` largest free rooms together hold `guests`. The largest rooms are the best possible choice, so if they cannot hold the guests, no choice can. `rooms` defaults to 1. Fewer guests than rooms is allowed.
-- **Result.** The public hotel fields, `freeRooms` (how many rooms are free for the stay) and `lowestPricePerNight` with `currency` (USD, PAY-04). Price filters and sorting are HTL-12, and the list of free rooms is HTL-15.
+- **Result.** The public hotel fields, `freeRooms` (how many rooms are free for the stay) and `lowestPricePerNight` with `currency` (USD, PAY-04). Price filters and sorting are HTL-12. The rooms themselves are listed by `GET /api/hotels/:id/rooms/available` (HTL-15) with the same rule, so `freeRooms` is the `total` of that route for the same dates and `lowestPricePerNight` the lowest `pricePerNight` it lists.
 - **Order and pages.** By hotel name (case is ignored), then id, 10 per page (GEN-05). Every matching hotel is counted for `total`, so the hotels and their rooms of the city or country are read in one go and paged in memory. That is fine for the size of the data; a very large country would need the free-room check in the database.
 - **Limits (engineering limits, not workbook rules).** `guests` 1 to `HOTEL_SEARCH_GUESTS_MAX` (100), `rooms` 1 to `HOTEL_SEARCH_ROOMS_MAX` (20).
 - **Reading only.** The search writes nothing. A room in the results can be gone when the user books it; booking (HTL-16) takes the nights in its own concurrency-safe way.
 
 ## Available rooms for the searched dates (HTL-15)
 
-- `GET /api/hotels/:id/rooms/available?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD` is public, as the endpoint table says. It lists every room of an active hotel that is free for the whole stay, paginated (GEN-05) and sorted by room number. A deactivated hotel answers 404, as on the hotel page.
-- HTL-02 says the hotel page shows "the available rooms when dates are provided". So `GET /api/hotels/:id` takes the same two dates as optional query parameters and then adds `availableRooms`, the full list without pagination; without dates it is `null`. Sending only one date answers 400. Both routes use the same service method, so they can never disagree.
-- A room is free when it is active (HTL-06), its availability ranges (HTL-04) cover every night from check-in up to the day before check-out, and no night of the stay has a `room_nights` document that is booked, blocked, or held with a hold that has not expired. The check-out day is not a night of the stay, so a reservation that starts that day does not matter.
-- The date rules are the ones of HTL-11 and HTL-18: check-out after check-in (checked by the DTO), and check-in not in the past (UTC, checked by the service because "today" changes). A stay has at most 366 nights (`ROOM_QUERY_MAX_NIGHTS`); the workbook gives no limit.
-- Each room shows the fields of the workbook (type, beds, maximum occupancy, price per night) plus its number, the number of nights and `totalPrice` = nights x price per night, in minor units of the platform currency.
-- The rooms are read with one query and the taken ones with one `distinct` on `room_nights`; the coverage check runs in memory on the embedded availability ranges. The free list is paginated in memory, because whether a room is free depends on both collections.
-- `findFreeRoomEntities` is the rule for hotel search (HTL-11) and booking (HTL-16), so they should call it instead of writing their own. It is only a read: a room can be taken right after it, so the hold of HTL-18 must still rely on the unique (`roomId`, `date`) index.
+- **Route.** `GET /api/hotels/:id/rooms/available?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD` is public, as the endpoint table says: guests and users get the same answer. `HotelAvailableRoomsController` is registered before `HotelDetailsController`. A malformed hotel id answers 400, and a missing or deactivated hotel (ACC-15) 404 "Hotel not found", exactly like the hotel page.
+- **One free-room rule.** The rule is `isFreeForStay` in `hotel-search.ts`, the one hotel search uses: a room is free when it is active (HTL-06), its availability ranges (HTL-04) cover every night from check-in up to the day before check-out, and no night of the stay has a `room_nights` document that is booked, blocked (HTL-06) or held by a hold that has not expired (HTL-18; a hold that expires exactly now no longer counts). The check-out day is not a night, so a reservation that starts that day does not matter. `HotelAvailableRoomsService` reads the active rooms of the one hotel that are bookable on the first night and their `room_nights` of the stay (one query each), groups the nights by room and applies `isFreeForStay`. There is no second copy of the rule: two copies would drift apart and show a room on one route that the other says is taken. HTL-16 and HTL-18 should reuse `isFreeForStay` too, and still rely on the unique (`roomId`, `date`) index.
+- **Same answer as hotel search.** For the same dates, the rooms listed here are exactly the rooms search counts as `freeRooms` for the hotel, and its `lowestPricePerNight` is the lowest `pricePerNight` listed. The e2e test checks this over HTTP for six stays. The stay checks are shared too (`assertStay` in `stay-rules.ts`): check-in not before today (UTC) and at most `ROOM_QUERY_MAX_NIGHTS` (366) nights, as in search, with the same 400 body naming the field. That check-out is after check-in is checked by the query DTO with the same validators as search. The workbook gives no limit on the length; 366 is the module's limit for every date range.
+- **Each room.** `id` (the room id, which the reservation of HTL-16 selects), `number`, `type`, `beds`, `maxOccupancy`, `pricePerNight`, `nights`, `totalPrice` = nights x `pricePerNight`, and `currency` (USD, PAY-04). Money is whole minor units: `ROOM_PRICE_MAX` x 366 nights = 3.66e11 is a safe integer. Nothing internal (availability, `active`, `hotelId`, timestamps) is returned.
+- **No `guests` or `rooms` parameter.** HTL-15 asks for every free room, not for the rooms that fit a party; `maxOccupancy` is shown so the user can choose, and HTL-16 checks the guests per room. An unknown parameter answers 400.
+- **Order and pages.** By room number, with the digits compared as numbers (2 before 10, as in HTL-08), then id; 10 per page (GEN-05). Whether a room is free depends on two collections, so the free rooms of the hotel are found first and paged in memory; one hotel has few rooms.
+- **The hotel page (HTL-02).** HTL-02 shows "the available rooms when dates are provided". `GET /api/hotels/:id` takes the same `checkIn` and `checkOut` as optional parameters (`HotelDetailsQueryDto`): with both it adds `availableRooms`, the full list without pages, from the same `listAvailable` method as the route, so the two cannot disagree; without dates it is `null`; with only one date it answers 400. The page applies the same `assertStay` before it reads the hotel.
+- **Read only.** The route writes nothing and locks nothing. A listed room can be taken before the user books it, so the hold of HTL-18 must take the nights through the unique (`roomId`, `date`) index of `room_nights` and not trust this list.
