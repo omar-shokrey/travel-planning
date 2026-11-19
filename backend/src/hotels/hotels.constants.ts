@@ -37,3 +37,10 @@ export const HOTEL_SEARCH_ROOMS_MAX = 20;
 
 /** HTL-11: the most guests one search may ask for (engineering limit). */
 export const HOTEL_SEARCH_GUESTS_MAX = 100;
+
+/**
+ * The reservations' collection, as the data model names it. The hotels module
+ * reads it only through `HotelBookingLookup`, because the hotel-bookings
+ * module imports this one and not the other way round.
+ */
+export const HOTEL_BOOKINGS_COLLECTION = 'hotel_bookings';

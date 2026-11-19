@@ -9,6 +9,7 @@ import { Types, type Model } from 'mongoose';
 import type { ManagedRoomResponseDto } from './dto/managed-room-response.dto';
 import type { SetRoomAvailabilityDto } from './dto/set-room-availability.dto';
 import type { UpdateRoomDto } from './dto/update-room.dto';
+import { HotelBookingLookup } from './hotel-booking-lookup.service';
 import { ROOM_BLOCK_MAX_NIGHTS } from './hotels.constants';
 import { HotelsService } from './hotels.service';
 import { toManagedRoomResponse } from './mappers/managed-room.mapper';
@@ -68,6 +69,7 @@ export class HotelRoomsService {
     @InjectModel(RoomNight.name)
     private readonly roomNights: Model<RoomNight>,
     private readonly hotelsService: HotelsService,
+    private readonly bookingLookup: HotelBookingLookup,
   ) {}
 
   /**
@@ -216,14 +218,17 @@ export class HotelRoomsService {
   /**
    * HTL-06: deletes a room that has never been reserved. A room night with a
    * reservation, in any state, means the room was reserved; such a room can
-   * only be deactivated.
+   * only be deactivated. So does a reservation that names the room: the
+   * nights of an expired one are released (HTL-18), but it was reserved.
    */
   async remove(hotelId: string, roomId: string, userId: string): Promise<void> {
     const room = await this.findManagedRoomOrThrow(hotelId, roomId, userId);
 
-    const reserved = await this.roomNights
-      .exists({ roomId: room._id, bookingId: { $exists: true } })
-      .exec();
+    const reserved =
+      (await this.roomNights
+        .exists({ roomId: room._id, bookingId: { $exists: true } })
+        .exec()) !== null ||
+      (await this.bookingLookup.wasEverReserved(room.hotelId, room._id));
     if (reserved) {
       throw new ConflictException(
         'A room that has been reserved cannot be deleted. Deactivate it instead.',
