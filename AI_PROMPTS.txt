@@ -2082,6 +2082,12 @@ How the output was used:
 Claude Code added HotelBookingsService.confirmPaid, which delegates to a new HotelBookingConfirmationService, and two additive methods of HotelRoomHoldsService: secureHold (keeps this reservation's live held nights 30 more minutes) and confirm (turns its held nights into booked nights with no hold end). Because a held night stops counting when its hold ends and the next hold removes it, the reservation is read first and confirmed only when every night (rooms x nights) was kept, so a payment at the very end of the hold can never double-book a room; then one findOneAndUpdate matching pending_payment and holdExpiresAt > now sets confirmed and a reference such as HB-7KQ2MX (retried on a duplicate key); then the nights are booked and the owner gets a booking_confirmed notification with the hotel, the dates as YYYY-MM-DD strings, the rooms, the guests and the reference. A repeated event answers true and books any night still held; a late payment answers false and releases this reservation's held nights. GET /api/hotel-bookings/:id does not exist yet (HTL-20), so it was not added. Tests: unit specs for every new file and test/hotel-booking-confirmation.e2e-spec.ts (a two-room reservation, policies, payment with the Stripe calls replaced and a signed webhook, then the reference, 6 booked nights and one notification; a repeated payment; a late payment; the expiry job after the confirmation; another reservation of the same room and dates is 409). On my laptop format, lint (0 warnings), typecheck, build, the unit tests of hotel-bookings, payments, notifications and hotels (73 suites, 788 tests), the hotel-booking end-to-end suites (2 suites, 39 tests) and the payments end-to-end suite (21 tests) all passed.
 Accepted, changed, or rejected:
 Accepted: the design (keep the nights, confirm, book the nights, notify) and the reference format. Changed after the reviewer agent: a failure while booking the nights is now thrown so Stripe retries and the retry books them (it was only logged, which could free the nights after 30 minutes), and the confirmation now goes on only when secureHold kept every night (a webhook clock a moment old could otherwise confirm after another hold took the nights); the e2e comment about the expiry job was corrected. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Omar Hossam
+Tool: Claude Code (VS Code extension, model Claude Opus 5.5, with its reviewer agent)
 Branch / Issue: feature/FLT-23-flight-booking-confirmation / #39
 Related Requirement: FLT-23 (with PAY-01 for the payment webhook, GEN-01 for the notification, GEN-06 for local times, FLT-12 for round trips)
 Prompt:
@@ -2104,6 +2110,11 @@ How the output was used:
 Claude Code added the decorator (read from the handler and the class with Reflector.getAllAndOverride) and the check in JwtAuthGuard after the existing ones, so a guest still gets 401 and a suspended account still gets 403 "Your account is suspended"; an account with mustChangePassword === true then gets 403 "You must change your temporary password first" (PASSWORD_CHANGE_REQUIRED_MESSAGE) on every route but the two. The flag is read with the account on every request, so change-password ends the restriction for the same session at once. It updated the Swagger descriptions of login, me, change-password, POST /api/admin/moderators and the admin reset, and the auth, admin and users READMEs, which said the backend did not block other routes. Tests: guard and decorator unit specs; the moderator e2e test that expected the bug now expects 403, then me 200, change-password 200 and the same edit 200 with the same cookie; new cases in the reset and change-password suites; a new table-driven suite over 10 routes of 9 modules. The reviewer agent found no way to bypass the check (one global guard before RolesGuard, no @UseGuards, no class-level @Public, every public route checked) and confirmed the decorator is on exactly two handlers. On my laptop format, lint (0 warnings), typecheck, build, the whole unit suite (243 suites, 3462 tests) and the auth, admin, users and temporary-password e2e suites passed. The whole e2e suite had 13 failures not caused by this change: 11 itinerary and reports suites timed out in their setup against Atlas, and 2 booking-confirmation suites fail on develop itself since PAY-03 (#235), as develop's CI shows.
 Accepted, changed, or rejected:
 Accepted: the decided design. Changed: a test email in the new suite was too long for the email rule and was shortened. Not changed here, listed as follow-ups: the Swagger text of mustChangePassword in users/dto (outside the allowed files) and a global note in the Swagger description (shared layer). Rejected: fixing the two failing booking-confirmation tests in this PR, because they are unrelated and fail on develop already.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Omar Hossam
 Tool: Claude Code (VS Code extension, model Claude Opus 5.5)
 Branch / Issue: fix/PAY-03-late-payment-e2e-stripe-stub / no issue (CI on develop red since #235)
 Related Requirement: PAY-03, FLT-23, HTL-17
@@ -2113,4 +2124,60 @@ How the output was used:
 Claude Code reproduced the failure, read develop's failed CI log (only these 2 tests in the step "E2E tests"; lint, typecheck, build, unit tests and the frontend job were green), and changed only backend/test/flight-booking-confirmation.e2e-spec.ts and backend/test/hotel-booking-confirmation.e2e-spec.ts: StripeGateway.createRefund is replaced in every test (beforeEach, restored afterEach) on the one gateway that PaymentsModule and RefundsModule share, and the wrong assertion "no notification" became the real outcome: no booking_confirmed notification, exactly one refund notification, exactly one refund (100%, late_payment, the payment amount, refunded as the stub answers), createRefund called once with the key refund-<type>-<bookingId>, and a second delivery of the same payment creates no second refund or notification. Every other assertion was kept, and the refunds are deleted by id. It checked every other suite that can reach a refund: refunds.e2e-spec already stubs it and payments.e2e-spec cannot reach it, so they were not changed. On my laptop the four suites ran with no "Invalid API Key" line.
 Accepted, changed, or rejected:
 Accepted: the stub and the new assertions as asked. Changed: nothing in production code. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Omar Hossam
+Tool: Claude Code (VS Code extension, model Claude Opus 5.5, with its reviewer agent)
+Branch / Issue: feature/HTL-20-my-hotel-reservations / #58 (pull request #243)
+Related Requirement: HTL-20 (with PAY-03 for the refund on the details, ACC-11 for ownership, GEN-05 for pagination)
+Prompt:
+I asked Claude Code to build HTL-20 on its own branch from develop: GET /api/hotel-bookings with the user's own reservations grouped as Upcoming, Past and Cancelled (pagination, filter by group) and GET /api/hotel-bookings/:id with the full details and the refund and its status, for registered users and their own reservations only, choosing and documenting the grouping rule so FLT-25 can mirror it, in new files of the hotel-bookings module, with unit and e2e tests and the README.
+How the output was used:
+Claude Code wrote the grouping rule once (hotel-reservation-groups.ts: Cancelled is cancelled; Past is completed, or confirmed with a check-out before today in UTC; Upcoming is confirmed with a check-out today or later; pending_payment and expired are in no group) and used it for both the list filter and each item's group, with a unit test that they agree. It added HotelReservationsController and HotelReservationsService, the query and response DTOs, the mappers (no holdExpiresAt, policyAcceptedAt or owner id), an index (userId, status, checkIn), and one read-only method in the hotels module, HotelsService.findNamesByIds, for the hotel names of a page. The reviewer agent found no blocker; Claude Code moved an e2e check-out off "today" so the suite cannot flip at midnight UTC, and made a reservation that is listed but in no group an error instead of a silent label. On my laptop format, lint (0 warnings), typecheck, build, the hotel-bookings and hotels unit tests (59 suites, 632 tests) and the new e2e suite (16 tests) passed.
+Accepted, changed, or rejected:
+Accepted: the grouping rule, the details route also opening a pending reservation (group null), and the HotelsService method. Changed: the two reviewer fixes. Rejected: adding the AI log entry to the feature PR, because these entries come in this separate docs PR.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Omar Hossam
+Tool: Claude Code (VS Code extension, model Claude Opus 5.5, with its reviewer agent)
+Branch / Issue: feature/HTL-21-cancel-hotel-reservation / #59 (pull request #248)
+Related Requirement: HTL-21 (with HTL-10 for the tiers, PAY-03 for the refund, GEN-11 for Confirmed -> Cancelled)
+Prompt:
+I asked Claude Code to build HTL-21 on its own branch from develop, with the flight cancellation (FLT-26) as the model: GET /api/hotel-bookings/:id/cancel shows the refund and changes nothing, POST with { expectedRefundPercent } cancels the whole confirmed reservation before its check-in date with one conditional update, releases every room's nights, and creates the refund through RefundsService, with the createRefund call stubbed in every e2e test.
+How the output was used:
+Claude Code added HotelBookingCancellationController and HotelBookingCancellationService, the DTOs, the cancelledAt, cancelledBy and refundPercent fields of the data model (reusing the CancelledBy enum of flight-bookings, a plain enum file, so there is no module cycle), and one method in the hotels module, HotelRoomHoldsService.unbook. The refund is refundPercentFor of the tiers copied into the reservation with the whole days from today (UTC) to the check-in date, on the full total; on and after the check-in date the answer is 409. The reviewer agent found a real problem: a cancellation between the confirmation and the booking of the nights could leave held nights that a retried confirmation would book for good, so unbook now frees the held and the booked nights of the reservation, with a unit and an e2e test. On my laptop format, lint (0 warnings), typecheck, build, the hotel-bookings and hotels unit tests (57 suites, 637 tests) and the new e2e suite (14 tests, no real Stripe call) passed.
+Accepted, changed, or rejected:
+Accepted: the cancellation design mirroring FLT-26 and the "strictly before the check-in date" rule. Changed: unbook also frees held nights, the comment about refund retries, and an "after the check-in date" e2e case, all from the reviewer agent. Rejected: nothing; a refund that could not even be recorded stays a follow-up, as in FLT-26.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Omar Hossam
+Tool: Claude Code (VS Code extension, model Claude Opus 5.5, with its reviewer agent)
+Branch / Issue: feature/HTL-22-moderator-hotel-reservations / #60 (pull request #250)
+Related Requirement: HTL-22 (with ACC-11 for access, GEN-05 for pagination)
+Prompt:
+I asked Claude Code to build HTL-22 on its own branch from develop: GET /api/hotels/:id/reservations for the hotel moderator of that hotel only, showing the guest, the dates, the rooms, the status and the reference, paginated, with a status filter, through the hotels module's HotelBookingLookup so that the hotels module never imports hotel-bookings, and returning only what a moderator needs.
+How the output was used:
+Claude Code added HotelBookingLookup.listForHotel (read only, native driver, a projection without any price, payment, hold or policy field), a ModeratorReservationStatus enum checked against the hotel-bookings enum in a spec, HotelModeratorReservationsController and HotelModeratorReservationsService with the same assigned-hotel check as the other moderator routes (404 for a missing hotel, 403 for another moderator), the DTOs and the mapper (the guest's name only). Confirmed, completed and cancelled reservations are listed, newest check-in first. The reviewer agent found no blocker; Claude Code added a route-matching test so GET /hotels/:id never answers /hotels/:id/reservations. On my laptop format, lint (0 warnings), typecheck, build, the hotels unit tests (46 suites, 503 tests) and the new e2e suite (11 tests) passed.
+Accepted, changed, or rejected:
+Accepted: the module boundary through HotelBookingLookup, the three listed statuses and the guest name only. Changed: the route-matching test from the reviewer agent. Rejected: nothing; an index on hotel_bookings and a batch name lookup in the users module are follow-ups for their own modules.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Omar Hossam
+Tool: Claude Code (VS Code extension, model Claude Opus 5.5, with its reviewer agent)
+Branch / Issue: feature/HTL-23-hotel-reviews / #61 (pull request #251)
+Related Requirement: HTL-23 (with GEN-11 for Completed, ACC-11 for ownership)
+Prompt:
+I asked Claude Code to build HTL-23 on its own branch from develop: a Review schema in the hotel-bookings module as in the data model, POST /api/hotel-bookings/:id/review for the owner of a completed reservation (one per reservation), PATCH and DELETE /api/reviews/:id for the author, and the hotel's ratingCount and averageRating recomputed from the visible reviews after every change, not incrementally, without building HTL-24, HTL-26 or the ACC-12 display.
+How the output was used:
+Claude Code added the Review schema (unique bookingId, an index on hotelId and createdAt), the moderation enum, the DTOs (UpdateReviewDto written with whenSent instead of PartialType, as UpdateCabinDto, so a sent null is refused), the mapper (no author id), ReviewsService, HotelReviewsController and ReviewsController, and one method in the hotels module, HotelsService.setRating. After every change one aggregation of the hotel's visible reviews gives the count and the average (two decimals), which is stored, read again and stored again if another change moved it. The reviewer agent found no blocker; Claude Code now stores the newest value when the retries run out, corrected the comment that a failed store can never drift (it is corrected by the next change), and added e2e tests for two reviews of one stay at once and for a hidden review left out of the rating. On my laptop format, lint (0 warnings), typecheck, build, the hotel-bookings and hotels unit tests (67 suites, 744 tests) and the new e2e suite (17 tests) passed.
+Accepted, changed, or rejected:
+Accepted: the recompute-and-verify design and the explicit UpdateReviewDto. Changed: the three reviewer suggestions. Rejected: nothing; a job that reconciles every hotel's rating stays a follow-up.
 ================================================
