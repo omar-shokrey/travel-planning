@@ -639,12 +639,47 @@ describe('Admin list of all bookings (e2e, ACC-17)', () => {
     });
 
     it('takes from alone', async () => {
-      // Run one after the other: the difference is the bookings of 12 March.
-      const from12 = await list({ from: '2001-03-12' });
-      const from13 = await list({ from: '2001-03-13' });
+      // With from alone the list also has every newer booking of the shared
+      // "-test" database, and other suites add or delete some while this
+      // runs. Newest first, the seeded rows of 12 and 14 March are the oldest
+      // rows, so they are the tail of the list. Read the last page and its
+      // neighbours one after the other (rows added at the front only push the
+      // tail later, into the next page), drop the rows seen twice, and check
+      // the tail; 10 and 11 March must not appear at all.
+      const LIMIT = 50;
+      const first = await list({ from: '2001-03-12', limit: LIMIT });
+      expect(first.status).toBe(200);
+      const lastPage = Math.max(
+        1,
+        Math.ceil((first.body.meta.total as number) / LIMIT),
+      );
+      const seen: string[] = [];
+      for (const page of [lastPage - 1, lastPage, lastPage + 1]) {
+        if (page < 1) {
+          continue;
+        }
+        const response = await list({ from: '2001-03-12', limit: LIMIT, page });
+        expect(response.status).toBe(200);
+        for (const id of rowIds(response.body)) {
+          if (!seen.includes(id)) {
+            seen.push(id);
+          }
+        }
+      }
 
-      expect(from12.status).toBe(200);
-      expect(from12.body.meta.total - from13.body.meta.total).toBe(2);
+      expect(seen.slice(-4)).toEqual([
+        ids.hotelExpired.toString(),
+        ids.flightCancelled.toString(),
+        ids.hotelConfirmed.toString(),
+        ids.flightRoundTrip.toString(),
+      ]);
+      for (const older of [
+        ids.flightPending,
+        ids.flightOneWay,
+        ids.hotelCompleted,
+      ]) {
+        expect(seen).not.toContain(older.toString());
+      }
     });
 
     it('answers 400 naming from and to when from is after to', async () => {
