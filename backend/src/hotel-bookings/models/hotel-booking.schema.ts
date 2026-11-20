@@ -149,3 +149,5 @@ HotelBookingSchema.index({ reference: 1 }, { unique: true, sparse: true });
 HotelBookingSchema.index({ status: 1, holdExpiresAt: 1 });
 // GEN-11: the completion job finds the confirmed reservations past check-out.
 HotelBookingSchema.index({ status: 1, checkOut: 1 });
+// HTL-20: a user's reservations by status ("My hotel reservations").
+HotelBookingSchema.index({ userId: 1, status: 1, checkIn: 1 });
