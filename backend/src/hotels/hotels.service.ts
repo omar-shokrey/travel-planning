@@ -339,4 +339,27 @@ export class HotelsService {
       )
       .exec();
   }
+
+  /**
+   * HTL-23: stores the hotel's rating as the reviews module computed it from
+   * all the visible reviews of the hotel (`ratingCount`, `averageRating`).
+   * It only overwrites: it never adds to the stored numbers, so nothing can
+   * drift. Never exposed by a controller.
+   */
+  async setRating(
+    id: string | Types.ObjectId,
+    rating: { ratingCount: number; averageRating: number },
+  ): Promise<void> {
+    await this.hotels
+      .updateOne(
+        { _id: id },
+        {
+          $set: {
+            ratingCount: rating.ratingCount,
+            averageRating: rating.averageRating,
+          },
+        },
+      )
+      .exec();
+  }
 }
