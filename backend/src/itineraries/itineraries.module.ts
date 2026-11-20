@@ -18,6 +18,8 @@ import { ItinerariesService } from './itineraries.service';
 import { ItineraryBookingsController } from './itinerary-bookings.controller';
 import { ItineraryBookingsService } from './itinerary-bookings.service';
 import { ItineraryFlightsController } from './itinerary-flights.controller';
+import { ItineraryPdfController } from './itinerary-pdf.controller';
+import { ItineraryPdfService } from './itinerary-pdf.service';
 import { ItineraryFlightsService } from './itinerary-flights.service';
 import { ItineraryHotelsController } from './itinerary-hotels.controller';
 import { ItineraryHotelsService } from './itinerary-hotels.service';
@@ -48,8 +50,8 @@ import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
     FlightBookingsModule,
     HotelBookingsModule,
   ],
-  // ItineraryHotelsController, ItineraryFlightsController and
-  // ItineraryBookingsController are after
+  // ItineraryHotelsController, ItineraryFlightsController,
+  // ItineraryBookingsController and ItineraryPdfController are after
   // PublicItinerariesController, so the routes under /itineraries/public/
   // are matched first, as before ITN-25.
   controllers: [
@@ -61,6 +63,7 @@ import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
     ItineraryHotelsController,
     ItineraryFlightsController,
     ItineraryBookingsController,
+    ItineraryPdfController,
   ],
   providers: [
     ItinerariesService,
@@ -72,6 +75,7 @@ import { Itinerary, ItinerarySchema } from './models/itinerary.schema';
     ItineraryHotelsService,
     ItineraryFlightsService,
     ItineraryBookingsService,
+    ItineraryPdfService,
   ],
   // PublicItinerariesService: the public author page of the blog (BLG-12).
   exports: [ItinerariesService, PublicItinerariesService],

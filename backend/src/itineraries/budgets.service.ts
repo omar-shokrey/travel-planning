@@ -189,9 +189,10 @@ export class BudgetsService {
   /**
    * ITN-18: the user's preferred currency (ACC-09), USD (PAY-04) when there
    * is none, and the rates. The rates never fail a request: without them
-   * every converted amount is null.
+   * every converted amount is null. Also used by the PDF export (ITN-28), so
+   * the PDF converts exactly as the budget summary does.
    */
-  private async conversionFor(userId: string): Promise<SummaryConversion> {
+  async conversionFor(userId: string): Promise<SummaryConversion> {
     const user = await this.usersService.findEntityById(userId);
     const currency = user?.preferredCurrency ?? PLATFORM_CURRENCY;
     return { currency, rates: await this.exchangeRates.latest() };
