@@ -5,6 +5,7 @@ import { Flight, FlightSchema } from '../flights/models/flight.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { FlightBookingConfirmationService } from './flight-booking-confirmation.service';
 import { FlightBookingETicketService } from './flight-booking-e-ticket.service';
+import { FlightBookingCompletionService } from './flight-booking-completion.service';
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
 import { FlightBookingsController } from './flight-bookings.controller';
 import { FlightBookingsService } from './flight-bookings.service';
@@ -36,6 +37,8 @@ import {
     FlightBookingExpiryService,
     FlightBookingConfirmationService,
     FlightBookingETicketService,
+    // GEN-11: the completion job (Confirmed -> Completed).
+    FlightBookingCompletionService,
   ],
   // FlightBookingsService: the owner lookup and the policy acceptance for the
   // payments module (PAY-02). The payments module imports this one, never the
