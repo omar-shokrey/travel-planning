@@ -680,6 +680,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           activities: [],
           budgetEntries: [],
           transportCosts: [],
+          linkedBookings: [],
         },
         {
           id: expect.stringMatching(/^[0-9a-f]{24}$/),
@@ -689,6 +690,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           activities: [],
           budgetEntries: [],
           transportCosts: [],
+          linkedBookings: [],
         },
         {
           id: expect.stringMatching(/^[0-9a-f]{24}$/),
@@ -698,6 +700,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           activities: [],
           budgetEntries: [],
           transportCosts: [],
+          linkedBookings: [],
         },
       ]);
     });
@@ -839,6 +842,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           activities: [],
           budgetEntries: [],
           transportCosts: [],
+          linkedBookings: [],
         },
         {
           id: dayIds[1],
@@ -849,6 +853,7 @@ describe('Itineraries (e2e, ITN-01, ITN-03, ITN-05, ITN-20)', () => {
           activities: [],
           budgetEntries: [],
           transportCosts: [],
+          linkedBookings: [],
         },
       ]);
     });
