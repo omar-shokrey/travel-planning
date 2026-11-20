@@ -42,5 +42,15 @@ export const REVIEW_EXISTS_MESSAGE =
 export const REVIEW_NOT_FOUND_MESSAGE = 'Review not found';
 export const REVIEW_UPDATE_EMPTY_MESSAGE = 'Send a rating or a text to change';
 
+/**
+ * HTL-26: a moderator's reply to a review. The workbook gives no limit for a
+ * reply, so it has the limit of a review's text.
+ */
+export const REPLY_TEXT_MAX_LENGTH = REVIEW_TEXT_MAX_LENGTH;
+
+/** HTL-26: the answer to a second reply to the same review. */
+export const REVIEW_REPLY_EXISTS_MESSAGE =
+  'This review already has a reply: a review gets one reply only';
+
 /** HTL-23: how many times the hotel's rating is recomputed when it changed in between. */
 export const RATING_RECOMPUTE_ATTEMPTS = 3;

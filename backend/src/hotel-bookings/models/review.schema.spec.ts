@@ -46,12 +46,53 @@ describe('Review schema (HTL-23)', () => {
     expect(invalidPaths(review(fields))).toContain(path);
   });
 
-  it("has one review per reservation and the index of a hotel's reviews, newest first", () => {
-    expect(ReviewSchema.indexes()).toEqual(
-      expect.arrayContaining([
-        [{ bookingId: 1 }, { unique: true }],
-        [{ hotelId: 1, createdAt: -1 }, {}],
-      ]),
-    );
+  it("has one review per reservation and the index of a hotel's reviews, newest first, and no other index", () => {
+    expect(ReviewSchema.indexes()).toEqual([
+      [{ bookingId: 1 }, { unique: true }],
+      [{ hotelId: 1, createdAt: -1 }, {}],
+    ]);
+  });
+});
+
+describe('Review schema: the reply (HTL-26)', () => {
+  const reply = (fields: Record<string, unknown> = {}) => ({
+    text: 'Thank you for your stay.',
+    repliedAt: new Date('2027-06-22T09:15:00.000Z'),
+    moderatorId: new Types.ObjectId(),
+    ...fields,
+  });
+
+  it('has no reply by default', () => {
+    expect(review().reply).toBeUndefined();
+  });
+
+  it('keeps a reply with its text, time and moderator, trims the text and has no _id of its own', () => {
+    const moderatorId = new Types.ObjectId();
+    const doc = review({ reply: reply({ text: '  Thanks!  ', moderatorId }) });
+
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.reply?.text).toBe('Thanks!');
+    expect(doc.reply?.repliedAt.toISOString()).toBe('2027-06-22T09:15:00.000Z');
+    expect(doc.reply?.moderatorId.toString()).toBe(moderatorId.toString());
+    expect(doc.toObject().reply).not.toHaveProperty('_id');
+  });
+
+  it('accepts a reply of 1 and of 1000 characters', () => {
+    expect(
+      review({ reply: reply({ text: 'a' }) }).validateSync(),
+    ).toBeUndefined();
+    expect(
+      review({ reply: reply({ text: 'a'.repeat(1000) }) }).validateSync(),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    ['a text of 1001 characters', 'reply.text', { text: 'a'.repeat(1001) }],
+    ['a text of spaces only', 'reply.text', { text: '   ' }],
+    ['no text', 'reply.text', { text: undefined }],
+    ['no time', 'reply.repliedAt', { repliedAt: undefined }],
+    ['no moderator', 'reply.moderatorId', { moderatorId: undefined }],
+  ])('refuses a reply with %s (%s)', (_label, path, fields) => {
+    expect(invalidPaths(review({ reply: reply(fields) }))).toContain(path);
   });
 });

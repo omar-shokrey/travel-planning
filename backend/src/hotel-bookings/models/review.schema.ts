@@ -6,12 +6,14 @@ import {
   REVIEW_RATING_MIN,
   REVIEW_TEXT_MAX_LENGTH,
 } from '../hotel-bookings.constants';
+import { ReviewReply, ReviewReplySchema } from './review-reply.schema';
 
 /**
  * HTL-23: one rating, with an optional text, of a completed hotel
  * reservation. It follows `REVIEW` of the data model in
  * `specs/travel-platform.md`. The unique `bookingId` makes it one review per
- * reservation, whatever the number of rooms.
+ * reservation, whatever the number of rooms. HTL-26 adds the moderator's
+ * optional `reply`.
  */
 @Schema({ collection: 'reviews', timestamps: true })
 export class Review {
@@ -47,6 +49,10 @@ export class Review {
     default: ReviewModeration.Visible,
   })
   moderation: ReviewModeration;
+
+  /** HTL-26: the hotel moderator's reply, once there is one. */
+  @Prop({ type: ReviewReplySchema })
+  reply?: ReviewReply;
 
   createdAt: Date;
   updatedAt: Date;
