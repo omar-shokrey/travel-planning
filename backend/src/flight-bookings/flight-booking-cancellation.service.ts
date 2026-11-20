@@ -8,6 +8,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { refundPercentFor } from '../common/cancellation-tiers';
 import { FlightSeatHoldsService } from '../flights/flight-seat-holds.service';
+import { FlightStatus } from '../flights/models/flight-status.enum';
 import { Flight } from '../flights/models/flight.schema';
 import { BookingType } from '../payments/enums/booking-type.enum';
 import { RefundReason } from '../payments/refunds/enums/refund-reason.enum';
@@ -21,6 +22,7 @@ import { CancelledBy } from './enums/cancelled-by.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import {
   DEPARTED_MESSAGE,
+  FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE,
   NOT_CANCELLABLE_MESSAGE,
   REFUND_CHANGED_MESSAGE,
 } from './flight-bookings.constants';
@@ -179,12 +181,16 @@ export class FlightBookingCancellationService {
     }
     const first = await this.flights
       .findById(booking.segments[0]?.flightId)
-      .select('departureAt')
+      .select('departureAt status')
       .lean()
       .exec();
     // A flight that no longer exists cannot be checked: it counts as departed.
     if (!first || first.departureAt.getTime() <= now.getTime()) {
       throw new ConflictException(DEPARTED_MESSAGE);
+    }
+    // FLT-06: the airline's cancellation cancels it with a full refund.
+    if (first.status === FlightStatus.Cancelled) {
+      throw new ConflictException(FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE);
     }
     const daysRemaining = Math.floor(
       (first.departureAt.getTime() - now.getTime()) / DAY_MS,

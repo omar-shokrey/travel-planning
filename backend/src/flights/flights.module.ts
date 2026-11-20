@@ -71,6 +71,8 @@ import { FlightsService } from './flights.service';
   // FlightSearchService: flights from an itinerary (ITN-26).
   exports: [
     AirlinesService,
+    // FLT-06: the flight cancellation, called by the booking module's cascade.
+    FlightsService,
     FlightResponsesService,
     FlightSeatHoldsService,
     FlightSearchService,
