@@ -225,7 +225,7 @@ export class AdminController {
   @ApiOperation({
     summary: 'Deactivate a hotel or airline (ACC-15)',
     description:
-      'Admin only. Sets `active: false` on the hotel or airline: it is hidden from search and cannot be booked, while its existing confirmed bookings remain valid. Its moderator accounts are not suspended (that is PATCH /api/admin/accounts/:id/suspend); each of them gets an in-app notification.',
+      'Admin only. Sets `active: false` on the hotel or airline: it is hidden from search and cannot be booked, while its existing confirmed bookings remain valid. Its moderator accounts are not suspended (that is PATCH /api/admin/accounts/:id/suspend). Its moderators and the travellers who have a confirmed booking with it that is not over yet each get one in-app notification, with no link. Nothing is cancelled or refunded: a hold taken before the deactivation can still be paid, while new holds and reservations are refused.',
   })
   @ApiParam({ name: 'type', enum: ProviderType, example: ProviderType.Hotel })
   @ApiParam({

@@ -27,6 +27,7 @@ import {
   PROVIDER_NOT_FOUND_MESSAGE,
   PROVIDER_STATUS_CHANGED_MESSAGE,
   providerDeactivatedNotification,
+  providerDeactivatedTravellerNotification,
 } from './admin.constants';
 import { AdminService } from './admin.service';
 import { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
@@ -34,6 +35,10 @@ import type { AirlinesService } from '../flights/airlines.service';
 import type { HotelsService } from '../hotels/hotels.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import type { NotificationsService } from '../notifications/notifications.service';
+import { NOTIFICATION_MESSAGE_MAX_LENGTH } from '../notifications/notifications.constants';
+import type { FlightBookingsService } from '../flight-bookings/flight-bookings.service';
+import type { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service';
+import { HOTEL_NAME_MAX_LENGTH } from '../hotels/hotels.constants';
 import { ProviderType } from '../common/enums/provider-type.enum';
 
 const accountId = '6740f1c2a4b5c6d7e8f90123';
@@ -92,6 +97,13 @@ function setup(role: Role = Role.User, status: UserStatus = UserStatus.Active) {
     record: jest.fn().mockResolvedValue(undefined),
     list: jest.fn().mockResolvedValue({ items: [], total: 0 }),
   };
+  // ACC-15: the travellers of a deactivated provider; by default nobody.
+  const flightBookings = {
+    findTravellerIdsOfAirline: jest.fn().mockResolvedValue([]),
+  };
+  const hotelBookings = {
+    findTravellerIdsOfHotel: jest.fn().mockResolvedValue([]),
+  };
   const service = new AdminService(
     usersService as unknown as UsersService,
     sessions as unknown as SessionsService,
@@ -99,6 +111,8 @@ function setup(role: Role = Role.User, status: UserStatus = UserStatus.Active) {
     hotels as unknown as HotelsService,
     notifications as unknown as NotificationsService,
     audit as unknown as AuditService,
+    flightBookings as unknown as FlightBookingsService,
+    hotelBookings as unknown as HotelBookingsService,
   );
   return {
     usersService,
@@ -107,6 +121,8 @@ function setup(role: Role = Role.User, status: UserStatus = UserStatus.Active) {
     hotels,
     notifications,
     audit,
+    flightBookings,
+    hotelBookings,
     service,
   };
 }
@@ -882,6 +898,7 @@ describe('AdminService', () => {
       );
 
       expect(result).toMatchObject({ type: 'hotel', active: false });
+      // No traveller by default, so no notice was sent at all.
       expect(notifications.notifyMany).not.toHaveBeenCalled();
       expect(logError).toHaveBeenCalledTimes(1);
       logError.mockRestore();
@@ -1003,6 +1020,299 @@ describe('AdminService', () => {
         service.deactivateProvider(ProviderType.Hotel, providerId, adminId),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    describe('the travellers of a deactivated provider', () => {
+      const travellerIds = [new Types.ObjectId(), new Types.ObjectId()];
+
+      it('tells the moderators and the travellers of an airline, each with their own text and no link', async () => {
+        const context = setupProvider(ProviderType.Airline, true);
+        context.flightBookings.findTravellerIdsOfAirline.mockResolvedValue(
+          travellerIds,
+        );
+
+        await context.service.deactivateProvider(
+          ProviderType.Airline,
+          providerId,
+          adminId,
+        );
+
+        expect(
+          context.flightBookings.findTravellerIdsOfAirline,
+        ).toHaveBeenCalledWith(providerObjectId, expect.any(Date));
+        expect(
+          context.hotelBookings.findTravellerIdsOfHotel,
+        ).not.toHaveBeenCalled();
+        expect(context.notifications.notifyMany.mock.calls).toEqual([
+          [
+            moderatorIds,
+            NotificationType.ProviderDeactivated,
+            providerDeactivatedNotification(ProviderType.Airline, 'Nile View'),
+          ],
+          [
+            travellerIds,
+            NotificationType.ProviderDeactivated,
+            providerDeactivatedTravellerNotification(
+              ProviderType.Airline,
+              'Nile View',
+            ),
+          ],
+        ]);
+      });
+
+      it('tells the moderators and the travellers of a hotel, each with their own text and no link', async () => {
+        const context = setupProvider(ProviderType.Hotel, true);
+        context.hotelBookings.findTravellerIdsOfHotel.mockResolvedValue(
+          travellerIds,
+        );
+
+        await context.service.deactivateProvider(
+          ProviderType.Hotel,
+          providerId,
+          adminId,
+        );
+
+        expect(
+          context.hotelBookings.findTravellerIdsOfHotel,
+        ).toHaveBeenCalledWith(providerObjectId, expect.any(Date));
+        expect(
+          context.flightBookings.findTravellerIdsOfAirline,
+        ).not.toHaveBeenCalled();
+        expect(context.notifications.notifyMany.mock.calls).toEqual([
+          [
+            moderatorIds,
+            NotificationType.ProviderDeactivated,
+            providerDeactivatedNotification(ProviderType.Hotel, 'Nile View'),
+          ],
+          [
+            travellerIds,
+            NotificationType.ProviderDeactivated,
+            providerDeactivatedTravellerNotification(
+              ProviderType.Hotel,
+              'Nile View',
+            ),
+          ],
+        ]);
+      });
+
+      it("sends only the moderators' notice when no traveller is affected", async () => {
+        const { notifications, service } = setupProvider(
+          ProviderType.Hotel,
+          true,
+        );
+
+        await service.deactivateProvider(
+          ProviderType.Hotel,
+          providerId,
+          adminId,
+        );
+
+        expect(notifications.notifyMany.mock.calls).toEqual([
+          [
+            moderatorIds,
+            NotificationType.ProviderDeactivated,
+            providerDeactivatedNotification(ProviderType.Hotel, 'Nile View'),
+          ],
+        ]);
+      });
+
+      it('still tells the moderators, answers, logs and records when the traveller lookup fails', async () => {
+        const context = setupProvider(ProviderType.Airline, true);
+        context.flightBookings.findTravellerIdsOfAirline.mockRejectedValue(
+          new Error('database down'),
+        );
+        const logError = jest
+          .spyOn(Logger.prototype, 'error')
+          .mockImplementation();
+
+        const result = await context.service.deactivateProvider(
+          ProviderType.Airline,
+          providerId,
+          adminId,
+        );
+
+        expect(result).toMatchObject({ type: 'airline', active: false });
+        expect(context.notifications.notifyMany.mock.calls).toEqual([
+          [
+            moderatorIds,
+            NotificationType.ProviderDeactivated,
+            providerDeactivatedNotification(ProviderType.Airline, 'Nile View'),
+          ],
+        ]);
+        expect(logError).toHaveBeenCalledTimes(1);
+        expect(context.audit.record).toHaveBeenCalledTimes(1);
+        logError.mockRestore();
+      });
+
+      it('still tells the travellers when the moderator lookup fails', async () => {
+        const context = setupProvider(ProviderType.Hotel, true);
+        context.findModeratorIdsOfProvider.mockRejectedValue(
+          new Error('database down'),
+        );
+        context.hotelBookings.findTravellerIdsOfHotel.mockResolvedValue(
+          travellerIds,
+        );
+        const logError = jest
+          .spyOn(Logger.prototype, 'error')
+          .mockImplementation();
+
+        const result = await context.service.deactivateProvider(
+          ProviderType.Hotel,
+          providerId,
+          adminId,
+        );
+
+        expect(result).toMatchObject({ type: 'hotel', active: false });
+        expect(context.notifications.notifyMany.mock.calls).toEqual([
+          [
+            travellerIds,
+            NotificationType.ProviderDeactivated,
+            providerDeactivatedTravellerNotification(
+              ProviderType.Hotel,
+              'Nile View',
+            ),
+          ],
+        ]);
+        expect(logError).toHaveBeenCalledTimes(1);
+        expect(context.audit.record).toHaveBeenCalledTimes(1);
+        logError.mockRestore();
+      });
+
+      it('logs the type and the provider id, never the user ids or the notice text', async () => {
+        const context = setupProvider(ProviderType.Hotel, true);
+        context.hotelBookings.findTravellerIdsOfHotel.mockResolvedValue(
+          travellerIds,
+        );
+        context.notifications.notifyMany.mockRejectedValue(
+          new Error('insert failed'),
+        );
+        const logError = jest
+          .spyOn(Logger.prototype, 'error')
+          .mockImplementation();
+
+        await context.service.deactivateProvider(
+          ProviderType.Hotel,
+          providerId,
+          adminId,
+        );
+
+        const messages = logError.mock.calls.map((call) => String(call[0]));
+        expect(messages).toHaveLength(2);
+        for (const message of messages) {
+          expect(message).toContain(`hotel ${providerId}`);
+          expect(message).not.toContain('Nile View');
+          for (const userId of [...moderatorIds, ...travellerIds]) {
+            expect(message).not.toContain(userId.toString());
+          }
+        }
+        logError.mockRestore();
+      });
+
+      it.each([
+        ['deactivateProvider', false],
+        ['reactivateProvider', true],
+      ] as const)(
+        'looks up nobody, tells nobody and records nothing when %s answers 409',
+        async (action, active) => {
+          const context = setupProvider(ProviderType.Hotel, active);
+
+          await expect(
+            context.service[action](ProviderType.Hotel, providerId, adminId),
+          ).rejects.toBeInstanceOf(ConflictException);
+          expect(context.findModeratorIdsOfProvider).not.toHaveBeenCalled();
+          expect(
+            context.hotelBookings.findTravellerIdsOfHotel,
+          ).not.toHaveBeenCalled();
+          expect(context.notifications.notifyMany).not.toHaveBeenCalled();
+          expect(context.audit.record).not.toHaveBeenCalled();
+        },
+      );
+
+      it('looks up nobody, tells nobody and records nothing when another request changed it first', async () => {
+        const context = setupProvider(ProviderType.Airline, true);
+        context.setActive.mockResolvedValue(null);
+
+        await expect(
+          context.service.deactivateProvider(
+            ProviderType.Airline,
+            providerId,
+            adminId,
+          ),
+        ).rejects.toThrow(PROVIDER_STATUS_CHANGED_MESSAGE);
+        expect(context.findModeratorIdsOfProvider).not.toHaveBeenCalled();
+        expect(
+          context.flightBookings.findTravellerIdsOfAirline,
+        ).not.toHaveBeenCalled();
+        expect(context.notifications.notifyMany).not.toHaveBeenCalled();
+        expect(context.audit.record).not.toHaveBeenCalled();
+      });
+
+      it('looks up nobody, tells nobody and records nothing on a 404', async () => {
+        const context = setupProvider(ProviderType.Airline, true);
+        context.owner.findEntityOrThrow.mockRejectedValue(
+          new NotFoundException('Airline not found'),
+        );
+
+        await expect(
+          context.service.deactivateProvider(
+            ProviderType.Airline,
+            providerId,
+            adminId,
+          ),
+        ).rejects.toBeInstanceOf(NotFoundException);
+        expect(context.findModeratorIdsOfProvider).not.toHaveBeenCalled();
+        expect(
+          context.flightBookings.findTravellerIdsOfAirline,
+        ).not.toHaveBeenCalled();
+        expect(context.notifications.notifyMany).not.toHaveBeenCalled();
+        expect(context.audit.record).not.toHaveBeenCalled();
+      });
+
+      it.each([ProviderType.Airline, ProviderType.Hotel])(
+        'reactivating a %s looks up and tells nobody',
+        async (type) => {
+          const context = setupProvider(type, false);
+
+          await context.service.reactivateProvider(type, providerId, adminId);
+
+          expect(context.findModeratorIdsOfProvider).not.toHaveBeenCalled();
+          expect(
+            context.flightBookings.findTravellerIdsOfAirline,
+          ).not.toHaveBeenCalled();
+          expect(
+            context.hotelBookings.findTravellerIdsOfHotel,
+          ).not.toHaveBeenCalled();
+          expect(context.notifications.notifyMany).not.toHaveBeenCalled();
+        },
+      );
+
+      it.each([ProviderType.Airline, ProviderType.Hotel])(
+        "words the %s travellers' notice: booking valid, nothing cancelled or refunded, no later notice",
+        (type) => {
+          const text = providerDeactivatedTravellerNotification(
+            type,
+            'Nile View',
+          );
+
+          expect(text).toBe(
+            `The ${type} "Nile View" was deactivated by an administrator. Your confirmed booking with it remains valid and nothing is cancelled or refunded.`,
+          );
+          expect(text).not.toMatch(
+            /until it is reactivated|will be told|we will/i,
+          );
+        },
+      );
+
+      it("keeps the longest travellers' notice within the notification limit", () => {
+        const longest = providerDeactivatedTravellerNotification(
+          ProviderType.Airline,
+          'x'.repeat(HOTEL_NAME_MAX_LENGTH),
+        );
+
+        expect(longest.length).toBeLessThanOrEqual(
+          NOTIFICATION_MESSAGE_MAX_LENGTH,
+        );
+      });
     });
 
     it('passes on the 404 of a provider that does not exist', async () => {

@@ -2,7 +2,9 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { BlogModule } from '../blog/blog.module';
+import { FlightBookingsModule } from '../flight-bookings/flight-bookings.module';
 import { FlightsModule } from '../flights/flights.module';
+import { HotelBookingsModule } from '../hotel-bookings/hotel-bookings.module';
 import { HotelsModule } from '../hotels/hotels.module';
 import { ItinerariesModule } from '../itineraries/itineraries.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -28,7 +30,12 @@ import { AdminService } from './admin.service';
     AuditModule,
     AuthModule,
     BlogModule,
+    // FlightBookingsModule and HotelBookingsModule to find the travellers
+    // with a confirmed, not yet over booking of a deactivated airline or
+    // hotel, who are notified (ACC-15). Neither imports AdminModule.
+    FlightBookingsModule,
     FlightsModule,
+    HotelBookingsModule,
     HotelsModule,
     ItinerariesModule,
     // NotificationsService: a suspended account (ACC-16, ACC-15) and the
