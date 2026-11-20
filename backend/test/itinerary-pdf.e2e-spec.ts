@@ -9,6 +9,7 @@ import { ProviderType } from './../src/common/enums/provider-type.enum';
 import { Role } from './../src/common/enums/role.enum';
 import { formatMoneyList } from './../src/itineraries/itinerary-pdf';
 import { User } from './../src/users/models/user.schema';
+import { deleteAuditLogsOf } from './support/delete-audit-logs';
 import { deleteSessionsOf } from './support/delete-sessions';
 import {
   createItineraryFixture,
@@ -72,17 +73,12 @@ describe('Export an itinerary as PDF (e2e, ITN-28)', () => {
 
   const http = () => fixture.http();
 
-  const download = (
-    itineraryId: string,
-    // `null` for a guest: an explicit `undefined` would take the default.
-    cookie: string | null = owner.cookie,
-  ) => {
-    const call = http()
+  const download = (itineraryId: string, cookie: string = owner.cookie) =>
+    http()
       .get(`/api/itineraries/${itineraryId}/pdf`)
+      .set('Cookie', cookie)
       .buffer(true)
       .parse(binary);
-    return cookie ? call.set('Cookie', cookie) : call;
-  };
 
   /** A user made straight in the database, with a session (ACC-06). */
   const createStaff = async (role: Role) => {
@@ -116,6 +112,11 @@ describe('Export an itinerary as PDF (e2e, ITN-28)', () => {
   afterAll(async () => {
     // Nothing to clean when the setup itself failed (for example no database).
     if (!fixture) return;
+    // The audit records (GEN-07) of the admin's hide, by the admin's id.
+    await deleteAuditLogsOf(
+      fixture.app,
+      staff.map(({ id }) => id),
+    );
     for (const { id } of staff) {
       await deleteSessionsOf(fixture.app, id);
       await users.findByIdAndDelete(id);

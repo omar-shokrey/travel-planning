@@ -70,7 +70,7 @@ export function formatMoneyList(amounts: readonly MoneyResponseDto[]): string {
 export function pdfFilename(title: string): string {
   const slug = title
     .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
@@ -200,7 +200,7 @@ export function buildItineraryPdfModel(
       group.firstDayNumber === group.lastDayNumber
         ? `day ${group.firstDayNumber}`
         : `days ${group.firstDayNumber}-${group.lastDayNumber}`;
-    return `${city(group.cityId)}, ${dayRange} (${group.startDate} to ${group.endDate}): ${formatMoneyList(group.budgetSubtotal)}`;
+    return `${city(group.cityId)}, ${dayRange} (${group.startDate} to ${group.endDate}): ${formatMoneyList(group.budgetSubtotal)} (in your currency: ${converted(group.budgetSubtotalConverted)})`;
   });
 
   const conversionNotes: string[] = [];
@@ -239,6 +239,9 @@ export function buildItineraryPdfModel(
 /** Space a day heading needs, with its first line, before a page break. */
 const KEEP_WITH_NEXT = 60;
 
+/** Space a list label ("Activities:") needs with its first item. */
+const LABEL_WITH_NEXT = 30;
+
 /**
  * ITN-28: the itinerary as an A4 PDF (pdfkit, built-in fonts), built in
  * memory. Long text wraps inside the margins; a day heading never stays alone
@@ -275,7 +278,7 @@ export function renderItineraryPdf(
       doc.font('Helvetica').fontSize(11);
     };
     const body = (text: string, indent = 0) => {
-      doc.text(toPdfText(text), { indent });
+      doc.text(toPdfText(text), { indent, indentAllLines: true });
     };
     const money = (moneyLine: PdfMoneyLine) => {
       body(
@@ -284,6 +287,7 @@ export function renderItineraryPdf(
     };
     const list = (label: string, items: string[]) => {
       if (items.length === 0) return;
+      keepRoom(LABEL_WITH_NEXT);
       body(`${label}:`);
       for (const item of items) body(`- ${item}`, 12);
     };

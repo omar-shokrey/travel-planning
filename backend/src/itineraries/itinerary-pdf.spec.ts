@@ -253,8 +253,10 @@ describe('buildItineraryPdfModel (ITN-28)', () => {
     const { model } = modelOf(trip());
 
     expect(model.cityGroups).toEqual([
-      'Cairo, day 1 (2026-12-20 to 2026-12-20): EGP 200.00 + USD 535.00',
-      'Luxor, day 2 (2026-12-21 to 2026-12-21): EGP 900.00 + GBP 9.99',
+      // USD 535.00 = EGP 26,750.00, plus EGP 200.00.
+      'Cairo, day 1 (2026-12-20 to 2026-12-20): EGP 200.00 + USD 535.00 (in your currency: EGP 26950.00)',
+      // GBP has no rate, so the subtotal is not converted (ITN-18).
+      'Luxor, day 2 (2026-12-21 to 2026-12-21): EGP 900.00 + GBP 9.99 (in your currency: not available)',
     ]);
   });
 
@@ -387,6 +389,35 @@ describe('renderItineraryPdf (ITN-28)', () => {
     expect(pages).toBeGreaterThan(pageCount(short));
     expect(pdfText(pdf)).toContain(`Page ${pages} of ${pages}`);
     expect(pdf.subarray(-6).toString('latin1')).toContain('%%EOF');
+  });
+
+  it('never ends a page with a day heading: the heading moves to the next page', async () => {
+    const days = Array.from({ length: 40 }, (_, index) => ({
+      cityId: 'cairo',
+      notes: 'Some notes. '.repeat(index % 7),
+      activities: Array.from({ length: index % 5 }, (_, activity) => ({
+        name: `Activity ${activity + 1}`,
+      })),
+    }));
+    const pdf = await renderItineraryPdf(
+      modelOf(trip({ days, dayCount: days.length })).model,
+      { compress: false },
+    );
+
+    // One content stream per page; its last line is the footer.
+    const pages = [
+      ...pdf.toString('latin1').matchAll(/stream\n([\s\S]*?)\nendstream/g),
+    ]
+      .map(([, content]) => pdfText(Buffer.from(content, 'latin1')).split('\n'))
+      .filter((lines) => lines.some((line) => /^Page \d+ of \d+$/.test(line)));
+    expect(pages.length).toBeGreaterThan(1);
+    for (const lines of pages) {
+      const beforeFooter = lines[lines.length - 2] ?? '';
+      expect(beforeFooter).not.toMatch(/^Day \d+ - /);
+      expect(beforeFooter).not.toMatch(
+        /^(Activities|Budget entries|Transport|Booked):$/,
+      );
+    }
   });
 
   it('draws a very long title and a long word without throwing', async () => {
