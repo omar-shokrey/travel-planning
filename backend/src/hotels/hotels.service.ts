@@ -7,7 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { isValidObjectId, type Model } from 'mongoose';
+import { isValidObjectId, type Model, type Types } from 'mongoose';
 import { ProviderType } from '../common/enums/provider-type.enum';
 import { City } from '../reference/models/city.schema';
 import { UploadsService } from '../uploads/uploads.service';
@@ -301,6 +301,27 @@ export class HotelsService {
    */
   findEntityOrThrow(id: string): Promise<HotelDocument> {
     return this.findHotelOrThrow(id);
+  }
+
+  /**
+   * HTL-20: the names of the given hotels, read in one query, by hotel id.
+   * A hotel that no longer exists is simply missing from the map. Active or
+   * not, a reservation always shows the name of its hotel. Read only; never
+   * exposed by a controller.
+   */
+  async findNamesByIds(
+    ids: readonly (string | Types.ObjectId)[],
+  ): Promise<Map<string, string>> {
+    if (ids.length === 0) {
+      return new Map();
+    }
+    const unique = [...new Set(ids.map((id) => id.toString()))];
+    const found = await this.hotels
+      .find({ _id: { $in: unique } })
+      .select('name')
+      .lean()
+      .exec();
+    return new Map(found.map((hotel) => [hotel._id.toString(), hotel.name]));
   }
 
   /**

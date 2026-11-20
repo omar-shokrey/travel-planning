@@ -10,6 +10,8 @@ import { HotelBookingCompletionService } from './hotel-booking-completion.servic
 import { HotelBookingExpiryService } from './hotel-booking-expiry.service';
 import { HotelBookingsController } from './hotel-bookings.controller';
 import { HotelBookingsService } from './hotel-bookings.service';
+import { HotelReservationsController } from './hotel-reservations.controller';
+import { HotelReservationsService } from './hotel-reservations.service';
 import {
   HotelBooking,
   HotelBookingSchema,
@@ -27,12 +29,16 @@ import {
     NotificationsModule,
     // HTL-21: the refund of a cancelled reservation (PAY-03). RefundsModule
     // imports no booking module, so there is no cycle.
+    // HTL-20: the refund shown on the reservation details (PAY-03).
+    // RefundsModule imports no booking module, so there is no cycle.
     RefundsModule,
   ],
   controllers: [
     HotelBookingsController,
     // HTL-21: cancel a hotel reservation.
     HotelBookingCancellationController,
+    // HTL-20: my hotel reservations.
+    HotelReservationsController,
   ],
   // HotelBookingExpiryService: the hold-expiry job (HTL-18).
   // HotelBookingConfirmationService: the confirmation after payment (HTL-17).
@@ -44,6 +50,8 @@ import {
     HotelBookingCompletionService,
     // HTL-21: cancel a hotel reservation.
     HotelBookingCancellationService,
+    // HTL-20: my hotel reservations.
+    HotelReservationsService,
   ],
   // HotelBookingsService: the owner lookup and the policy acceptance for the
   // payments module (PAY-02). The payments module imports this one, never the
