@@ -419,4 +419,26 @@ export class UsersService {
       .exec();
     return moderators.map((moderator) => moderator._id);
   }
+
+  /**
+   * The names that may be shown for these accounts, read in one query:
+   * account id (as a string) to name. A missing or deactivated account (ACC-12)
+   * is not in the map, so the caller shows "Deleted user" for it. A suspended
+   * account keeps its name. Reads only `name`. Used by the public reviews of a
+   * hotel (HTL-24).
+   */
+  async findNamesByIds(
+    ids: readonly Types.ObjectId[],
+  ): Promise<Map<string, string>> {
+    const unique = [...new Map(ids.map((id) => [id.toString(), id])).values()];
+    if (unique.length === 0) return new Map();
+    const accounts = await this.users
+      .find({ _id: { $in: unique }, status: { $ne: UserStatus.Deactivated } })
+      .select('name')
+      .lean<{ _id: Types.ObjectId; name: string }[]>()
+      .exec();
+    return new Map(
+      accounts.map((account) => [account._id.toString(), account.name]),
+    );
+  }
 }

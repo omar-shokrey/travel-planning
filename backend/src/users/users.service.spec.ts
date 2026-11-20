@@ -772,4 +772,57 @@ describe('UsersService', () => {
       ).toEqual([]);
     });
   });
+
+  describe('findNamesByIds (HTL-24)', () => {
+    const first = new Types.ObjectId('6740f1c2a4b5c6d7e8f90a01');
+    const second = new Types.ObjectId('6740f1c2a4b5c6d7e8f90a02');
+
+    function setupNames(found: { _id: Types.ObjectId; name: string }[]) {
+      const exec = jest.fn().mockResolvedValue(found);
+      const lean = jest.fn(() => ({ exec }));
+      const select = jest.fn(() => ({ lean }));
+      const model = { find: jest.fn(() => ({ select })) };
+      const service = new UsersService(model as unknown as Model<User>);
+      return { model, select, service };
+    }
+
+    it('reads only the names of accounts that are not deactivated, in one query', async () => {
+      const { model, select, service } = setupNames([
+        { _id: first, name: 'Mona' },
+      ]);
+
+      const names = await service.findNamesByIds([first, second]);
+
+      expect(model.find).toHaveBeenCalledTimes(1);
+      expect(model.find).toHaveBeenCalledWith({
+        _id: { $in: [first, second] },
+        status: { $ne: UserStatus.Deactivated },
+      });
+      expect(select).toHaveBeenCalledWith('name');
+      expect(names).toEqual(new Map([[first.toString(), 'Mona']]));
+      // A missing or deactivated account is simply not in the map.
+      expect(names.has(second.toString())).toBe(false);
+    });
+
+    it('asks for each account once, however often it is given', async () => {
+      const { model, service } = setupNames([]);
+
+      await service.findNamesByIds([
+        first,
+        new Types.ObjectId(first.toString()),
+        second,
+      ]);
+
+      expect(model.find).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: { $in: [first, second] } }),
+      );
+    });
+
+    it('reads nothing for no ids', async () => {
+      const { model, service } = setupNames([]);
+
+      expect(await service.findNamesByIds([])).toEqual(new Map());
+      expect(model.find).not.toHaveBeenCalled();
+    });
+  });
 });
