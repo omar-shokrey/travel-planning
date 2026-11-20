@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   HttpException,
   HttpStatus,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { hash } from 'bcrypt';
@@ -15,21 +16,33 @@ import {
   type CreateUserInput,
   type UsersService,
 } from '../users/users.service';
+import type { EmailService } from '../notifications/email.service';
+import type { AuthTokenStoreService } from './auth-token-store.service';
 import type { AuthTokensService, TokenClaims } from './auth-tokens.service';
 import { AuthService } from './auth.service';
 import {
   ACCOUNT_SUSPENDED_MESSAGE,
   CURRENT_PASSWORD_INCORRECT_MESSAGE,
+  EMAIL_ALREADY_VERIFIED_MESSAGE,
+  EMAIL_SWITCHED_OFF_MESSAGE,
   INVALID_CREDENTIALS_MESSAGE,
+  INVALID_RESET_LINK_MESSAGE,
+  INVALID_VERIFICATION_LINK_MESSAGE,
   SAME_PASSWORD_MESSAGE,
   LOCKOUT_MINUTES,
   LOGIN_REQUIRED_MESSAGE,
   MAX_FAILED_LOGIN_ATTEMPTS,
+  MAX_PENDING_PASSWORD_RESETS,
+  PASSWORD_RESET_DONE_MESSAGE,
+  PASSWORD_RESET_REQUESTED_MESSAGE,
+  VERIFICATION_EMAIL_SENT_MESSAGE,
+  VERIFICATION_RESEND_TOO_SOON_MESSAGE,
   accountLockedMessage,
 } from './auth.constants';
 import type { ChangePasswordDto } from './dto/change-password.dto';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
+import { AuthTokenType } from './enums/auth-token-type.enum';
 import type { SessionsService } from './sessions.service';
 
 const dto: RegisterDto = {
@@ -75,6 +88,10 @@ function setup(
     status?: UserStatus;
     lockedUntil?: Date;
     mustChangePassword?: boolean;
+    /** Left out unless given, like an account saved before ACC-02. */
+    emailVerified?: boolean;
+    /** Whether the API sends email (SMTP_HOST set). Off by default. */
+    emailEnabled?: boolean;
   } = {},
 ) {
   // A stored user, with the private fields a real document carries.
@@ -88,11 +105,16 @@ function setup(
     failedLoginAttempts: 0,
     lockedUntil: changes.lockedUntil,
     mustChangePassword: changes.mustChangePassword ?? false,
+    ...(changes.emailVerified === undefined
+      ? {}
+      : { emailVerified: changes.emailVerified }),
     createdAt: new Date('2026-11-14T10:00:00.000Z'),
   };
   const usersService = {
     createRegisteredUser: jest.fn().mockResolvedValue(stored),
     findEntityByEmailWithPasswordHash: jest.fn().mockResolvedValue(stored),
+    // The forgot-password lookup (ACC-07), without the hash.
+    findEntityByEmail: jest.fn().mockResolvedValue(stored),
     findEntityById: jest.fn().mockResolvedValue(stored),
     // The lockout (ACC-05): by default no failure reaches the limit.
     recordFailedLogin: jest.fn().mockResolvedValue(null),
@@ -101,6 +123,12 @@ function setup(
     // Change password (ACC-08).
     findEntityByIdWithPasswordHash: jest.fn().mockResolvedValue(stored),
     updatePassword: jest
+      .fn()
+      .mockResolvedValue({ ...stored, mustChangePassword: false }),
+    // Email verification (ACC-02).
+    markEmailVerified: jest.fn().mockResolvedValue(true),
+    // Password reset by email (ACC-07).
+    resetForgottenPassword: jest
       .fn()
       .mockResolvedValue({ ...stored, mustChangePassword: false }),
   };
@@ -118,13 +146,43 @@ function setup(
     revoke: jest.fn().mockResolvedValue(undefined),
     revokeAllOfUser: jest.fn().mockResolvedValue(undefined),
   };
+  // Email (GEN-01-B): the background tasks are kept so a test can run them.
+  const background: { task: () => Promise<void>; what: string }[] = [];
+  const email = {
+    enabled: changes.emailEnabled ?? false,
+    runInBackground: jest.fn((task: () => Promise<void>, what: string) => {
+      background.push({ task, what });
+    }),
+    sendEmailVerification: jest.fn().mockResolvedValue(undefined),
+    sendPasswordReset: jest.fn().mockResolvedValue(undefined),
+  };
+  const runBackground = async () => {
+    for (const { task } of background.splice(0)) await task();
+  };
+  // The one-time tokens (ACC-02).
+  const tokenStore = {
+    issue: jest.fn().mockResolvedValue('a-one-time-token'),
+    issueUnlessRecent: jest.fn().mockResolvedValue('a-one-time-token'),
+    consume: jest.fn().mockResolvedValue(userObjectId),
+  };
   const service = new AuthService(
     usersService as unknown as UsersService,
     tokens as unknown as AuthTokensService,
     sessions as unknown as SessionsService,
+    email as unknown as EmailService,
+    tokenStore as unknown as AuthTokenStoreService,
   );
 
-  return { usersService, tokens, sessions, service };
+  return {
+    usersService,
+    tokens,
+    sessions,
+    email,
+    background,
+    runBackground,
+    tokenStore,
+    service,
+  };
 }
 
 describe('AuthService', () => {
@@ -140,6 +198,7 @@ describe('AuthService', () => {
         email: 'sara@example.com',
         password: 'Passw0rdOK',
         consentAcceptedAt: expect.any(Date),
+        emailVerified: true,
       });
     });
 
@@ -167,6 +226,7 @@ describe('AuthService', () => {
         role: 'user',
         status: 'active',
         mustChangePassword: false,
+        emailVerified: true,
         createdAt: '2026-11-14T10:00:00.000Z',
       });
     });
@@ -177,6 +237,435 @@ describe('AuthService', () => {
       usersService.createRegisteredUser.mockRejectedValueOnce(emailTaken);
 
       await expect(service.register(dto)).rejects.toBe(emailTaken);
+    });
+  });
+
+  describe('register: email verification (ACC-02)', () => {
+    it('with email on, creates the account unverified and emails a 24-hour link in the background', async () => {
+      const { usersService, email, runBackground, tokenStore, service } = setup(
+        { emailEnabled: true, emailVerified: false },
+      );
+
+      const response = await service.register(dto);
+
+      expect(usersService.createRegisteredUser).toHaveBeenCalledWith(
+        expect.objectContaining({ emailVerified: false }),
+      );
+      expect(response.emailVerified).toBe(false);
+      // Nothing is created or sent before the answer.
+      expect(email.runInBackground).toHaveBeenCalledWith(
+        expect.any(Function),
+        'email verification',
+      );
+      expect(tokenStore.issue).not.toHaveBeenCalled();
+      expect(email.sendEmailVerification).not.toHaveBeenCalled();
+
+      await runBackground();
+
+      expect(tokenStore.issue).toHaveBeenCalledWith(
+        userObjectId,
+        AuthTokenType.EmailVerification,
+        24 * 60 * MINUTE,
+      );
+      expect(email.sendEmailVerification).toHaveBeenCalledWith({
+        name: 'Sara Ahmed',
+        email: 'sara@example.com',
+        token: 'a-one-time-token',
+        expiresInHours: 24,
+      });
+    });
+
+    it('with email off, creates the account verified, creates no token and sends nothing', async () => {
+      const { usersService, email, tokenStore, service } = setup({
+        emailEnabled: false,
+      });
+
+      const response = await service.register(dto);
+
+      expect(usersService.createRegisteredUser).toHaveBeenCalledWith(
+        expect.objectContaining({ emailVerified: true }),
+      );
+      expect(response.emailVerified).toBe(true);
+      expect(email.runInBackground).not.toHaveBeenCalled();
+      expect(tokenStore.issue).not.toHaveBeenCalled();
+    });
+
+    it('starts nothing in the background when the account is not created', async () => {
+      const { usersService, email, service } = setup({ emailEnabled: true });
+      usersService.createRegisteredUser.mockRejectedValueOnce(
+        new ConflictException(EMAIL_TAKEN_MESSAGE),
+      );
+
+      await expect(service.register(dto)).rejects.toThrow(EMAIL_TAKEN_MESSAGE);
+      expect(email.runInBackground).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('verifyEmail (ACC-02)', () => {
+    it('consumes the verification token and marks the account of its user as verified', async () => {
+      const { tokenStore, usersService, service } = setup();
+
+      await expect(service.verifyEmail('a-one-time-token')).resolves.toEqual({
+        verified: true,
+      });
+      expect(tokenStore.consume).toHaveBeenCalledWith(
+        'a-one-time-token',
+        AuthTokenType.EmailVerification,
+      );
+      expect(usersService.markEmailVerified).toHaveBeenCalledWith(userObjectId);
+    });
+
+    it('answers 400 with the one message when the token is unknown, expired, used or replaced, and changes no account', async () => {
+      const { tokenStore, usersService, service } = setup();
+      tokenStore.consume.mockResolvedValueOnce(null);
+
+      const result = service.verifyEmail('a-used-token');
+
+      await expect(result).rejects.toBeInstanceOf(BadRequestException);
+      await expect(result).rejects.toThrow(INVALID_VERIFICATION_LINK_MESSAGE);
+      expect(usersService.markEmailVerified).not.toHaveBeenCalled();
+    });
+
+    it('answers the same 400 when the account of the token is gone', async () => {
+      const { usersService, service } = setup();
+      usersService.markEmailVerified.mockResolvedValueOnce(false);
+
+      await expect(service.verifyEmail('a-one-time-token')).rejects.toThrow(
+        INVALID_VERIFICATION_LINK_MESSAGE,
+      );
+    });
+
+    it('logs the account id, never the token, and fails when the account cannot be marked after the token was used', async () => {
+      const { usersService, service } = setup();
+      const failure = new Error('database down');
+      usersService.markEmailVerified.mockRejectedValueOnce(failure);
+      const logged = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+
+      await expect(service.verifyEmail('a-one-time-token')).rejects.toBe(
+        failure,
+      );
+      expect(logged).toHaveBeenCalledTimes(1);
+      const [message] = logged.mock.calls[0] as [string];
+      expect(message).toContain(userObjectId.toString());
+      expect(JSON.stringify(logged.mock.calls)).not.toContain(
+        'a-one-time-token',
+      );
+      logged.mockRestore();
+    });
+  });
+
+  describe('resendVerification (ACC-02)', () => {
+    it('replaces the token before the answer and emails the new link in the background', async () => {
+      const { tokenStore, email, runBackground, service } = setup({
+        emailEnabled: true,
+        emailVerified: false,
+      });
+
+      await expect(
+        service.resendVerification(userObjectId.toString()),
+      ).resolves.toEqual({ message: VERIFICATION_EMAIL_SENT_MESSAGE });
+      expect(tokenStore.issueUnlessRecent).toHaveBeenCalledWith(
+        userObjectId,
+        AuthTokenType.EmailVerification,
+        24 * 60 * MINUTE,
+        MINUTE,
+      );
+      expect(email.sendEmailVerification).not.toHaveBeenCalled();
+
+      await runBackground();
+
+      expect(email.sendEmailVerification).toHaveBeenCalledWith({
+        name: 'Sara Ahmed',
+        email: 'sara@example.com',
+        token: 'a-one-time-token',
+        expiresInHours: 24,
+      });
+    });
+
+    it.each([
+      ['true', true],
+      ['missing (an account saved before ACC-02)', undefined],
+    ])(
+      'answers 409 when emailVerified is %s, and creates no token',
+      async (_label, emailVerified) => {
+        const { tokenStore, service } = setup({
+          emailEnabled: true,
+          emailVerified,
+        });
+
+        const result = service.resendVerification(userObjectId.toString());
+
+        await expect(result).rejects.toBeInstanceOf(ConflictException);
+        await expect(result).rejects.toThrow(EMAIL_ALREADY_VERIFIED_MESSAGE);
+        expect(tokenStore.issueUnlessRecent).not.toHaveBeenCalled();
+      },
+    );
+
+    it('answers 409 "email is switched off" when the API sends no email, and creates no token', async () => {
+      const { tokenStore, email, service } = setup({
+        emailEnabled: false,
+        emailVerified: false,
+      });
+
+      const result = service.resendVerification(userObjectId.toString());
+
+      await expect(result).rejects.toBeInstanceOf(ConflictException);
+      await expect(result).rejects.toThrow(EMAIL_SWITCHED_OFF_MESSAGE);
+      expect(tokenStore.issueUnlessRecent).not.toHaveBeenCalled();
+      expect(email.runInBackground).not.toHaveBeenCalled();
+    });
+
+    it('answers 429 and sends nothing when the last link of the account is less than a minute old', async () => {
+      const { tokenStore, email, service } = setup({
+        emailEnabled: true,
+        emailVerified: false,
+      });
+      tokenStore.issueUnlessRecent.mockResolvedValueOnce(null);
+
+      const result = service.resendVerification(userObjectId.toString());
+
+      await expect(result).rejects.toMatchObject({
+        status: HttpStatus.TOO_MANY_REQUESTS,
+        message: VERIFICATION_RESEND_TOO_SOON_MESSAGE,
+      });
+      expect(email.runInBackground).not.toHaveBeenCalled();
+    });
+
+    it('answers 401 when the account is gone', async () => {
+      const { usersService, service } = setup({ emailEnabled: true });
+      usersService.findEntityById.mockResolvedValueOnce(null);
+
+      await expect(
+        service.resendVerification(userObjectId.toString()),
+      ).rejects.toThrow(LOGIN_REQUIRED_MESSAGE);
+    });
+  });
+
+  describe('forgotPassword (ACC-07)', () => {
+    it('gives the same answer for an existing and an unknown email, before any lookup', () => {
+      const known = setup({ emailEnabled: true });
+      const unknown = setup({ emailEnabled: true });
+      unknown.usersService.findEntityByEmail.mockResolvedValue(null);
+
+      const forKnown = known.service.forgotPassword('sara@example.com');
+      const forUnknown = unknown.service.forgotPassword('nobody@example.com');
+
+      expect(forKnown).toEqual({ message: PASSWORD_RESET_REQUESTED_MESSAGE });
+      expect(forUnknown).toEqual(forKnown);
+      // The answer is ready before anything is read.
+      for (const { usersService, email } of [known, unknown]) {
+        expect(usersService.findEntityByEmail).not.toHaveBeenCalled();
+        expect(email.runInBackground).toHaveBeenCalledWith(
+          expect.any(Function),
+          'password reset',
+        );
+      }
+    });
+
+    it('in the background, looks the account up without its hash and emails an active registered user a 30-minute link', async () => {
+      const { usersService, tokenStore, email, runBackground, service } = setup(
+        { emailEnabled: true },
+      );
+
+      service.forgotPassword('sara@example.com');
+      await runBackground();
+
+      expect(usersService.findEntityByEmail).toHaveBeenCalledWith(
+        'sara@example.com',
+      );
+      expect(
+        usersService.findEntityByEmailWithPasswordHash,
+      ).not.toHaveBeenCalled();
+      expect(tokenStore.issue).toHaveBeenCalledWith(
+        userObjectId,
+        AuthTokenType.PasswordReset,
+        30 * MINUTE,
+      );
+      expect(email.sendPasswordReset).toHaveBeenCalledWith({
+        name: 'Sara Ahmed',
+        email: 'sara@example.com',
+        token: 'a-one-time-token',
+        expiresInMinutes: 30,
+      });
+    });
+
+    it('replaces the token and emails a new link on every request, so a newer request invalidates the older link', async () => {
+      const { tokenStore, email, runBackground, service } = setup({
+        emailEnabled: true,
+      });
+      tokenStore.issue
+        .mockResolvedValueOnce('first-token')
+        .mockResolvedValueOnce('second-token');
+
+      service.forgotPassword('sara@example.com');
+      service.forgotPassword('sara@example.com');
+      await runBackground();
+
+      expect(tokenStore.issue).toHaveBeenCalledTimes(2);
+      expect(
+        email.sendPasswordReset.mock.calls.map(
+          ([request]: [{ token: string }]) => request.token,
+        ),
+      ).toEqual(['first-token', 'second-token']);
+    });
+
+    it.each([
+      ['an unknown email', null],
+      ['a suspended account', { status: UserStatus.Suspended }],
+      ['a deactivated account', { status: UserStatus.Deactivated }],
+      ['an airline moderator', { role: Role.AirlineModerator }],
+      ['a hotel moderator', { role: Role.HotelModerator }],
+      ['an administrator', { role: Role.Admin }],
+    ])('creates no token and sends nothing for %s', async (_label, change) => {
+      const { usersService, tokenStore, email, runBackground, service } = setup(
+        { emailEnabled: true },
+      );
+      const found = (await usersService.findEntityByEmail()) as object;
+      usersService.findEntityByEmail.mockResolvedValue(
+        change === null ? null : { ...found, ...change },
+      );
+
+      expect(service.forgotPassword('sara@example.com')).toEqual({
+        message: PASSWORD_RESET_REQUESTED_MESSAGE,
+      });
+      await runBackground();
+
+      expect(tokenStore.issue).not.toHaveBeenCalled();
+      expect(email.sendPasswordReset).not.toHaveBeenCalled();
+    });
+
+    it(`works on at most ${MAX_PENDING_PASSWORD_RESETS} requests at once in the background, and answers the others the same`, async () => {
+      const { email, runBackground, background, service } = setup({
+        emailEnabled: true,
+      });
+
+      const answers = Array.from(
+        { length: MAX_PENDING_PASSWORD_RESETS + 3 },
+        () => service.forgotPassword('sara@example.com'),
+      );
+
+      expect(new Set(answers.map((answer) => answer.message))).toEqual(
+        new Set([PASSWORD_RESET_REQUESTED_MESSAGE]),
+      );
+      expect(background).toHaveLength(MAX_PENDING_PASSWORD_RESETS);
+
+      // Once they are done, a new request is worked on again.
+      await runBackground();
+      service.forgotPassword('sara@example.com');
+      expect(email.runInBackground).toHaveBeenCalledTimes(
+        MAX_PENDING_PASSWORD_RESETS + 1,
+      );
+    });
+
+    it('frees its place in the background work when the lookup fails', async () => {
+      const { usersService, background, service } = setup({
+        emailEnabled: true,
+      });
+      usersService.findEntityByEmail.mockRejectedValue(new Error('down'));
+
+      for (let i = 0; i < MAX_PENDING_PASSWORD_RESETS; i++) {
+        service.forgotPassword('sara@example.com');
+      }
+      for (const { task } of background.splice(0)) {
+        await expect(task()).rejects.toThrow('down');
+      }
+      service.forgotPassword('sara@example.com');
+
+      expect(background).toHaveLength(1);
+    });
+
+    it('with email off, gives the same answer and starts nothing', () => {
+      const { usersService, email, service } = setup({ emailEnabled: false });
+
+      expect(service.forgotPassword('sara@example.com')).toEqual({
+        message: PASSWORD_RESET_REQUESTED_MESSAGE,
+      });
+      expect(email.runInBackground).not.toHaveBeenCalled();
+      expect(usersService.findEntityByEmail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resetPassword (ACC-07)', () => {
+    const reset = { token: 'a-one-time-token', newPassword: 'N3wPassword' };
+
+    it('consumes the token, stores the new password and then ends every session of the account', async () => {
+      const { tokenStore, usersService, sessions, service } = setup();
+
+      await expect(service.resetPassword(reset)).resolves.toEqual({
+        message: PASSWORD_RESET_DONE_MESSAGE,
+      });
+      expect(tokenStore.consume).toHaveBeenCalledWith(
+        'a-one-time-token',
+        AuthTokenType.PasswordReset,
+      );
+      expect(usersService.resetForgottenPassword).toHaveBeenCalledWith(
+        userObjectId,
+        'N3wPassword',
+      );
+      expect(sessions.revokeAllOfUser).toHaveBeenCalledWith(
+        userObjectId.toString(),
+        expect.any(Date),
+      );
+      // No session is kept: the person is not logged in.
+      expect(sessions.revokeAllOfUser.mock.calls[0]).toHaveLength(2);
+      const order = [
+        tokenStore.consume.mock.invocationCallOrder[0],
+        usersService.resetForgottenPassword.mock.invocationCallOrder[0],
+        sessions.revokeAllOfUser.mock.invocationCallOrder[0],
+      ];
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+    });
+
+    it('logs nobody in: it issues no token and creates no session', async () => {
+      const { tokens, sessions, service } = setup();
+
+      await service.resetPassword(reset);
+
+      expect(tokens.issueTokens).not.toHaveBeenCalled();
+      expect(sessions.create).not.toHaveBeenCalled();
+    });
+
+    it('answers 400 with the one message when the token is unknown, expired, used or replaced, and changes nothing', async () => {
+      const { tokenStore, usersService, sessions, service } = setup();
+      tokenStore.consume.mockResolvedValueOnce(null);
+
+      const result = service.resetPassword(reset);
+
+      await expect(result).rejects.toBeInstanceOf(BadRequestException);
+      await expect(result).rejects.toThrow(INVALID_RESET_LINK_MESSAGE);
+      expect(usersService.resetForgottenPassword).not.toHaveBeenCalled();
+      expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+    });
+
+    it('answers the same 400 when the account is no longer an active registered user, and ends no session', async () => {
+      const { usersService, sessions, service } = setup();
+      usersService.resetForgottenPassword.mockResolvedValueOnce(null);
+
+      await expect(service.resetPassword(reset)).rejects.toThrow(
+        INVALID_RESET_LINK_MESSAGE,
+      );
+      expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+    });
+
+    it('logs the account id, never the token or the password, and fails when the sessions cannot be ended', async () => {
+      const { sessions, service } = setup();
+      const failure = new Error('database down');
+      sessions.revokeAllOfUser.mockRejectedValueOnce(failure);
+      const logged = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+
+      await expect(service.resetPassword(reset)).rejects.toBe(failure);
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect((logged.mock.calls[0] as [string])[0]).toContain(
+        userObjectId.toString(),
+      );
+      const text = JSON.stringify(logged.mock.calls);
+      expect(text).not.toContain('a-one-time-token');
+      expect(text).not.toContain('N3wPassword');
+      logged.mockRestore();
     });
   });
 
@@ -208,6 +697,7 @@ describe('AuthService', () => {
         role: 'user',
         status: 'active',
         mustChangePassword: false,
+        emailVerified: true,
         createdAt: '2026-11-14T10:00:00.000Z',
       });
     });

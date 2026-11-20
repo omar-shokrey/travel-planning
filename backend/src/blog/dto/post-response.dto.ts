@@ -33,6 +33,15 @@ export class PostResponseDto {
 
   @ApiProperty({
     type: String,
+    nullable: true,
+    example: '6741c0ffee0ddba11ad0b0b0',
+    description:
+      'BLG-13: the id of the itinerary attached to the post, or `null` when none is',
+  })
+  itineraryId: string | null;
+
+  @ApiProperty({
+    type: String,
     format: 'date-time',
     example: '2026-11-15T10:00:00.000Z',
   })

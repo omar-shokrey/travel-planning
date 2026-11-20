@@ -1,6 +1,6 @@
 # notifications
 
-In-app notifications (GEN-01): the unread count, the notification list and "mark as read", for booking confirmation, cancellation and refund, flight schedule change, and account or provider suspension. Each notification is also sent by email when SMTP is configured (GEN-01-B), and new moderators get an invitation email. Owns the `notifications` collection.
+In-app notifications (GEN-01): the unread count, the notification list and "mark as read", for booking confirmation, cancellation and refund, flight schedule change, and account or provider suspension. Each notification is also sent by email when SMTP is configured (GEN-01-B), new moderators get an invitation email, new users get the link that verifies their email address (ACC-02), and a user who forgot their password gets a reset link (ACC-07). Owns the `notifications` collection.
 
 ## Routes
 
@@ -65,12 +65,12 @@ A module that needs another reason adds a value to `NotificationType`.
 
 "The system shall also send the GEN-01 notifications (plus moderator invitations) by email via SMTP, using a test inbox in development." This adds no route and changes no Swagger document.
 
-| File                 | What it does                                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `mail-transport.ts`  | `MAIL_TRANSPORT`: the nodemailer transporter built from the `SMTP_*` settings, or `null` when `SMTP_HOST` is empty |
-| `email.service.ts`   | `EmailService`: sends the notification emails and the moderator invitation, bounded, never throwing                |
-| `email-templates.ts` | Pure functions: the subject and the plain-text body of each email                                                  |
-| `email.constants.ts` | The subject of each `NotificationType`, the invitation subject, the timeouts and the in-flight limit               |
+| File                 | What it does                                                                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `mail-transport.ts`  | `MAIL_TRANSPORT`: the nodemailer transporter built from the `SMTP_*` settings, or `null` when `SMTP_HOST` is empty                         |
+| `email.service.ts`   | `EmailService`: sends the notification emails, the moderator invitation, the verification link and the reset link, bounded, never throwing |
+| `email-templates.ts` | Pure functions: the subject and the plain-text body of each email                                                                          |
+| `email.constants.ts` | The subject of each `NotificationType`, the invitation, verification and reset subjects, the timeouts and the in-flight limit              |
 
 Environment variables (checked at startup in `backend/src/config/env.validation.ts`, listed in `.env.example`): `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` and `MAIL_FROM`; the body links to `FRONTEND_URL`.
 
@@ -88,4 +88,6 @@ then set `SMTP_HOST=localhost` and `SMTP_PORT=1025` in your own `backend/.env` a
 - **Plain text, fixed subjects.** Each `NotificationType` has a fixed subject in `email.constants.ts`. The body is "Hello <name>," + the notification text + a line asking to log in at `FRONTEND_URL` to see the details. No HTML and no deep link: plain text only, and the frontend routes are not fixed. Text a user wrote (a name, a hotel name) only ever goes into the body, never into the subject or a header, and `to` is always the stored address of an account, so nothing can add a header or a recipient. `MAIL_FROM` is checked as one sender at startup.
 - **Bounded sending.** Each SMTP step (connection, greeting, socket) times out after 5 seconds, at most 5 emails are in flight at once across the whole app (one queue in `EmailService` for every caller, so several notifications at the same moment still share the 5), and one failure never stops the others. With a login on a connection that starts plain (`SMTP_SECURE=false`), STARTTLS is required, so the credentials are never sent unencrypted. A failure is logged once per batch with what was sent, how many of how many failed and nodemailer's error codes (for example `ETIMEDOUT`), never an address, a name, the text or an SMTP credential.
 - **The moderator invitation (ACC-13).** When the admin creates a moderator, `AdminService.createModerator` calls `EmailService.sendModeratorInvitation` in the background once the account is saved: the moderator's name, their role, the login address and the instruction to sign in with the temporary password the administrator gave them and change it at the first login. **The email never contains the password**; the template is not even given it. A failed invitation never fails or delays the creation; it is logged.
+- **The verification link (ACC-02).** `EmailService.sendEmailVerification({ name, email, token, expiresInHours })` sends the email of a new account: the fixed subject "Verify your email address", the link `${FRONTEND_URL}/verify-email?token=<token>` (a trailing slash of `FRONTEND_URL` is dropped, `frontendLink`), how many hours it works (the auth module gives it, 24) and "If you did not register, ignore this email." The auth module creates the token and calls it in the background; the token is in the link only, never in the subject or a log. See the auth README.
+- **The reset link (ACC-07).** `EmailService.sendPasswordReset({ name, email, token, expiresInMinutes })` sends the fixed subject "Reset your password", the link `${FRONTEND_URL}/reset-password?token=<token>`, "This link expires in 30 minutes and works once." and "If you did not ask for this, ignore this email: your password has not changed." It never holds a password. The auth module calls it in the background; see the auth README.
 - **Package:** `nodemailer` 10, which ships its own TypeScript types (so no `@types/nodemailer`).

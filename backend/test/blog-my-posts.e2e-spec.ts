@@ -191,6 +191,7 @@ describe('GET /api/posts/mine (e2e, BLG-03)', () => {
         status: 'published',
         moderation: 'visible',
         publishedAt: expect.stringMatching(/Z$/),
+        itineraryId: null,
         createdAt: expect.stringMatching(/Z$/),
         updatedAt: expect.stringMatching(/Z$/),
         likeCount: 4,

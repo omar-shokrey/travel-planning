@@ -55,6 +55,7 @@ describe('ProfileService', () => {
         role: Role.User,
         status: UserStatus.Active,
         mustChangePassword: false,
+        emailVerified: true,
         phone: '+20 10 1234 5678',
         preferredCurrency: 'EGP',
         createdAt: '2026-11-14T10:00:00.000Z',

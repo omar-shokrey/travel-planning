@@ -20,3 +20,11 @@ export const SEARCH_AUTHORS_MAX_COUNT = 500;
 
 /** BLG-05: a comment is non-empty and at most 500 characters. */
 export const COMMENT_BODY_MAX = 500;
+
+/** BLG-13: an itinerary that is private or hidden by an admin cannot be attached. */
+export const ONLY_PUBLIC_ITINERARY_MESSAGE =
+  'Only a public itinerary can be attached';
+
+/** BLG-13: the 403 for an itinerary of another user. */
+export const OWN_ITINERARY_ONLY_MESSAGE =
+  'You can only attach your own itineraries';

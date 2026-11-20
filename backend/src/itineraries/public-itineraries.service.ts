@@ -25,6 +25,7 @@ import { ItineraryVisibility } from './enums/itinerary-visibility.enum';
 import {
   toItineraryDetailResponse,
   toItineraryResponse,
+  withoutLinkedBookings,
 } from './mappers/itinerary.mapper';
 import { Itinerary, type ItineraryDocument } from './models/itinerary.schema';
 
@@ -40,6 +41,19 @@ export const PUBLICLY_VISIBLE = {
   moderation: ItineraryModeration.Visible,
   authorDeactivated: false,
 } as const;
+
+/**
+ * BLG-13: what a blog post shows of the itinerary attached to it. Only the
+ * fields of a search result's header: never the days, activities, budget,
+ * linked bookings (ITN-27) or the owner id.
+ */
+export interface PublicItinerarySummary {
+  id: string;
+  title: string;
+  countries: string[];
+  startDate: string;
+  dayCount: number;
+}
 
 /** Escapes a keyword so it is matched as plain text, never as a pattern. */
 export function escapeRegExp(text: string): string {
@@ -104,18 +118,45 @@ export class PublicItinerariesService {
     );
   }
 
+  /**
+   * BLG-13, for the blog module (never through a controller): the summary of
+   * an itinerary attached to a post, or `null` when it is not publicly
+   * visible now: private, hidden by an admin (GEN-10), its owner deactivated
+   * (ACC-12) or deleted. One query with the same filter as search and the
+   * public view (`PUBLICLY_VISIBLE`), so they can never disagree.
+   */
+  async findPublicSummary(id: string): Promise<PublicItinerarySummary | null> {
+    const found = await this.itineraries
+      .findOne({ _id: id, ...PUBLICLY_VISIBLE })
+      .select('title countries startDate dayCount')
+      .lean()
+      .exec();
+    if (!found) {
+      return null;
+    }
+    return {
+      id: found._id.toString(),
+      title: found.title,
+      countries: [...found.countries],
+      startDate: found.startDate,
+      dayCount: found.dayCount,
+    };
+  }
+
   /** ITN-21: a public itinerary, read-only, with its author, days, activities and budget. */
   async findPublic(id: string): Promise<PublicItineraryDetailResponseDto> {
     const itinerary = await this.findPublicOrThrow(id);
     const authors = await this.authorsOf([itinerary]);
     return {
-      ...toItineraryDetailResponse(itinerary),
+      // ITN-27, ACC-11: the owner's linked bookings never reach the public.
+      ...toItineraryDetailResponse(withoutLinkedBookings(itinerary)),
       author: this.authorOf(itinerary, authors),
     };
   }
 
   /**
-   * ITN-21: copy a public itinerary for the logged-in user. The clone has all
+   * ITN-21: copy a public itinerary for the logged-in user (never its
+   * linked bookings, ITN-27). The clone has all
    * days, activities, budget entries and transport costs with new ids, is
    * private, credits the original author, and shares nothing with the
    * original, so later changes or a delete of either leave the other alone.
@@ -152,6 +193,8 @@ export class PublicItinerariesService {
           amount: cost.amount,
           currency: cost.currency,
         })),
+        // ITN-27, ACC-11: the author's bookings are never copied.
+        linkedBookings: [],
       })),
       dayCount: source.days.length,
       cloneSource: {

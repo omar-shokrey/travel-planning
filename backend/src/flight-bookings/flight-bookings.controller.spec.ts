@@ -1,6 +1,7 @@
 import { HttpStatus, StreamableFile } from '@nestjs/common';
 import { HTTP_CODE_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
+import { REQUIRE_VERIFIED_EMAIL_KEY } from '../auth/decorators/require-verified-email.decorator';
 import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
 import { ROLES_KEY } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
@@ -253,4 +254,29 @@ describe('FlightBookingsController lists and details (FLT-25)', () => {
       );
     },
   );
+});
+
+describe('FlightBookingsController: a verified email to book (ACC-02)', () => {
+  const flagged = (name: keyof FlightBookingsController): unknown =>
+    new Reflector().get(
+      REQUIRE_VERIFIED_EMAIL_KEY,
+      FlightBookingsController.prototype[name] as () => unknown,
+    );
+
+  it.each(['summarise', 'hold'] as const)(
+    'marks %s, which starts a booking',
+    (name) => {
+      expect(flagged(name)).toBe(true);
+    },
+  );
+
+  it.each([
+    'list',
+    'details',
+    'eTicket',
+    'cancellationPreview',
+    'cancel',
+  ] as const)('leaves %s open to an unverified account', (name) => {
+    expect(flagged(name)).toBeUndefined();
+  });
 });

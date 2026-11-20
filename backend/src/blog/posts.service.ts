@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -11,7 +12,15 @@ import {
   type PaginatedResponse,
 } from '../common/dto/paginated-response.dto';
 import type { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { ItineraryModeration } from '../itineraries/enums/itinerary-moderation.enum';
+import { ItineraryVisibility } from '../itineraries/enums/itinerary-visibility.enum';
+import { ItinerariesService } from '../itineraries/itineraries.service';
 import { UploadsService } from '../uploads/uploads.service';
+import {
+  ONLY_PUBLIC_ITINERARY_MESSAGE,
+  OWN_ITINERARY_ONLY_MESSAGE,
+} from './blog.constants';
+import type { AttachItineraryDto } from './dto/attach-itinerary.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import type { MyPostResponseDto } from './dto/my-post-response.dto';
 import { PostResponseDto } from './dto/post-response.dto';
@@ -37,6 +46,8 @@ export class PostsService {
     private readonly likes: Model<Like>,
     // The image files of a post the author deletes (BLG-10, GEN-08).
     private readonly uploads: UploadsService,
+    // BLG-13: the author's own itinerary to attach to a post.
+    private readonly itineraries: ItinerariesService,
   ) {}
 
   /**
@@ -259,6 +270,57 @@ export class PostsService {
 
     await post.save();
     return toPostResponse(post);
+  }
+
+  /**
+   * BLG-13: attach one of your own public itineraries to your own post, draft
+   * or published, or remove it with `null`. The post: 404, then 403 for
+   * someone else's (as BLG-04). The itinerary: 404, then 403 for someone
+   * else's (`findOwnedOrThrow`, the itineraries convention), then 409 when it
+   * is private or hidden by an admin (GEN-10), since other people read the
+   * post. Removing is always allowed, even when the itinerary is gone or
+   * private. Attaching the itinerary already attached, or removing when none
+   * is, changes nothing. The write is one update by id and author; a post
+   * deleted in the meantime answers 404. What readers see is decided again
+   * on every read of the page (`PostPageService`).
+   */
+  async attachItinerary(
+    id: string,
+    dto: AttachItineraryDto,
+    userId: string,
+  ): Promise<PostResponseDto> {
+    const post = await this.findOwnedOrThrow(id, userId);
+    const itineraryId = dto.itineraryId;
+    if (itineraryId !== null) {
+      const itinerary = await this.itineraries.findOwnedOrThrow(
+        itineraryId,
+        userId,
+        OWN_ITINERARY_ONLY_MESSAGE,
+      );
+      if (
+        itinerary.visibility !== ItineraryVisibility.Public ||
+        itinerary.moderation === ItineraryModeration.Hidden
+      ) {
+        throw new ConflictException(ONLY_PUBLIC_ITINERARY_MESSAGE);
+      }
+    }
+    if ((post.itineraryId?.toString() ?? null) === itineraryId) {
+      return toPostResponse(post);
+    }
+
+    const updated = await this.posts
+      .findOneAndUpdate(
+        { _id: post._id, authorId: post.authorId },
+        itineraryId === null
+          ? { $unset: { itineraryId: 1 } }
+          : { $set: { itineraryId: new Types.ObjectId(itineraryId) } },
+        { returnDocument: 'after' },
+      )
+      .exec();
+    if (!updated) {
+      throw new NotFoundException('Post not found');
+    }
+    return toPostResponse(updated);
   }
 
   /**

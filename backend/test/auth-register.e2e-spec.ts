@@ -75,6 +75,8 @@ describe('POST /api/auth/register (e2e, ACC-01)', () => {
       role: 'user',
       status: 'active',
       mustChangePassword: false,
+      // ACC-02: email is switched off in the e2e runs, so the account is verified.
+      emailVerified: true,
       createdAt: expect.stringMatching(
         /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
       ),

@@ -232,6 +232,7 @@ describe('POST /api/admin/moderators (e2e, ACC-13)', () => {
         role: 'hotel_moderator',
         status: 'active',
         mustChangePassword: true,
+        emailVerified: true,
         assignment: { providerType: 'hotel', providerId: hotelId },
         createdAt: expect.stringMatching(/Z$/),
       });

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
+import { PublicItinerariesService } from '../itineraries/public-itineraries.service';
 import { CommentsService } from './comments.service';
 import type { PostPageQueryDto } from './dto/post-page-query.dto';
 import type { PostPageResponseDto } from './dto/post-page-response.dto';
@@ -11,7 +12,7 @@ import { visiblePublishedPost } from './visible-post.filter';
 
 /** The fields of a post that the page shows. */
 const PAGE_FIELDS =
-  'authorId title body tags images publishedAt likeCount commentCount';
+  'authorId title body tags images publishedAt likeCount commentCount itineraryId';
 
 /** BLG-02: the public page of a published post. */
 @Injectable()
@@ -20,6 +21,8 @@ export class PostPageService {
     @InjectModel(BlogPost.name) private readonly posts: Model<BlogPost>,
     private readonly comments: CommentsService,
     private readonly publishedPosts: PublishedPostsService,
+    // BLG-13: the summary of the itinerary attached to the post.
+    private readonly publicItineraries: PublicItinerariesService,
   ) {}
 
   /**
@@ -34,6 +37,11 @@ export class PostPageService {
    * The names of the post author and of the authors of the comments on the
    * page are then read in one query. A missing or deactivated account is shown
    * as "Deleted user" (the lists do the same).
+   *
+   * BLG-13: at the same time, the summary of the attached itinerary is read
+   * as the public sees it now. It is `null` when none is attached, or when it
+   * is no longer public, hidden by an admin, deleted or its owner is
+   * deactivated (ACC-12): the post itself stays readable.
    */
   async findPage(
     id: string,
@@ -52,9 +60,14 @@ export class PostPageService {
       throw new NotFoundException('Post not found');
     }
 
-    const authorNames = await this.publishedPosts.authorNamesOf([
-      post.authorId,
-      ...comments.comments.map((comment) => comment.authorId),
+    const [authorNames, itinerary] = await Promise.all([
+      this.publishedPosts.authorNamesOf([
+        post.authorId,
+        ...comments.comments.map((comment) => comment.authorId),
+      ]),
+      post.itineraryId
+        ? this.publicItineraries.findPublicSummary(post.itineraryId.toString())
+        : Promise.resolve(null),
     ]);
     return toPostPage(
       post,
@@ -62,6 +75,7 @@ export class PostPageService {
       comments.total,
       pagination,
       authorNames,
+      itinerary,
     );
   }
 }

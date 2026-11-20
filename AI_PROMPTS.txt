@@ -2223,3 +2223,45 @@ Claude added ReviewReply (_id: false, explicit types) on the Review schema, REPL
 Accepted, changed, or rejected:
 Accepted: the design. Changed after the reviewer agent: the e2e 400 tests read the "errors" list of the real error shape instead of "message" (they would have failed), with two more cases (a null text and a number); the DTO spec now uses the app's exception factory; the schema test names say what each case checks; a hidden review has its own unit test; the Swagger test checks the login cookie; two README sentences were corrected. Changed by me from the prompt: the review's updatedAt is not moved by a reply, and an older duplicate "Confirmation page" sentence about HTL-20 was removed from the hotel-bookings README. Rejected: nothing.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Ali Ghayesh
+Tool: Claude (claude.ai agent workspace, model Claude Opus 5.5, with its reviewer agent)
+Branch / Issue: feature/ACC-02-email-verification / #254
+Related Requirement: ACC-02 (bonus, approved by the team leader; with ACC-01 for registration, GEN-01-B for the email, ACC-04 for the authentication guard)
+Prompt:
+I asked Claude to build ACC-02 in the auth module: an emailVerified field that defaults to true (so every existing account, moderator and admin is verified), registration that creates the account unverified and emails a 24-hour link in the background when email is on and creates it verified when email is off, a generic auth_tokens store (32 random bytes, only the SHA-256 hash stored, one live token per user and type by an atomic upsert, a TTL index, atomic single-use consumption) that ACC-07 will reuse, GET /api/auth/verify-email with one 400 for every bad link, POST /api/auth/resend-verification as an approved addition to section 8, a @RequireVerifiedEmail() decorator read by JwtAuthGuard on the routes that create a booking or a hold, emailVerified in UserResponseDto, the email template in the notifications module, Swagger, unit and e2e tests with a fake mail transport, and the READMEs.
+How the output was used:
+Claude added AuthTokenStoreService, the AuthToken schema and the AuthTokenType enum, the constants, VerifyEmailQueryDto and two small response DTOs, AuthService.register (unverified + background token and email when EmailService.enabled), verifyEmail and resendVerification, the two routes, @RequireVerifiedEmail() and its check in JwtAuthGuard (403 "Verify your email address before booking", after the suspension and the temporary password), the decorator on POST /api/flight-bookings, POST /api/flight-bookings/hold and POST /api/hotel-bookings, emailVerified on the User schema, UsersService.markEmailVerified, UserResponseDto and its mapper, and EmailService.sendEmailVerification with its template. The exact-shape tests of a user response in the users, admin, auth and owner-access specs were updated. In backend/ format, lint (0 warnings), typecheck, build and the whole unit suite (301 suites, 4298 tests, after merging develop) passed; on my laptop npm ci and 21 e2e specs (email-verification, auth, users, admin, temporary-password, backend-enforcement, notifications, guest-access, owner-access, flight-bookings summary and hold, hotel-bookings: 405 tests and 2 existing todos) passed on the -test database.
+Accepted, changed, or rejected:
+Accepted: the design. Changed after the reviewer agent: the global exception filter logs the URL of every 5xx with its query, so verify-email got its own QueryFreeExceptionsFilter in the auth module that drops the query first (no token in any log; the shared filter is unchanged); the resend route is limited to one link a minute with an atomic conditional upsert (429), because otherwise it could flood the inbox of someone whose address was used to register; the store class was renamed AuthTokenStoreService; test names now match their assertions; the Swagger texts use the message constant; the README explains the public GET that changes data and an account left unverified if email is switched off later. Changed by me from the prompt: sendEmailVerification also takes expiresInHours, so the notifications module does not hard-code the auth module's 24 hours. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Ali Ghayesh
+Tool: Claude (claude.ai agent workspace, model Claude Opus 5.5, with its reviewer agent)
+Branch / Issue: feature/ACC-07-password-reset-by-email / #255
+Related Requirement: ACC-07 (bonus, approved by the team leader; with ACC-02 for the token store, GEN-01-B for the email, ACC-05 for the lockout, ACC-06 for the sessions; ACC-07a, the admin reset, unchanged)
+Prompt:
+I asked Claude to build ACC-07 in the auth module on the auth_tokens store of ACC-02: POST /api/auth/forgot-password that always answers the same 202 and does the lookup, the token and the email in the background, only for active accounts with the role user and nothing when email is off; a 30-minute single-use token that a newer request replaces; POST /api/auth/reset-password that checks the new password with the rule of registration before it uses the token once, gives the same 400 for every bad link, stores the new hash, clears mustChangePassword and the lockout and revokes every session; the reset email in the notifications module, Swagger, unit and e2e tests with a fake mail transport, and the READMEs.
+How the output was used:
+Claude added ForgotPasswordDto, ResetForgottenPasswordDto (the admin's ResetPasswordDto keeps its Swagger name), two response DTOs, the constants, AuthService.forgotPassword (the same answer, background work capped at 20 at once) and resetPassword (consume, then UsersService.resetForgottenPassword only for an active registered user, then revokeAllOfUser), the two routes, UsersService.findEntityByEmail (without the hash) and resetForgottenPassword, and EmailService.sendPasswordReset with its template. In backend/ format, lint (0 warnings), typecheck, build and the whole unit suite (307 suites, 4435 tests) passed; on my laptop npm ci and the e2e specs password-reset, email-verification, auth-register, auth-login, auth-change-password, auth-lockout, auth-session, admin-reset-password, temporary-password, guest-access and notifications (11 suites, 206 tests) passed on the -test database.
+Accepted, changed, or rejected:
+Accepted: the design. Changed after the reviewer agent: a once-a-minute limit Claude had added was removed, because it kept an older link working and the requirement says a newer request invalidates it (the flooding risk is written in the README as a known limit); the background work of forgot-password is capped at 20 requests at once; the lookup no longer reads the password hash; the two answers have their own Swagger response classes; a reset also marks the email verified; five stale README sentences about the lockout, the temporary password and the sessions were corrected; the e2e covers an airline moderator too. Rejected: nothing.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Ali Ghayesh
+Tool: Claude (claude.ai agent workspace, model Claude Opus 5.5)
+Branch / Issue: fix/ci-e2e-memory-limit / no issue (found by the CI of #277)
+Related Requirement: none (CI only; it unblocks BON-02, #277)
+Prompt:
+CI of #277 (BON-02) failed in the E2E tests step. I asked Claude to find why and, after I chose the fix, to open a separate shared-layer pull request with no feature code.
+How the output was used:
+Claude read the CI log: no test failed; the single e2e process (--runInBand) ran out of memory at the 4 GB limit (FATAL ERROR: JavaScript heap out of memory, exit 134) after 99 suites passed, and develop's last green run had exactly 99 e2e suites, so the 100th suite of any pull request crosses the limit. It raised NODE_OPTIONS --max-old-space-size from 4096 to 6144 in .github/workflows/ci.yml and updated the comment there. Nothing else changed; CI of this pull request is the check.
+Accepted, changed, or rejected:
+Accepted: the diagnosis and the one-line fix. Rejected: re-running #277 without a fix, because the memory grows with every suite and it would crash again.
+================================================

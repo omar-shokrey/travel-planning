@@ -57,6 +57,7 @@ describe('toPostPage (BLG-02)', () => {
       images: ['a.jpg', 'b.png'],
       likeCount: 4,
       commentCount: 2,
+      itinerary: null,
       comments: {
         items: [],
         meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
@@ -83,6 +84,7 @@ describe('toPostPage (BLG-02)', () => {
       'comments',
       'id',
       'images',
+      'itinerary',
       'likeCount',
       'publishedAt',
       'tags',
@@ -233,5 +235,44 @@ describe('toPostPage (BLG-02)', () => {
 
     expect(source.tags).toEqual(['cairo', 'egypt']);
     expect(source.images).toEqual(['a.jpg', 'b.png']);
+  });
+
+  describe('the attached itinerary (BLG-13)', () => {
+    const summary = {
+      id: '6741c0ffee0ddba11ad0b0b0',
+      title: 'Ten days in Egypt',
+      countries: ['EG'],
+      startDate: '2026-12-20',
+      dayCount: 10,
+    };
+
+    it('shows its summary, and exactly these keys', () => {
+      const leaky = {
+        ...summary,
+        // What an itinerary carries, which must never reach the page.
+        ownerId: 'someone',
+        days: [{ linkedBookings: [{ reference: 'FB-7KQ2MX' }] }],
+        budgetSubtotal: [{ amount: 1, currency: 'USD' }],
+      };
+
+      const page = toPostPage(post(), [], 0, pagination, names, leaky);
+
+      expect(page.itinerary).toEqual(summary);
+      expect(Object.keys(page.itinerary ?? {}).sort()).toEqual([
+        'countries',
+        'dayCount',
+        'id',
+        'startDate',
+        'title',
+      ]);
+      expect(JSON.stringify(page)).not.toContain('FB-7KQ2MX');
+    });
+
+    it('shows null when there is none to show', () => {
+      expect(
+        toPostPage(post(), [], 0, pagination, names, null).itinerary,
+      ).toBeNull();
+      expect(toPostPage(post(), [], 0, pagination, names).itinerary).toBeNull();
+    });
   });
 });

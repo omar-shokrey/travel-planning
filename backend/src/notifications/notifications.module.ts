@@ -20,7 +20,9 @@ import { NotificationsService } from './notifications.service';
   // EmailService and its transport: GEN-01-B.
   providers: [NotificationsService, EmailService, mailTransportProvider],
   // Other modules send notifications through NotificationsService only;
-  // the admin module sends the moderator invitation through EmailService.
+  // the admin module sends the moderator invitation, and the auth module the
+  // verification link (ACC-02) and the reset link (ACC-07), through
+  // EmailService.
   exports: [NotificationsService, EmailService],
 })
 export class NotificationsModule {}

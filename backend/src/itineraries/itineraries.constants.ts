@@ -31,6 +31,19 @@ export const MONEY_AMOUNT_MAX = 10_000_000_000;
  */
 export const BUDGET_ENTRIES_PER_DAY_MAX = 50;
 
+/**
+ * ITN-27: the most bookings one day can have linked, so one itinerary
+ * document stays small. An engineering limit, not a workbook rule.
+ */
+export const LINKED_BOOKINGS_PER_DAY_MAX = 10;
+
+/** ITN-27: the answers of linking a booking to a day. */
+export const BOOKING_NOT_LINKABLE_MESSAGE =
+  'Only a confirmed or completed booking can be linked';
+export const BOOKING_ALREADY_LINKED_MESSAGE =
+  'This booking is already linked to this itinerary';
+export const LINKED_BOOKINGS_PER_DAY_MESSAGE = `A day has at most ${LINKED_BOOKINGS_PER_DAY_MAX} linked bookings`;
+
 /** A currency code as in countries.csv, for example EGP. */
 export const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
 

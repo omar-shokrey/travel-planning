@@ -58,6 +58,15 @@ export class BlogPost {
   @Prop({ type: Date, index: true })
   publishedAt?: Date;
 
+  /**
+   * BLG-13: the author's own public itinerary attached to the post, set and
+   * removed only through `PATCH /api/posts/:id/itinerary`. A post stored
+   * before this field existed has none. Not indexed: it is only read with
+   * the post it belongs to.
+   */
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Itinerary' })
+  itineraryId?: Types.ObjectId;
+
   @Prop({ type: [String], default: [] })
   tags: string[];
 

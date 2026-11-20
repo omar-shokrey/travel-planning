@@ -83,6 +83,19 @@ describe('PublicItinerariesService', () => {
       ],
     }) as ItineraryDocument;
 
+  /** The same public itinerary with the author's flight linked to its day (ITN-27). */
+  const withLinkedBooking = (): ItineraryDocument => {
+    const itinerary = publicItinerary();
+    itinerary.days[0].linkedBookings.push({
+      bookingType: 'flight',
+      bookingId: new Types.ObjectId(),
+      reference: 'FB-7KQ2MX',
+      amount: 52000,
+      currency: 'USD',
+    } as never);
+    return itinerary;
+  };
+
   /** Replaces find().select().sort().skip().limit() and countDocuments(). */
   const withSearchResults = (
     found: ItineraryDocument[],
@@ -338,6 +351,26 @@ describe('PublicItinerariesService', () => {
         service.findPublic(new Types.ObjectId().toString()),
       ).rejects.toThrow(new NotFoundException('Itinerary not found'));
     });
+
+    it("never shows the author's linked bookings, nor counts them in the subtotals (ITN-27)", async () => {
+      const itinerary = withLinkedBooking();
+      jest
+        .spyOn(ItineraryModel, 'findOne')
+        .mockResolvedValue(itinerary as never);
+
+      const response = await service.findPublic(itinerary.id as string);
+
+      expect(response.days[0].linkedBookings).toEqual([]);
+      expect(response.cityGroups[0].budgetSubtotal).toEqual([
+        { amount: 11500, currency: 'EGP' },
+      ]);
+      expect(JSON.stringify(response)).not.toContain('FB-7KQ2MX');
+      expect(JSON.stringify(response)).not.toContain(
+        itinerary.days[0].linkedBookings[0].bookingId.toString(),
+      );
+      // The stored itinerary is not changed by the public view.
+      expect(itinerary.days[0].linkedBookings).toHaveLength(1);
+    });
   });
 
   describe('clone', () => {
@@ -398,6 +431,26 @@ describe('PublicItinerariesService', () => {
       ]);
     });
 
+    it("never copies the author's linked bookings (ITN-27)", async () => {
+      const source = withLinkedBooking();
+      jest.spyOn(ItineraryModel, 'findOne').mockResolvedValue(source as never);
+      const create = jest
+        .spyOn(ItineraryModel, 'create')
+        .mockImplementation(((data: Record<string, unknown>) =>
+          Promise.resolve(new ItineraryModel(data))) as never);
+
+      const response = await service.clone(source.id as string, readerId);
+
+      const [data] = create.mock.calls[0] as unknown as [
+        { days: { linkedBookings: unknown[] }[] },
+      ];
+      expect(data.days[0].linkedBookings).toEqual([]);
+      expect(response.days[0].linkedBookings).toEqual([]);
+      expect(response.cityGroups[0].budgetSubtotal).toEqual([
+        { amount: 11500, currency: 'EGP' },
+      ]);
+    });
+
     it('answers 404 and creates nothing for an itinerary that is not public', async () => {
       jest.spyOn(ItineraryModel, 'findOne').mockResolvedValue(null as never);
       const create = jest.spyOn(ItineraryModel, 'create');
@@ -413,5 +466,66 @@ describe('PublicItinerariesService', () => {
     expect(escapeRegExp('a.b*c+d?e^f$g{h}i(j)k|l[m]n\\o')).toBe(
       'a\\.b\\*c\\+d\\?e\\^f\\$g\\{h\\}i\\(j\\)k\\|l\\[m\\]n\\\\o',
     );
+  });
+
+  describe('findPublicSummary (BLG-13)', () => {
+    const withFound = (found: unknown) => {
+      const chain = {
+        select: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue(found),
+      };
+      const findOne = jest
+        .spyOn(ItineraryModel, 'findOne')
+        .mockReturnValue(chain as never);
+      return { chain, findOne };
+    };
+
+    it('reads with the same filter as search and the public view: public, not hidden, owner active', async () => {
+      const id = new Types.ObjectId();
+      const { chain, findOne } = withFound(null);
+
+      await service.findPublicSummary(id.toString());
+
+      expect(findOne).toHaveBeenCalledWith({
+        _id: id.toString(),
+        ...PUBLICLY_VISIBLE,
+      });
+      expect(PUBLICLY_VISIBLE).toEqual({
+        visibility: ItineraryVisibility.Public,
+        moderation: ItineraryModeration.Visible,
+        authorDeactivated: false,
+      });
+      expect(chain.select).toHaveBeenCalledWith(
+        'title countries startDate dayCount',
+      );
+    });
+
+    it('gives the summary, with exactly these fields, of a publicly visible itinerary', async () => {
+      const id = new Types.ObjectId();
+      withFound({
+        _id: id,
+        title: 'Ten days in Egypt',
+        countries: ['EG'],
+        startDate: '2026-12-20',
+        dayCount: 10,
+      });
+
+      expect(await service.findPublicSummary(id.toString())).toEqual({
+        id: id.toString(),
+        title: 'Ten days in Egypt',
+        countries: ['EG'],
+        startDate: '2026-12-20',
+        dayCount: 10,
+      });
+    });
+
+    it('gives null when the filter finds nothing: missing, private, hidden or owner deactivated', async () => {
+      withFound(null);
+
+      expect(
+        await service.findPublicSummary(new Types.ObjectId().toString()),
+      ).toBeNull();
+    });
   });
 });

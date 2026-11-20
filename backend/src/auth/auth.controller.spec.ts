@@ -1,7 +1,13 @@
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  HttpStatus,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import type { Request, Response } from 'express';
 import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
+import { ROLES_KEY } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import type { UserResponseDto } from '../users/dto/user-response.dto';
@@ -27,6 +33,7 @@ const created: UserResponseDto = {
   role: Role.User,
   status: UserStatus.Active,
   mustChangePassword: false,
+  emailVerified: true,
   createdAt: '2026-11-14T10:00:00.000Z',
 };
 
@@ -48,6 +55,10 @@ function setup() {
     refresh: jest.fn().mockResolvedValue({ user: created, tokens }),
     me: jest.fn().mockResolvedValue(created),
     changePassword: jest.fn().mockResolvedValue(created),
+    verifyEmail: jest.fn().mockResolvedValue({ verified: true }),
+    resendVerification: jest.fn().mockResolvedValue({ message: 'sent' }),
+    forgotPassword: jest.fn().mockReturnValue({ message: 'requested' }),
+    resetPassword: jest.fn().mockResolvedValue({ message: 'done' }),
   };
   const authCookies = {
     setAuthCookies: jest.fn(),
@@ -276,6 +287,81 @@ describe('AuthController', () => {
           AuthController.prototype.changePassword,
         ),
       ).toBeUndefined();
+    });
+  });
+
+  describe('verifyEmail (ACC-02)', () => {
+    it('hands the token of the query to the service and returns its answer', async () => {
+      const { authService, controller } = setup();
+
+      await expect(
+        controller.verifyEmail({ token: 'a-one-time-token' }),
+      ).resolves.toEqual({ verified: true });
+      expect(authService.verifyEmail).toHaveBeenCalledWith('a-one-time-token');
+    });
+
+    it('is open to guests, because the link in the email is opened without a login', () => {
+      expect(
+        new Reflector().get<boolean>(
+          IS_PUBLIC_KEY,
+          AuthController.prototype.verifyEmail,
+        ),
+      ).toBe(true);
+    });
+  });
+
+  describe('resendVerification (ACC-02)', () => {
+    it('gives the service the id of the logged-in user and returns its answer', async () => {
+      const { authService, controller } = setup();
+
+      await expect(controller.resendVerification('u1')).resolves.toEqual({
+        message: 'sent',
+      });
+      expect(authService.resendVerification).toHaveBeenCalledWith('u1');
+    });
+
+    it('needs a login, is for registered users only and answers 202', () => {
+      const handler = AuthController.prototype.resendVerification;
+      const reflector = new Reflector();
+
+      expect(reflector.get(IS_PUBLIC_KEY, handler)).toBeUndefined();
+      expect(reflector.get(ROLES_KEY, handler)).toEqual([Role.User]);
+      expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(
+        HttpStatus.ACCEPTED,
+      );
+    });
+  });
+
+  describe('forgotPassword and resetPassword (ACC-07)', () => {
+    it('hands the email to the service and returns its answer', () => {
+      const { authService, controller } = setup();
+
+      expect(controller.forgotPassword({ email: 'sara@example.com' })).toEqual({
+        message: 'requested',
+      });
+      expect(authService.forgotPassword).toHaveBeenCalledWith(
+        'sara@example.com',
+      );
+    });
+
+    it('hands the token and the new password to the service and returns its answer', async () => {
+      const { authService, controller } = setup();
+      const body = { token: 'a-one-time-token', newPassword: 'N3wPassword' };
+
+      await expect(controller.resetPassword(body)).resolves.toEqual({
+        message: 'done',
+      });
+      expect(authService.resetPassword).toHaveBeenCalledWith(body);
+    });
+
+    it.each([
+      ['forgotPassword', HttpStatus.ACCEPTED],
+      ['resetPassword', HttpStatus.OK],
+    ] as const)('%s is open to guests and answers %s', (name, status) => {
+      const handler = AuthController.prototype[name];
+
+      expect(new Reflector().get(IS_PUBLIC_KEY, handler)).toBe(true);
+      expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(status);
     });
   });
 });

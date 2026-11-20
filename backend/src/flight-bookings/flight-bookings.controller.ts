@@ -26,6 +26,8 @@ import {
 import { PLATFORM_CURRENCY } from '../common/constants/currency';
 import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
 import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
+import { EMAIL_NOT_VERIFIED_MESSAGE } from '../auth/auth.constants';
+import { RequireVerifiedEmail } from '../auth/decorators/require-verified-email.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
@@ -130,6 +132,8 @@ export class FlightBookingsController {
   @Post()
   @HttpCode(HttpStatus.OK)
   @Roles(Role.User)
+  // ACC-02: an account whose email is not verified cannot book.
+  @RequireVerifiedEmail()
   @ApiOperation({
     summary:
       'Show the booking summary before payment (FLT-21), one-way or round trip (FLT-12)',
@@ -175,8 +179,7 @@ export class FlightBookingsController {
     description: 'Not logged in, or the access token is invalid or expired',
   })
   @ApiForbiddenResponse({
-    description:
-      'Only a registered user (role `user`) can book; administrators and moderators cannot',
+    description: `Only a registered user (role \`user\`) can book; administrators and moderators cannot. ACC-02: also "${EMAIL_NOT_VERIFIED_MESSAGE}" while the email of the account is not verified.`,
   })
   @ApiNotFoundResponse({
     description: `"${FLIGHT_NOT_FOUND_MESSAGE}" (also for a flight of a deactivated airline), or "${cabinNotOnFlightMessage(CabinClass.Business)}" (the cabin sent is named). For the return flight of a round trip the same answers start with "Return flight: ".`,
@@ -193,6 +196,8 @@ export class FlightBookingsController {
   @Post('hold')
   @HttpCode(HttpStatus.CREATED)
   @Roles(Role.User)
+  // ACC-02: an account whose email is not verified cannot book.
+  @RequireVerifiedEmail()
   @ApiOperation({
     summary:
       'Hold seats for payment, with the passengers and their extra bags (FLT-22, FLT-19), one-way or round trip (FLT-12)',
@@ -239,8 +244,7 @@ export class FlightBookingsController {
     description: 'Not logged in, or the access token is invalid or expired',
   })
   @ApiForbiddenResponse({
-    description:
-      'Only a registered user (role `user`) can book; administrators and moderators cannot',
+    description: `Only a registered user (role \`user\`) can book; administrators and moderators cannot. ACC-02: also "${EMAIL_NOT_VERIFIED_MESSAGE}" while the email of the account is not verified.`,
   })
   @ApiNotFoundResponse({
     description: `"${FLIGHT_NOT_FOUND_MESSAGE}" (also for a flight of a deactivated airline), or "${cabinNotOnFlightMessage(CabinClass.Business)}" (the cabin sent is named). For the return flight of a round trip the same answers start with "Return flight: ".`,

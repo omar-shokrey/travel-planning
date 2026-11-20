@@ -35,6 +35,19 @@ describe('User model', () => {
     expect(user.mustChangePassword).toBe(false);
   });
 
+  it('counts an account as verified unless it is saved with emailVerified false (ACC-02)', () => {
+    expect(new UserModel(valid).emailVerified).toBe(true);
+    expect(
+      new UserModel({ ...valid, emailVerified: false }).emailVerified,
+    ).toBe(false);
+  });
+
+  it('fills emailVerified true when a document without the field is read (ACC-02)', () => {
+    const loaded = UserModel.hydrate({ _id: new Types.ObjectId(), ...valid });
+
+    expect(loaded.emailVerified).toBe(true);
+  });
+
   it('lowercases and trims the email', () => {
     const user = new UserModel({ ...valid, email: '  Omar@Example.COM ' });
 

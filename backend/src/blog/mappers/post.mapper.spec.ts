@@ -1,3 +1,4 @@
+import { Types } from 'mongoose';
 import { PostModeration } from '../models/post-moderation.enum';
 import { PostStatus } from '../models/post-status.enum';
 import { toMyPostResponse, toPostResponse } from './post.mapper';
@@ -28,6 +29,7 @@ describe('toPostResponse', () => {
       publishedAt: '2026-11-15T10:00:00.000Z',
       tags: ['cairo', 'egypt'],
       images: ['cairo.jpg'],
+      itineraryId: null,
       createdAt: '2026-11-14T10:00:00.000Z',
       updatedAt: '2026-11-15T10:00:00.000Z',
     });
@@ -58,6 +60,7 @@ describe('toPostResponse', () => {
       publishedAt: undefined,
       tags: [],
       images: [],
+      itineraryId: null,
       createdAt: '2026-11-15T10:00:00.000Z',
       updatedAt: '2026-11-15T10:00:00.000Z',
     });
@@ -100,6 +103,26 @@ describe('toPostResponse', () => {
     expect(toPostResponse(lean as never).id).toBe('6740f1c2a4b5c6d7e8f90abc');
   });
 
+  it('gives the attached itinerary id as a string, and null for a post stored before BLG-13', () => {
+    const itineraryId = new Types.ObjectId();
+    const post = {
+      _id: new Types.ObjectId(),
+      authorId: new Types.ObjectId(),
+      title: 'With a trip',
+      body: 'Body',
+      status: PostStatus.Draft,
+      tags: [],
+      images: [],
+      createdAt: new Date('2026-11-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-11-15T10:00:00.000Z'),
+    };
+
+    expect(toPostResponse({ ...post, itineraryId } as never).itineraryId).toBe(
+      itineraryId.toString(),
+    );
+    expect(toPostResponse(post as never).itineraryId).toBeNull();
+  });
+
   describe('toMyPostResponse (BLG-03)', () => {
     const stored = {
       _id: { toString: () => '6740f1c2a4b5c6d7e8f90abc' },
@@ -124,6 +147,7 @@ describe('toPostResponse', () => {
         status: PostStatus.Published,
         moderation: PostModeration.Visible,
         publishedAt: '2026-11-15T10:00:00.000Z',
+        itineraryId: null,
         createdAt: '2026-11-14T10:00:00.000Z',
         updatedAt: '2026-11-15T10:00:00.000Z',
         likeCount: 4,
@@ -144,6 +168,15 @@ describe('toPostResponse', () => {
       const hidden = { ...stored, moderation: PostModeration.Hidden };
 
       expect(toMyPostResponse(hidden as never).moderation).toBe('hidden');
+    });
+
+    it('gives the attached itinerary id, or null when none is (BLG-13)', () => {
+      const itineraryId = new Types.ObjectId();
+
+      expect(
+        toMyPostResponse({ ...stored, itineraryId } as never).itineraryId,
+      ).toBe(itineraryId.toString());
+      expect(toMyPostResponse(stored as never).itineraryId).toBeNull();
     });
 
     it('leaves out publishedAt for a draft', () => {

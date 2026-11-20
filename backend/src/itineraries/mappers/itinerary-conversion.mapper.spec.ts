@@ -1,4 +1,5 @@
 import type { ItineraryDetailResponseDto } from '../dto/itinerary-detail-response.dto';
+import { LinkedBookingType } from '../enums/linked-booking-type.enum';
 import { withConvertedAmounts } from './itinerary-conversion.mapper';
 
 const RATES = {
@@ -22,6 +23,7 @@ const detail = (): ItineraryDetailResponseDto =>
           { id: 'b1', category: 'food', amount: 1500, currency: 'USD' },
         ],
         transportCosts: [],
+        linkedBookings: [],
       },
       {
         id: 'd2',
@@ -39,6 +41,7 @@ const detail = (): ItineraryDetailResponseDto =>
             currency: 'EGP',
           },
         ],
+        linkedBookings: [],
       },
     ],
     cityGroups: [
@@ -144,5 +147,51 @@ describe('withConvertedAmounts (ITN-18)', () => {
     expect(result.cityGroups[0].budgetSubtotal).toEqual(
       detail().cityGroups[0].budgetSubtotal,
     );
+  });
+
+  describe('linked bookings (ITN-27)', () => {
+    /** The detail with one flight linked to the first day, in `currency`. */
+    const withLink = (currency: string) => {
+      const linked = detail();
+      linked.days[0].linkedBookings = [
+        {
+          id: 'l1',
+          bookingType: LinkedBookingType.Flight,
+          bookingId: 'k1',
+          reference: 'FB-7KQ2MX',
+          amount: 52000,
+          currency,
+        },
+      ];
+      return linked;
+    };
+
+    it('gives every linked booking its converted amount, with the same rule', () => {
+      const result = withConvertedAmounts(withLink('EGP'), {
+        currency: 'USD',
+        rates: RATES,
+      });
+
+      // EGP 520.00 = USD 10.40.
+      expect(result.days[0].linkedBookings[0]).toEqual({
+        id: 'l1',
+        bookingType: 'flight',
+        bookingId: 'k1',
+        reference: 'FB-7KQ2MX',
+        amount: 52000,
+        currency: 'EGP',
+        converted: { amount: 1040, currency: 'USD' },
+      });
+    });
+
+    it('names the currency of a linked booking that has no rate', () => {
+      const result = withConvertedAmounts(withLink('CHF'), {
+        currency: 'USD',
+        rates: RATES,
+      });
+
+      expect(result.days[0].linkedBookings[0].converted).toBeNull();
+      expect(result.conversion?.missingCurrencies).toEqual(['CHF', 'GBP']);
+    });
   });
 });
