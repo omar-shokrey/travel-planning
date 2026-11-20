@@ -217,6 +217,38 @@ describe('UsersService', () => {
     });
   });
 
+  describe('deactivateOwnAccount (ACC-12)', () => {
+    const now = new Date('2026-11-20T10:00:00.000Z');
+
+    function setupDeactivate(updated: object | null) {
+      const exec = jest.fn().mockResolvedValue(updated);
+      const model = { findOneAndUpdate: jest.fn(() => ({ exec })) };
+      const service = new UsersService(model as unknown as Model<User>);
+      return { model, service };
+    }
+
+    it('deactivates only an active account with the user role, in one update', async () => {
+      const updated = { _id: userObjectId, status: UserStatus.Deactivated };
+      const { model, service } = setupDeactivate(updated);
+
+      const result = await service.deactivateOwnAccount(userObjectId, now);
+
+      expect(result).toBe(updated);
+      expect(model.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: userObjectId, role: Role.User, status: UserStatus.Active },
+        { $set: { status: UserStatus.Deactivated, deactivatedAt: now } },
+        { returnDocument: 'after' },
+      );
+    });
+
+    it('returns null when nothing matches (suspended, already deactivated or not a user)', async () => {
+      const { service } = setupDeactivate(null);
+
+      expect(await service.deactivateOwnAccount(userObjectId, now)).toBeNull();
+    });
+  });
+
   describe('findEntityByEmailWithPasswordHash (ACC-04)', () => {
     it('finds the account by its trimmed, lowercased email', async () => {
       const { model, service } = setup();
