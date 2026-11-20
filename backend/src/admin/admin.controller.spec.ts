@@ -6,7 +6,9 @@ import { Role } from '../common/enums/role.enum';
 import type { UserResponseDto } from '../users/dto/user-response.dto';
 import { PROVIDER_TYPE_MESSAGE } from './admin.constants';
 import { AdminController, PROVIDER_TYPE_PIPE } from './admin.controller';
+import type { AdminBookingsService } from './admin-bookings.service';
 import type { AdminService } from './admin.service';
+import { ListAdminBookingsQueryDto } from './dto/list-admin-bookings-query.dto';
 import { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
 import { ListAuditLogsQueryDto } from './dto/list-audit-logs-query.dto';
 
@@ -29,10 +31,13 @@ describe('AdminController', () => {
       deactivateProvider: jest.fn(),
       reactivateProvider: jest.fn(),
     };
+    // ACC-17: the list of all bookings.
+    const adminBookingsService = { list: jest.fn().mockResolvedValue(page) };
     const controller = new AdminController(
       adminService as unknown as AdminService,
+      adminBookingsService as unknown as AdminBookingsService,
     );
-    return { adminService, controller };
+    return { adminService, adminBookingsService, controller };
   }
 
   it('is open to administrators only', () => {
@@ -64,6 +69,16 @@ describe('AdminController', () => {
 
       expect(await controller.listAccounts(query)).toBe(page);
       expect(adminService.listAccounts).toHaveBeenCalledWith(query);
+    });
+  });
+
+  describe('listBookings (ACC-17)', () => {
+    it('gives the bookings service the query and returns its page', async () => {
+      const { adminBookingsService, controller } = setup();
+      const query = new ListAdminBookingsQueryDto();
+
+      expect(await controller.listBookings(query)).toBe(page);
+      expect(adminBookingsService.list).toHaveBeenCalledWith(query);
     });
   });
 
