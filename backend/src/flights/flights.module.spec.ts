@@ -5,6 +5,8 @@ import {
   PATH_METADATA,
 } from '@nestjs/common/constants';
 import { FlightDetailsController } from './flight-details.controller';
+import { FlightPassengersController } from './flight-passengers.controller';
+import { FlightPassengersService } from './flight-passengers.service';
 import { FlightSearchController } from './flight-search.controller';
 import { FlightSearchService } from './flight-search.service';
 import { FlightsModule } from './flights.module';
@@ -86,5 +88,14 @@ describe('FlightsModule', () => {
     expect(
       Reflect.getMetadata(MODULE_METADATA.EXPORTS, FlightsModule),
     ).toContain(FlightSearchService);
+  });
+
+  it('registers the bookings and passenger list of a flight (FLT-29) after the search', () => {
+    expect(controllers.indexOf(FlightPassengersController)).toBeGreaterThan(
+      controllers.indexOf(FlightSearchController),
+    );
+    expect(
+      Reflect.getMetadata(MODULE_METADATA.PROVIDERS, FlightsModule),
+    ).toContain(FlightPassengersService);
   });
 });
