@@ -53,6 +53,7 @@ import {
   CHILD_MIN_AGE,
   DEPARTED_MESSAGE,
   E_TICKET_NOT_CONFIRMED_MESSAGE,
+  FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE,
   FLIGHT_BOOKING_HOLD_MINUTES,
   FLIGHT_BOOKING_SEATS_MAX,
   FLIGHT_CHANGED_MESSAGE,
@@ -328,7 +329,7 @@ export class FlightBookingsController {
     description: `"${BOOKING_NOT_FOUND_MESSAGE}": no such booking, or it belongs to another user`,
   })
   @ApiConflictResponse({
-    description: `"${NOT_CANCELLABLE_MESSAGE}" (waiting for payment, expired, already cancelled or completed), or "${DEPARTED_MESSAGE}"`,
+    description: `"${NOT_CANCELLABLE_MESSAGE}" (waiting for payment, expired, already cancelled or completed), "${DEPARTED_MESSAGE}", or "${FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE}" (FLT-06 cancels it with a full refund)`,
   })
   cancellationPreview(
     @Param('id', ParseObjectIdPipe) id: string,
@@ -370,7 +371,7 @@ export class FlightBookingsController {
     description: `"${BOOKING_NOT_FOUND_MESSAGE}": no such booking, or it belongs to another user`,
   })
   @ApiConflictResponse({
-    description: `"${NOT_CANCELLABLE_MESSAGE}" (waiting for payment, expired, already cancelled or completed), "${DEPARTED_MESSAGE}", or "${REFUND_CHANGED_MESSAGE}". Nothing changed.`,
+    description: `"${NOT_CANCELLABLE_MESSAGE}" (waiting for payment, expired, already cancelled or completed), "${DEPARTED_MESSAGE}", "${FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE}" (FLT-06 cancels it with a full refund), or "${REFUND_CHANGED_MESSAGE}". Nothing changed.`,
   })
   cancel(
     @Param('id', ParseObjectIdPipe) id: string,

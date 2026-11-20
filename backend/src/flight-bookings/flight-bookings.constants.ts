@@ -98,7 +98,13 @@ export const NOT_CANCELLABLE_MESSAGE =
   'Only a confirmed booking can be cancelled';
 export const DEPARTED_MESSAGE =
   'The flight has departed: the booking can no longer be cancelled';
+/** FLT-06: the user cannot cancel what the airline's cancellation cancels with a full refund. */
+export const FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE =
+  'The airline cancelled this flight: the booking is cancelled and refunded in full';
 export const REFUND_CHANGED_MESSAGE =
   'The refund changed since you viewed it. View the cancellation again and confirm the new refund';
 /** GEN-11: how many confirmed bookings one run of the completion job completes, earliest trips first. */
 export const FLIGHT_BOOKING_COMPLETION_BATCH_SIZE = 100;
+
+/** FLT-06: how many bookings left on cancelled flights one run of the hourly sweep reads. */
+export const FLIGHT_CANCELLATION_SWEEP_BATCH_SIZE = 100;

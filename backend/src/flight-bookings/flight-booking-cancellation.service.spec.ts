@@ -2,6 +2,7 @@ import { ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import type { FlightSeatHoldsService } from '../flights/flight-seat-holds.service';
 import { CabinClass } from '../flights/models/cabin-class.enum';
+import { FlightStatus } from '../flights/models/flight-status.enum';
 import { BookingType } from '../payments/enums/booking-type.enum';
 import { RefundReason } from '../payments/refunds/enums/refund-reason.enum';
 import { RefundStatus } from '../payments/refunds/enums/refund-status.enum';
@@ -11,6 +12,7 @@ import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { FlightBookingCancellationService } from './flight-booking-cancellation.service';
 import {
   DEPARTED_MESSAGE,
+  FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE,
   NOT_CANCELLABLE_MESSAGE,
   REFUND_CHANGED_MESSAGE,
 } from './flight-bookings.constants';
@@ -116,7 +118,7 @@ describe('FlightBookingCancellationService.preview (FLT-26)', () => {
       userId: new Types.ObjectId(USER_ID),
     });
     expect(flights.findById).toHaveBeenCalledWith(OUTBOUND_ID);
-    expect(select).toHaveBeenCalledWith('departureAt');
+    expect(select).toHaveBeenCalledWith('departureAt status');
     expect(bookings.updateOne).not.toHaveBeenCalled();
     expect(seatHolds.unbook).not.toHaveBeenCalled();
     expect(refunds.refund).not.toHaveBeenCalled();
@@ -206,6 +208,19 @@ describe('FlightBookingCancellationService.preview (FLT-26)', () => {
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConflictException);
     expect((error as Error).message).toBe(DEPARTED_MESSAGE);
+  });
+
+  it('answers 409 when the airline cancelled the flight (FLT-06), which refunds in full', async () => {
+    const { service } = setup(booking(), {
+      departureAt: DEPARTURE,
+      status: FlightStatus.Cancelled,
+    });
+
+    const error = await service
+      .preview(BOOKING_ID, USER_ID, NOW)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as Error).message).toBe(FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE);
   });
 
   it('answers 409 "departed" for a booking with no segment', async () => {

@@ -11,6 +11,8 @@ import { FlightBookingCompletionService } from './flight-booking-completion.serv
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
 import { FlightBookingListService } from './flight-booking-list.service';
 import { FlightBookingsController } from './flight-bookings.controller';
+import { FlightCancellationController } from './flight-cancellation.controller';
+import { FlightCancellationService } from './flight-cancellation.service';
 import { FlightBookingsService } from './flight-bookings.service';
 import {
   FlightBooking,
@@ -35,7 +37,8 @@ import {
     // imports no booking module and not PaymentsModule, so there is no cycle.
     RefundsModule,
   ],
-  controllers: [FlightBookingsController],
+  // FlightCancellationController: POST /api/flights/:id/cancel (FLT-06).
+  controllers: [FlightBookingsController, FlightCancellationController],
   // FlightBookingExpiryService: the hold-expiry job (FLT-22).
   // FlightBookingConfirmationService and FlightBookingETicketService: FLT-23.
   // FlightBookingCancellationService: FLT-26.
@@ -49,6 +52,8 @@ import {
     FlightBookingCompletionService,
     // FLT-25: the user's lists of bookings and the details of one.
     FlightBookingListService,
+    // FLT-06: the cancellation by the airline, its cascade and its hourly sweep.
+    FlightCancellationService,
   ],
   // FlightBookingsService: the owner lookup and the policy acceptance for the
   // payments module (PAY-02). The payments module imports this one, never the
