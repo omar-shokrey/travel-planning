@@ -1,4 +1,5 @@
 import type { Types } from 'mongoose';
+import type { HotelSearchSort, HotelSearchSortOrder } from './hotels.constants';
 import { RoomNightState } from './models/room-night-state.enum';
 import { coversNight, nightsOf, type DateRange } from './room-dates';
 
@@ -129,4 +130,89 @@ export function canHost(
     .sort((a, b) => b - a)
     .slice(0, rooms);
   return largest.reduce((sum, occupancy) => sum + occupancy, 0) >= guests;
+}
+
+/** HTL-12: what the filters and the order read of a search result. */
+export interface RankedHotel {
+  lowestPricePerNight: number;
+  ratingCount: number;
+  averageRating: number;
+}
+
+/** HTL-12: the optional filters of a search. */
+export interface HotelSearchFilters {
+  minPrice?: number;
+  maxPrice?: number;
+  minRating?: number;
+}
+
+/**
+ * HTL-12: whether a result passes the filters. The price is the result's
+ * `lowestPricePerNight`, the cheapest room free for the stay: a hotel whose
+ * cheapest room is below the range is left out even if a dearer room of it is
+ * inside, so a listed hotel always shows a price inside the range. Both ends
+ * are inclusive. With `minRating`, a hotel with no rating yet is left out;
+ * without it, it stays.
+ */
+export function passesFilters(
+  hotel: RankedHotel,
+  filters: HotelSearchFilters,
+): boolean {
+  if (
+    filters.minPrice !== undefined &&
+    hotel.lowestPricePerNight < filters.minPrice
+  ) {
+    return false;
+  }
+  if (
+    filters.maxPrice !== undefined &&
+    hotel.lowestPricePerNight > filters.maxPrice
+  ) {
+    return false;
+  }
+  if (filters.minRating !== undefined) {
+    return hotel.ratingCount > 0 && hotel.averageRating >= filters.minRating;
+  }
+  return true;
+}
+
+/** HTL-12: the direction when none is sent: best first for the rating, else ascending. */
+export function defaultSortOrder(
+  sortBy: HotelSearchSort,
+): HotelSearchSortOrder {
+  return sortBy === 'rating' ? 'desc' : 'asc';
+}
+
+/**
+ * HTL-12: the results in the order asked. `byName` must be in the name order
+ * of HTL-11 (collation en, then `_id`), as the hotels are read; that order
+ * breaks every tie, in both directions, so the order is the same on every
+ * page. For `rating`, hotels with no rating yet come last in both
+ * directions. Returns a new array.
+ */
+export function sortResults<T extends RankedHotel>(
+  byName: readonly T[],
+  sortBy: HotelSearchSort,
+  sortOrder: HotelSearchSortOrder,
+): T[] {
+  const sign = sortOrder === 'asc' ? 1 : -1;
+  const ranked = byName.map((hotel, position) => ({ hotel, position }));
+  const compare = (
+    a: { hotel: T; position: number },
+    b: { hotel: T; position: number },
+  ): number => {
+    if (sortBy === 'price') {
+      const diff = a.hotel.lowestPricePerNight - b.hotel.lowestPricePerNight;
+      return diff !== 0 ? sign * diff : a.position - b.position;
+    }
+    if (sortBy === 'rating') {
+      const aRated = a.hotel.ratingCount > 0;
+      const bRated = b.hotel.ratingCount > 0;
+      if (aRated !== bRated) return aRated ? -1 : 1;
+      const diff = aRated ? a.hotel.averageRating - b.hotel.averageRating : 0;
+      return diff !== 0 ? sign * diff : a.position - b.position;
+    }
+    return sign * (a.position - b.position);
+  };
+  return ranked.sort(compare).map(({ hotel }) => hotel);
 }

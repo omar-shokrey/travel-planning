@@ -1,10 +1,13 @@
 import { Types } from 'mongoose';
 import {
   canHost,
+  defaultSortOrder,
   groupNightsByRoom,
   isFreeForStay,
   nightsOfTheStay,
+  passesFilters,
   roomsThatCanBeFree,
+  sortResults,
   STAY_NIGHT_FIELDS,
   takesTheNight,
 } from './hotel-search';
@@ -193,5 +196,188 @@ describe('groupNightsByRoom (HTL-11, HTL-15)', () => {
 
     expect(byRoom.get(first.toString())).toHaveLength(366);
     expect(byRoom.get(first.toString())?.[365]).toBe(nights[365]);
+  });
+});
+
+/** A search result with only what the filters and the order read. */
+const ranked = (
+  name: string,
+  lowestPricePerNight: number,
+  averageRating = 0,
+  ratingCount = averageRating > 0 ? 1 : 0,
+) => ({ name, lowestPricePerNight, ratingCount, averageRating });
+
+const namesOf = (results: { name: string }[]) =>
+  results.map((result) => result.name);
+
+describe('passesFilters (HTL-12)', () => {
+  const hotel = ranked('Garden', 10000, 4);
+
+  it('keeps every hotel when no filter is set, rated or not', () => {
+    expect(passesFilters(hotel, {})).toBe(true);
+    expect(passesFilters(ranked('New', 10000), {})).toBe(true);
+  });
+
+  it('keeps a price equal to minPrice and leaves out one cent below it', () => {
+    expect(passesFilters(hotel, { minPrice: 10000 })).toBe(true);
+    expect(passesFilters(hotel, { minPrice: 10001 })).toBe(false);
+  });
+
+  it('keeps a price equal to maxPrice and leaves out one cent above it', () => {
+    expect(passesFilters(hotel, { maxPrice: 10000 })).toBe(true);
+    expect(passesFilters(hotel, { maxPrice: 9999 })).toBe(false);
+  });
+
+  it('keeps the price when minPrice and maxPrice are both equal to it', () => {
+    expect(passesFilters(hotel, { minPrice: 10000, maxPrice: 10000 })).toBe(
+      true,
+    );
+  });
+
+  it('accepts a minPrice of 0', () => {
+    expect(passesFilters(ranked('Free', 0), { minPrice: 0 })).toBe(true);
+  });
+
+  it('reads only the cheapest free room: a hotel whose cheapest room is below the range is left out', () => {
+    // lowestPricePerNight is the cheapest room free for the stay (the result
+    // mapper takes the lowest price), so a dearer room inside the range does
+    // not bring the hotel back.
+    const cheapAndDear = ranked('Mixed', 8000);
+
+    expect(
+      passesFilters(cheapAndDear, { minPrice: 9000, maxPrice: 20000 }),
+    ).toBe(false);
+    expect(passesFilters(cheapAndDear, { maxPrice: 9000 })).toBe(true);
+  });
+
+  it('keeps an average rating equal to minRating and leaves out a lower one', () => {
+    expect(passesFilters(ranked('A', 10000, 4), { minRating: 4 })).toBe(true);
+    expect(passesFilters(ranked('B', 10000, 3.99), { minRating: 4 })).toBe(
+      false,
+    );
+    expect(passesFilters(ranked('C', 10000, 4.5), { minRating: 4.5 })).toBe(
+      true,
+    );
+  });
+
+  it('leaves out a hotel with no rating yet only when minRating is set', () => {
+    const unrated = ranked('New', 10000);
+
+    expect(passesFilters(unrated, { minRating: 1 })).toBe(false);
+    expect(passesFilters(unrated, { minPrice: 0, maxPrice: 20000 })).toBe(true);
+  });
+
+  it('needs both the price and the rating to pass when both are set', () => {
+    const filters = { maxPrice: 10000, minRating: 4 };
+
+    expect(passesFilters(ranked('Both', 10000, 4), filters)).toBe(true);
+    expect(passesFilters(ranked('Dear', 10001, 5), filters)).toBe(false);
+    expect(passesFilters(ranked('Low', 9000, 3), filters)).toBe(false);
+  });
+});
+
+describe('defaultSortOrder (HTL-12)', () => {
+  it.each([
+    ['name', 'asc'],
+    ['price', 'asc'],
+    ['rating', 'desc'],
+  ] as const)('sorts %s %s when no order is sent', (sortBy, order) => {
+    expect(defaultSortOrder(sortBy)).toBe(order);
+  });
+});
+
+describe('sortResults (HTL-12)', () => {
+  // In the name order, as the hotels are read.
+  const byName = [
+    ranked('Alpha', 20000, 3),
+    ranked('Bravo', 10000),
+    ranked('Charlie', 10000, 5),
+    ranked('Delta', 30000, 3),
+    ranked('Echo', 5000),
+  ];
+
+  it('keeps the name order for name asc and reverses it for name desc', () => {
+    expect(namesOf(sortResults(byName, 'name', 'asc'))).toEqual([
+      'Alpha',
+      'Bravo',
+      'Charlie',
+      'Delta',
+      'Echo',
+    ]);
+    expect(namesOf(sortResults(byName, 'name', 'desc'))).toEqual([
+      'Echo',
+      'Delta',
+      'Charlie',
+      'Bravo',
+      'Alpha',
+    ]);
+  });
+
+  it('sorts by price cheapest first, with a tie in the name order', () => {
+    expect(namesOf(sortResults(byName, 'price', 'asc'))).toEqual([
+      'Echo',
+      'Bravo',
+      'Charlie',
+      'Alpha',
+      'Delta',
+    ]);
+  });
+
+  it('sorts by price dearest first, with a tie still in the name order', () => {
+    expect(namesOf(sortResults(byName, 'price', 'desc'))).toEqual([
+      'Delta',
+      'Alpha',
+      'Bravo',
+      'Charlie',
+      'Echo',
+    ]);
+  });
+
+  it('sorts by rating best first, a tie in the name order, unrated hotels last', () => {
+    expect(namesOf(sortResults(byName, 'rating', 'desc'))).toEqual([
+      'Charlie',
+      'Alpha',
+      'Delta',
+      'Bravo',
+      'Echo',
+    ]);
+  });
+
+  it('sorts by rating worst first and still puts unrated hotels last', () => {
+    expect(namesOf(sortResults(byName, 'rating', 'asc'))).toEqual([
+      'Alpha',
+      'Delta',
+      'Charlie',
+      'Bravo',
+      'Echo',
+    ]);
+  });
+
+  it('reads a hotel with no rating count as unrated, whatever its average', () => {
+    const stale = { ...ranked('Stale', 10000), averageRating: 5 };
+
+    expect(
+      namesOf(
+        sortResults([stale, ranked('Rated', 10000, 1)], 'rating', 'desc'),
+      ),
+    ).toEqual(['Rated', 'Stale']);
+  });
+
+  it('returns a new array and leaves the input as it was', () => {
+    const input = [...byName];
+    const sorted = sortResults(input, 'price', 'asc');
+
+    expect(sorted).not.toBe(input);
+    expect(namesOf(input)).toEqual(namesOf(byName));
+  });
+
+  it('keeps every other field of the results', () => {
+    const [first] = sortResults(
+      [{ ...ranked('Garden', 100), id: 'x' }],
+      'price',
+      'asc',
+    );
+
+    expect(first).toEqual({ ...ranked('Garden', 100), id: 'x' });
   });
 });
