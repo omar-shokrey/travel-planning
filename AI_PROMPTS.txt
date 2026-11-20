@@ -2181,3 +2181,17 @@ Claude Code added the Review schema (unique bookingId, an index on hotelId and c
 Accepted, changed, or rejected:
 Accepted: the recompute-and-verify design and the explicit UpdateReviewDto. Changed: the three reviewer suggestions. Rejected: nothing; a job that reconciles every hotel's rating stays a follow-up.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Ali Ghayesh
+Tool: Claude (claude.ai agent workspace, model Claude Opus 5.5, with its reviewer agent)
+Branch / Issue: feature/GEN-01B-smtp-config / part of #256
+Related Requirement: GEN-01-B (bonus, approved by the team leader), shared layer only
+Prompt:
+I asked Claude to deliver GEN-01-B and HTL-26 as three pull requests, one at a time, and to start with PR A: only the shared layer, adding the SMTP environment variables to backend/src/config/env.validation.ts and .env.example (SMTP_HOST empty by default, which switches email off; SMTP_PORT 1 to 65535, default 1025; SMTP_SECURE, default false; SMTP_USER and SMTP_PASSWORD as secrets that are never logged; MAIL_FROM as `Name <address>` or a plain address, checked when SMTP_HOST is set), with a Mailpit test inbox in the .env.example comment and tests in the existing env validation spec.
+How the output was used:
+Claude added the six variables in the style of the Stripe and FXRates ones, each with a doc comment, a default and a check: SMTP_HOST is empty or a host name (localhost, a container name) or an IPv4 or IPv6 address (isSmtpHost); MAIL_FROM is checked with isMailSender only when SMTP_HOST is set, and its display name allows only letters, digits, spaces and . ' & _ - so the value is always one sender and cannot add a recipient or a mail header. .env.example got the same variables with safe values and the Mailpit command. The spec covers the defaults, a full valid set, a local test inbox, SMTP_SECURE true and false, bad ports and hosts, an invalid MAIL_FROM only when SMTP_HOST is set, no SMTP value in any error message, and 30 accepted and refused senders and hosts. In backend/ format (no change), lint (0 warnings), typecheck, build and the config unit tests (97 tests) passed. No feature code: nothing reads the variables until PR B.
+Accepted, changed, or rejected:
+Accepted: the variables and their checks. Changed after the reviewer agent: the sender name became an allow-list (it accepted a comma, a colon, control characters and a name made only of spaces), the host check accepts IPv6 and container names and refuses "." and "-host", SMTP_PASSWORD got its own doc comment, a test now makes SMTP_USER and SMTP_PASSWORD fail and checks that no value is echoed, a test name was corrected and SMTP_SECURE=false is tested. Rejected: changing the root README environment table, because PR A may only touch env.validation.ts, its spec, .env.example and this file.
+================================================
