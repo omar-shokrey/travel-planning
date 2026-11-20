@@ -10,6 +10,9 @@ import { HotelAvailableRoomsController } from './hotel-available-rooms.controlle
 import { HotelAvailableRoomsService } from './hotel-available-rooms.service';
 import { HotelDetailsController } from './hotel-details.controller';
 import { HotelDetailsService } from './hotel-details.service';
+import { HotelReviewLookup } from './hotel-review-lookup.service';
+import { HotelReviewsListController } from './hotel-reviews-list.controller';
+import { HotelReviewsListService } from './hotel-reviews-list.service';
 import { HotelPoliciesController } from './hotel-policies.controller';
 import { HotelPoliciesService } from './hotel-policies.service';
 import { HotelRoomHoldsService } from './hotel-room-holds.service';
@@ -47,6 +50,8 @@ import { HotelsService } from './hotels.service';
     HotelAvailableRoomsController,
     // HTL-22: the reservations of a hotel, for its moderator.
     HotelModeratorReservationsController,
+    // HTL-24: the public reviews of a hotel.
+    HotelReviewsListController,
     HotelDetailsController,
   ],
   providers: [
@@ -62,6 +67,10 @@ import { HotelsService } from './hotels.service';
     // and for the moderator's list of reservations (HTL-22).
     HotelBookingLookup,
     HotelModeratorReservationsService,
+    // HotelReviewLookup: reads the reviews of the hotel-bookings module for
+    // the public list (HTL-24), as HotelBookingLookup does for reservations.
+    HotelReviewLookup,
+    HotelReviewsListService,
   ],
   // HotelSearchService: the hotels of a city group of an itinerary (ITN-25),
   // so that the itinerary and the search use the one free-room rule (HTL-11).
