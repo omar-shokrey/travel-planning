@@ -58,7 +58,7 @@ describe('needsSeat (FLT-12, FLT-28)', () => {
 describe('toSegmentSeats (FLT-28)', () => {
   it('lists, per segment, every passenger who takes a seat with their seat or null', () => {
     expect(
-      toSegmentSeats(booking(), [own(0, 1, '1B'), own(1, 0, '311A')]),
+      toSegmentSeats(booking(), [own(0, 1, '1B'), own(1, 0, '2C')]),
     ).toEqual([
       {
         segmentIndex: 0,
@@ -74,7 +74,7 @@ describe('toSegmentSeats (FLT-28)', () => {
         flightId: BACK.toString(),
         cabin: CabinClass.Business,
         passengers: [
-          { passengerIndex: 0, seatNumber: '311A' },
+          { passengerIndex: 0, seatNumber: '2C' },
           { passengerIndex: 1, seatNumber: null },
         ],
       },
@@ -94,7 +94,7 @@ describe('toSeatMap (FLT-28)', () => {
       seatNumbers: ['1A', '1B', '1C'],
       taken: [own(0, 0, '1A'), { ...own(0, 0, '1C'), bookingId: OTHER }],
     },
-    { seatNumbers: ['311A'], taken: [] },
+    { seatNumbers: ['2C'], taken: [] },
   ];
 
   it('marks each seat yours, taken or available, and never says who holds a taken seat', () => {
@@ -116,17 +116,14 @@ describe('toSeatMap (FLT-28)', () => {
         segmentIndex: 1,
         flightId: BACK.toString(),
         cabin: CabinClass.Business,
-        seats: [{ seatNumber: '311A', status: SeatStatus.Available }],
+        seats: [{ seatNumber: '2C', status: SeatStatus.Available }],
       },
     ]);
     expect(JSON.stringify(map.segments)).not.toContain(OTHER.toString());
   });
 
   it('lists each passenger with their seat on each segment, and an infant with none', () => {
-    const map = toSeatMap(booking(), maps, [
-      own(0, 0, '1A'),
-      own(1, 1, '311A'),
-    ]);
+    const map = toSeatMap(booking(), maps, [own(0, 0, '1A'), own(1, 1, '2C')]);
 
     expect(map.passengers).toEqual([
       {
@@ -141,7 +138,7 @@ describe('toSeatMap (FLT-28)', () => {
         fullName: 'Omar Ahmed',
         type: PassengerType.Child,
         needsSeat: true,
-        seats: [null, '311A'],
+        seats: [null, '2C'],
       },
       {
         passengerIndex: 2,

@@ -1,11 +1,6 @@
 import { CABIN_SEATS_MAX } from '../flights/flights.constants';
 import { CabinClass } from '../flights/models/cabin-class.enum';
-import {
-  SEAT_LAYOUTS,
-  SEAT_NUMBER_PATTERN,
-  buildSeatMap,
-  firstRowOf,
-} from './seat-map';
+import { SEAT_LAYOUTS, SEAT_NUMBER_PATTERN, buildSeatMap } from './seat-map';
 
 const CABINS = Object.values(CabinClass);
 
@@ -43,18 +38,18 @@ describe('buildSeatMap (FLT-28)', () => {
   });
 
   it('leaves the last row partial', () => {
-    const seats = buildSeatMap(CabinClass.Business, 6);
-
-    expect(seats.slice(-2)).toEqual([
-      `${firstRowOf(CabinClass.Business) + 1}A`,
-      `${firstRowOf(CabinClass.Business) + 1}C`,
+    expect(buildSeatMap(CabinClass.Business, 6)).toEqual([
+      '1A',
+      '1C',
+      '1D',
+      '1F',
+      '2A',
+      '2C',
     ]);
   });
 
   it('gives a single seat for a cabin of one seat', () => {
-    expect(buildSeatMap(CabinClass.First, 1)).toEqual([
-      `${firstRowOf(CabinClass.First)}A`,
-    ]);
+    expect(buildSeatMap(CabinClass.First, 1)).toEqual(['1A']);
   });
 
   it('gives no seat for a count of 0 or less', () => {
@@ -75,6 +70,14 @@ describe('buildSeatMap (FLT-28)', () => {
     expect(large.slice(0, 40)).toEqual(small);
   });
 
+  it('starts every cabin at row 1, so a change in one cabin never moves the seats of another', () => {
+    // A chosen seat is stored by its label and its cabin: changing a layout
+    // would move every stored seat of that cabin.
+    for (const cabin of CABINS) {
+      expect(buildSeatMap(cabin, 1)).toEqual(['1A']);
+    }
+  });
+
   it('uses each cabin’s own layout', () => {
     for (const cabin of CABINS) {
       const row = buildSeatMap(cabin, SEAT_LAYOUTS[cabin].length);
@@ -83,30 +86,10 @@ describe('buildSeatMap (FLT-28)', () => {
       );
     }
   });
-});
 
-describe('firstRowOf (FLT-28)', () => {
-  it('starts economy at row 1', () => {
-    expect(firstRowOf(CabinClass.Economy)).toBe(1);
-  });
+  it('keeps the largest cabin within the seat label format (at most 500 rows)', () => {
+    const first = buildSeatMap(CabinClass.First, CABIN_SEATS_MAX);
 
-  it('keeps the stored rows of every cabin: economy 1, premium economy 168, business 311, first 561', () => {
-    // A chosen seat is stored by its label: changing CABIN_SEATS_MAX, a
-    // layout or the CabinClass order would move every stored seat.
-    expect(CABINS.map(firstRowOf)).toEqual([1, 168, 311, 561]);
-  });
-
-  it('starts each cabin after every row the cabins before it can ever have, in enum order', () => {
-    let next = 1;
-    for (const cabin of CABINS) {
-      expect(firstRowOf(cabin)).toBe(next);
-      next += Math.ceil(CABIN_SEATS_MAX / SEAT_LAYOUTS[cabin].length);
-    }
-  });
-
-  it('never lets two cabins of a flight share a seat, even at the largest size', () => {
-    const all = CABINS.flatMap((cabin) => buildSeatMap(cabin, CABIN_SEATS_MAX));
-
-    expect(new Set(all).size).toBe(all.length);
+    expect(first[first.length - 1]).toBe('500F');
   });
 });

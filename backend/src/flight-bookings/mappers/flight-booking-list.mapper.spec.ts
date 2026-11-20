@@ -115,7 +115,7 @@ describe('toFlightBookingListItem (FLT-25)', () => {
         bookingId: booking()._id,
         segmentIndex: 1,
         passengerIndex: 0,
-        seatNumber: '311A',
+        seatNumber: '2C',
       },
     ]);
 
@@ -155,7 +155,7 @@ describe('toFlightBookingListItem (FLT-25)', () => {
           segmentIndex: 1,
           flightId: BACK.toString(),
           cabin: CabinClass.Business,
-          passengers: [{ passengerIndex: 0, seatNumber: '311A' }],
+          passengers: [{ passengerIndex: 0, seatNumber: '2C' }],
         },
       ],
     });

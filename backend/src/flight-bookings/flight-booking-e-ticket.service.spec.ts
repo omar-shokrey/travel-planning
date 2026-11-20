@@ -303,7 +303,7 @@ describe('buildETicket (FLT-23)', () => {
           bookingId: BOOKING_ID,
           segmentIndex: 1,
           passengerIndex: 0,
-          seatNumber: '311A',
+          seatNumber: '2C',
         },
         // Another passenger's seat never shows on Sara.
         {
@@ -316,7 +316,7 @@ describe('buildETicket (FLT-23)', () => {
     );
 
     expect(ticket.passengers.map((passenger) => passenger.seats)).toEqual([
-      ['seat not chosen yet', 'seat 311A'],
+      ['seat not chosen yet', 'seat 2C'],
       ['no seat (infant)', 'no seat (infant)'],
     ]);
   });

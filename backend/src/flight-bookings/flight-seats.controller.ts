@@ -42,7 +42,7 @@ export class FlightSeatsController {
   @ApiOperation({
     summary: 'Show the seat map of one of my flight bookings (FLT-28)',
     description:
-      'Registered users only, their own booking, in any status. For each segment, every seat of the booked cabin in order (each cabin has its own fixed rows: economy from row 1, premium economy from 168, business from 311, first from 561), each `available`, `taken` (by someone else, who is never shown) or `yours` (a passenger of this booking), and each passenger with their seat on each segment (an infant takes none). Seat numbers are a row and a letter, for example `12C`.',
+      'Registered users only, their own booking, in any status. For each segment, every seat of the booked cabin in order (every cabin starts at row 1, so a seat is always named with its cabin), each `available`, `taken` (by someone else, who is never shown) or `yours` (a passenger of this booking), and each passenger with their seat on each segment (an infant takes none). Seat numbers are a row and a letter, for example `12C`.',
   })
   @ApiOkResponse({ type: SeatMapResponseDto })
   @ApiBadRequestResponse({ description: 'The id is not a valid id' })

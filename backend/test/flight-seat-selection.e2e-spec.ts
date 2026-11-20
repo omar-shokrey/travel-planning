@@ -23,7 +23,7 @@ import {
 import { BOOKING_NOT_FOUND_MESSAGE } from './../src/flight-bookings/flight-bookings.service';
 import { FlightBooking } from './../src/flight-bookings/models/flight-booking.schema';
 import { FlightSeatAssignment } from './../src/flight-bookings/models/flight-seat-assignment.schema';
-import { buildSeatMap, firstRowOf } from './../src/flight-bookings/seat-map';
+import { buildSeatMap } from './../src/flight-bookings/seat-map';
 import { CabinClass } from './../src/flights/models/cabin-class.enum';
 import { FlightStatus } from './../src/flights/models/flight-status.enum';
 import { Notification } from './../src/notifications/models/notification.schema';
@@ -701,17 +701,17 @@ describe('Seat selection (e2e, FLT-28)', () => {
         'Seat 3A is not on the seat map of the Economy cabin',
       ],
       [
-        'a seat of another cabin',
+        'a seat of another cabin layout (G is premium economy only)',
         {
           seats: [
             {
               passengerIndex: 0,
-              seatNumber: `${firstRowOf(CabinClass.Business)}A`,
+              seatNumber: '1G',
             },
           ],
         },
         'seats.0.seatNumber',
-        `Seat ${firstRowOf(CabinClass.Business)}A is not on the seat map of the Economy cabin`,
+        'Seat 1G is not on the seat map of the Economy cabin',
       ],
       [
         'an infant',

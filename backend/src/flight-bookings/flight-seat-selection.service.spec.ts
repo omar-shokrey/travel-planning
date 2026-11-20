@@ -223,7 +223,7 @@ describe('FlightSeatSelectionService.select (FLT-28)', () => {
 
     await select(service, {
       segmentIndex: 1,
-      seats: [{ passengerIndex: 0, seatNumber: '311A' }],
+      seats: [{ passengerIndex: 0, seatNumber: '2C' }],
     });
 
     expect(flights.findById).toHaveBeenCalledWith(BACK);
@@ -233,7 +233,7 @@ describe('FlightSeatSelectionService.select (FLT-28)', () => {
         segmentIndex: 1,
         flightId: BACK,
         cabin: CabinClass.Business,
-        seatNumber: '311A',
+        seatNumber: '2C',
       }),
     );
   });
