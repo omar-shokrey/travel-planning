@@ -2,6 +2,9 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { FlightsModule } from '../flights/flights.module';
 import { Flight, FlightSchema } from '../flights/models/flight.schema';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { FlightBookingConfirmationService } from './flight-booking-confirmation.service';
+import { FlightBookingETicketService } from './flight-booking-e-ticket.service';
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
 import { FlightBookingsController } from './flight-bookings.controller';
 import { FlightBookingsService } from './flight-bookings.service';
@@ -21,10 +24,19 @@ import {
     ]),
     // FlightSeatHoldsService: the flight owns the seat counters (FLT-22).
     FlightsModule,
+    // FLT-23: the in-app notification of a confirmed booking (GEN-01). It
+    // imports nothing of the booking modules, so there is no cycle.
+    NotificationsModule,
   ],
   controllers: [FlightBookingsController],
   // FlightBookingExpiryService: the hold-expiry job (FLT-22).
-  providers: [FlightBookingsService, FlightBookingExpiryService],
+  // FlightBookingConfirmationService and FlightBookingETicketService: FLT-23.
+  providers: [
+    FlightBookingsService,
+    FlightBookingExpiryService,
+    FlightBookingConfirmationService,
+    FlightBookingETicketService,
+  ],
   // FlightBookingsService: the owner lookup and the policy acceptance for the
   // payments module (PAY-02). The payments module imports this one, never the
   // other way round.

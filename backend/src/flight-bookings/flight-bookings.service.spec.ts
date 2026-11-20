@@ -17,6 +17,7 @@ import type {
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { PassengerType } from './enums/passenger-type.enum';
 import { FLIGHT_CHANGED_MESSAGE } from './flight-bookings.constants';
+import type { FlightBookingConfirmationService } from './flight-booking-confirmation.service';
 import {
   BOOKING_NOT_FOUND_MESSAGE,
   FlightBookingsService,
@@ -176,6 +177,7 @@ function setup(
     seatHolds as unknown as FlightSeatHoldsService,
     airlines as unknown as AirlinesService,
     flightResponses as unknown as FlightResponsesService,
+    {} as FlightBookingConfirmationService,
   );
   return {
     service,
@@ -667,6 +669,7 @@ describe('FlightBookingsService owner lookup and policy acceptance (PAY-02)', ()
       {} as FlightSeatHoldsService,
       {} as AirlinesService,
       {} as FlightResponsesService,
+      {} as FlightBookingConfirmationService,
     );
     return { service, bookings };
   };

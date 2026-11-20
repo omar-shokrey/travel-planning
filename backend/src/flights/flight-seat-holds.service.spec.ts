@@ -320,3 +320,64 @@ describe('FlightSeatHoldsService.release (FLT-22)', () => {
     expect(warn.mock.calls[0][0]).toContain('Recompute heldSeats');
   });
 });
+
+describe('FlightSeatHoldsService.confirm (FLT-23)', () => {
+  let warn: jest.SpyInstance;
+
+  beforeEach(() => {
+    warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+  });
+
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
+  it('moves the seats from held to booked in that cabin, only if it holds at least that many, so the seats left do not change', async () => {
+    const { service, flights } = setup();
+
+    await expect(
+      service.confirm(FLIGHT_ID, CabinClass.Business, 3),
+    ).resolves.toBe(true);
+
+    expect(flights.updateOne).toHaveBeenCalledWith(
+      {
+        _id: FLIGHT_ID,
+        cabins: {
+          $elemMatch: { cabin: CabinClass.Business, heldSeats: { $gte: 3 } },
+        },
+      },
+      {
+        $inc: {
+          'cabins.$[c].heldSeats': -3,
+          'cabins.$[c].bookedSeats': 3,
+        },
+      },
+      { arrayFilters: [{ 'c.cabin': 'business' }] },
+    );
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('logs a mismatch instead of throwing: the seats then stay counted as held', async () => {
+    const { service, matches } = setup();
+    matches.push(0);
+
+    await expect(
+      service.confirm(FLIGHT_ID, CabinClass.Economy, 2),
+    ).resolves.toBe(false);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('Recompute the seat counters');
+  });
+
+  it.each([0, -1, 1.5])(
+    'refuses %p seats as a programming error, before any update',
+    async (seats) => {
+      const { service, flights } = setup();
+
+      await expect(
+        service.confirm(FLIGHT_ID, CabinClass.Economy, seats),
+      ).rejects.toBeInstanceOf(RangeError);
+      expect(flights.updateOne).not.toHaveBeenCalled();
+    },
+  );
+});

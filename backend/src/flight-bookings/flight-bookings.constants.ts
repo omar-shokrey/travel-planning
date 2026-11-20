@@ -85,3 +85,10 @@ export const RETURN_BAGS_WITHOUT_FLIGHT_MESSAGE =
  * so the round trip is refused for them.
  */
 export const INFANT_ON_RETURN_MESSAGE = `This passenger is an infant on the outbound flight but ${CHILD_MIN_AGE} or older on the return flight, where they need a seat: book two one-way trips`;
+
+/** FLT-23: how many new references the confirmation tries when one is already taken. */
+export const REFERENCE_ATTEMPTS = 5;
+
+/** FLT-23: the e-ticket is only for a booking that is paid and confirmed. */
+export const E_TICKET_NOT_CONFIRMED_MESSAGE =
+  'Only a confirmed booking has an e-ticket';

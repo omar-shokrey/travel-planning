@@ -1,4 +1,4 @@
-import { HttpStatus } from '@nestjs/common';
+import { HttpStatus, StreamableFile } from '@nestjs/common';
 import { HTTP_CODE_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
@@ -6,6 +6,7 @@ import { ROLES_KEY } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
 import { CabinClass } from '../flights/models/cabin-class.enum';
 import { FlightBookingsController } from './flight-bookings.controller';
+import type { FlightBookingETicketService } from './flight-booking-e-ticket.service';
 import type { FlightBookingsService } from './flight-bookings.service';
 
 describe('FlightBookingsController (FLT-22, FLT-19)', () => {
@@ -14,6 +15,7 @@ describe('FlightBookingsController (FLT-22, FLT-19)', () => {
     const service = { hold: jest.fn().mockResolvedValue(answer) };
     const controller = new FlightBookingsController(
       service as unknown as FlightBookingsService,
+      {} as FlightBookingETicketService,
     );
     const dto = {
       flightId: '6740f1c2a4b5c6d7e8f90456',
@@ -63,6 +65,7 @@ describe('FlightBookingsController.summarise (FLT-21)', () => {
     const service = { summarise: jest.fn().mockResolvedValue(answer) };
     const controller = new FlightBookingsController(
       service as unknown as FlightBookingsService,
+      {} as FlightBookingETicketService,
     );
 
     await expect(controller.summarise(dto)).resolves.toBe(answer);
@@ -85,5 +88,44 @@ describe('FlightBookingsController.summarise (FLT-21)', () => {
     );
     // POST /api/flight-bookings: the controller path with no route of its own.
     expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('/');
+  });
+});
+
+describe('FlightBookingsController.eTicket (FLT-23)', () => {
+  it('sends the PDF as a download named after the reference', async () => {
+    const pdf = Buffer.from('%PDF-1.3 test');
+    const eTickets = {
+      eTicket: jest
+        .fn()
+        .mockResolvedValue({ filename: 'e-ticket-FB-7KQ2MX.pdf', pdf }),
+    };
+    const controller = new FlightBookingsController(
+      {} as FlightBookingsService,
+      eTickets as unknown as FlightBookingETicketService,
+    );
+
+    const file = await controller.eTicket('booking-1', 'user-1');
+
+    expect(eTickets.eTicket).toHaveBeenCalledWith('booking-1', 'user-1');
+    expect(file).toBeInstanceOf(StreamableFile);
+    expect(file.getHeaders()).toEqual({
+      type: 'application/pdf',
+      disposition: 'attachment; filename="e-ticket-FB-7KQ2MX.pdf"',
+      length: pdf.length,
+    });
+  });
+
+  it('is GET :id/e-ticket for registered users only, and needs a login', () => {
+    const reflector = new Reflector();
+    const handler = FlightBookingsController.prototype.eTicket;
+
+    expect(reflector.get(ROLES_KEY, handler)).toEqual([Role.User]);
+    expect(
+      reflector.getAllAndOverride(IS_PUBLIC_KEY, [
+        handler,
+        FlightBookingsController,
+      ]),
+    ).toBeUndefined();
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe(':id/e-ticket');
   });
 });

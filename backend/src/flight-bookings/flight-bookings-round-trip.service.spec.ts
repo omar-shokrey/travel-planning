@@ -34,6 +34,7 @@ import {
   RETURN_TOO_EARLY_MESSAGE,
   returnRouteMessage,
 } from './flight-bookings.constants';
+import type { FlightBookingConfirmationService } from './flight-booking-confirmation.service';
 import {
   FlightBookingsService,
   forReturnFlight,
@@ -230,6 +231,7 @@ function setup(options: Options = {}) {
     seatHolds as unknown as FlightSeatHoldsService,
     airlines as unknown as AirlinesService,
     flightResponses as unknown as FlightResponsesService,
+    {} as FlightBookingConfirmationService,
   );
   return {
     service,
