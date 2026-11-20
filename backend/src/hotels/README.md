@@ -9,8 +9,9 @@ moderator update only the hotel in their user assignment. It reads cities from
 `ReferenceModule` and copies each city's country code into the hotel, so
 callers cannot choose a mismatched country. Reservations belong to the
 hotel-bookings module; `HotelRoomHoldsService` here finds and holds their rooms
-(HTL-16, HTL-18). The rest of the reservations (HTL-17 to HTL-22) are not built
-yet.
+(HTL-16, HTL-18) and frees them when a reservation is cancelled (HTL-21). The
+moderator's list of a hotel's reservations (HTL-22) is in this module, read
+through `HotelBookingLookup`.
 
 ## Routes
 
