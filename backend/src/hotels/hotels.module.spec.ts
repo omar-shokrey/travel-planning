@@ -7,6 +7,7 @@ import {
 import { HotelAvailableRoomsController } from './hotel-available-rooms.controller';
 import { HotelAvailableRoomsService } from './hotel-available-rooms.service';
 import { HotelDetailsController } from './hotel-details.controller';
+import { HotelModeratorReservationsController } from './hotel-moderator-reservations.controller';
 import { HotelRoomHoldsService } from './hotel-room-holds.service';
 import { HotelSearchController } from './hotel-search.controller';
 import { HotelSearchService } from './hotel-search.service';
@@ -79,6 +80,9 @@ describe('HotelsModule', () => {
     expect(firstMatch(`hotels/${id}/availability`)?.path).toBe(
       'hotels/:id/availability',
     );
+    expect(firstMatch(`hotels/${id}/reservations`)?.controller).toBe(
+      HotelModeratorReservationsController,
+    );
     expect(firstMatch(`hotels/${id}`)?.controller).toBe(HotelDetailsController);
   });
 
@@ -92,6 +96,7 @@ describe('HotelsModule', () => {
     for (const url of [
       `hotels/${id}/rooms/available`,
       `hotels/${id}/availability`,
+      `hotels/${id}/reservations`,
     ]) {
       const pattern = new RegExp(
         `^${details[0].path.replace(/:[^/]+/g, '[^/]+')}$`,

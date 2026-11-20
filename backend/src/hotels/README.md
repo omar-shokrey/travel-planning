@@ -9,8 +9,9 @@ moderator update only the hotel in their user assignment. It reads cities from
 `ReferenceModule` and copies each city's country code into the hotel, so
 callers cannot choose a mismatched country. Reservations belong to the
 hotel-bookings module; `HotelRoomHoldsService` here finds and holds their rooms
-(HTL-16, HTL-18). The rest of the reservations (HTL-17 to HTL-22) are not built
-yet.
+(HTL-16, HTL-18) and frees them when a reservation is cancelled (HTL-21). The
+moderator's list of a hotel's reservations (HTL-22) is in this module, read
+through `HotelBookingLookup`.
 
 ## Routes
 
@@ -32,6 +33,7 @@ yet.
 | `PATCH /api/hotels/:id/rooms/:roomId/reactivate`   | Its hotel moderator | HTL-06         |
 | `GET /api/hotels/:id/availability`                 | Its hotel moderator | HTL-08         |
 | `PUT /api/hotels/:id/policies`                     | Its hotel moderator | HTL-09, HTL-10 |
+| `GET /api/hotels/:id/reservations`                 | Its hotel moderator | HTL-22         |
 
 `GET /api/hotels/:id` is held by `HotelDetailsController`, which stays last in
 `HotelsModule`, so `GET /api/hotels/search` is matched before it and "search"
@@ -194,4 +196,16 @@ the order and which route answers each GET path.
 - **`hold`.** Holds every night of every room for one reservation, all or nothing. It first removes only the expired holds on those nights, then inserts one `held` night per room per night with `holdExpiresAt`. The unique (`roomId`, `date`) index decides who gets a night: if an insert fails, the nights this call inserted are deleted again by their own ids and the answer is 409. There is no transaction because the CI database is a single MongoDB server; the fallback of the spec is used, and a night left behind by a crash stops counting when its hold ends.
 - **Write first, then verify.** The checks in `findBookableRooms` and the writes in `hold` are separate steps. After the nights are inserted, `hold` reads the hotel and the rooms again: if the hotel was deactivated, or a room was deleted, deactivated or cut out of its availability (HTL-05, HTL-06) in between, only this call's nights are released and the answer is 409.
 - **`release`.** Deletes only the `held` nights of one reservation. The reservation service calls it when it cannot save the reservation after the hold. The hold-expiry job of the hotel-bookings module (HTL-18) calls it after it sets an unpaid reservation to `expired`.
+
+## The reservations of my hotel (HTL-22)
+
+HTL-22: "The system shall allow a hotel moderator to view reservations for their hotel (guest, dates, status)."
+
+- **Only the moderator of that hotel.** `@Roles(Role.HotelModerator)`, then `HotelsService.findManagedEntityOrThrow(hotelId, userId)`, the same rule as the other moderator routes: 404 for a hotel that does not exist, 403 for another hotel's moderator. Every other role gets 403 and a guest 401.
+- **The module boundary.** The hotel-bookings module owns the reservations and imports this module, so this one cannot import it back. `HotelBookingLookup` reads `hotel_bookings` with the native driver and never writes, as it already does for HTL-06. `listForHotel(hotelId, status, page)` reads one page and counts with the same filter, with a projection of only the listed fields: no price, payment, hold or policy field is even read.
+- **Which reservations.** `confirmed`, `completed` and `cancelled` (`ModeratorReservationStatus`, defined in the lookup, with a spec that checks its values against the hotel-bookings enum). A reservation waiting for payment or whose hold ran out was never a stay of the hotel, so it is not shown, as in "My hotel reservations" (HTL-20). `status` filters on one of the three; any other value is 400.
+- **What a moderator sees.** For each reservation: id, reference, the guest's **name only** (no email, phone or account id), check-in, check-out, nights, each room with its adults and children's ages, the status and when it was made. No total or other price, no payment data. A deleted account shows `name: null` (the "Deleted user" label is ACC-12).
+- **Order and pages.** Most recent check-in first, `_id` breaking ties, paginated with `paginate()` (10 by default).
+- **Guest names** come from `UsersService.findEntityById`, once per distinct guest of the page (at most one page of reads). A batch lookup in the users module would need its own PR.
+- **Tests:** `hotel-booking-lookup.service.spec.ts` (`listForHotel`: the filter, sort, page, count, the projection without prices or payments, no write, and the status values), `dto/moderator-reservations-query.dto.spec.ts`, `mappers/moderator-reservation.mapper.spec.ts`, `hotel-moderator-reservations.service.spec.ts`, `hotel-moderator-reservations.controller.spec.ts`, and `test/hotel-moderator-reservations.e2e-spec.ts` (on the `-test` database, two hotels and reservations in every status: the moderator's own list in order, each status filter, pages, nothing leaked, 403 for the other hotel's moderator both ways, 403 for a user, an admin and an airline moderator, 401 for a guest, 404, 400, Swagger).
 - **`unbook` (HTL-21).** Deletes every night of one cancelled reservation, found by `bookingId`, so all its rooms are free again for those dates: its `booked` nights and any night still `held` (the confirmation books the nights after it confirms the reservation, so a cancellation can come in between, and a later retry of the confirmation then finds nothing to book). Blocked nights have no `bookingId` and are never touched, and a second call deletes nothing. It returns how many nights it freed, so the cancellation can check rooms x nights.
