@@ -119,6 +119,10 @@ interface ProviderRoute {
   foreign?: { actor: StaffLabel; message: string };
   /** What the allowed actor's answer must contain. */
   shows?: () => string[];
+  /** A body that passes validation, so only the access checks can refuse. */
+  body?: () => Record<string, unknown>;
+  /** A check of the stored data after every refused request. */
+  unchanged?: () => Promise<void>;
 }
 
 type StaffLabel =
@@ -431,6 +435,24 @@ describe('Owner-only access to bookings (e2e, ACC-11)', () => {
       sendAllowed: true,
       foreign: { actor: 'otherHotelModerator', message: FOREIGN_HOTEL_MESSAGE },
       shows: () => [hotelReference],
+    },
+    {
+      // HTL-26. The roles guard refuses every role but a hotel moderator;
+      // then the review's hotel must be the moderator's own (HotelsService.
+      // findManagedEntityOrThrow). The reply writes, so the right moderator
+      // is never sent: test/hotel-review-replies.e2e-spec.ts covers it.
+      label: 'POST /api/reviews/:id/reply',
+      verb: 'POST',
+      path: () => `/api/reviews/${own.review}/reply`,
+      body: () => ({ text: 'A reply that must never be stored.' }),
+      allowed: 'hotelModerator',
+      sendAllowed: false,
+      foreign: { actor: 'otherHotelModerator', message: FOREIGN_HOTEL_MESSAGE },
+      unchanged: async () => {
+        const review = await reviews.findById(own.review).lean().exec();
+        expect(review).not.toBeNull();
+        expect(review?.reply).toBeUndefined();
+      },
     },
   ];
 
@@ -915,7 +937,12 @@ describe('Owner-only access to bookings (e2e, ACC-11)', () => {
     it.each(PROVIDER_ROUTES.filter((route) => route.sendAllowed))(
       'serves $allowed on $label, with the owner’s booking in it',
       async (route) => {
-        const response = await send(route.verb, route.path(), route.allowed);
+        const response = await send(
+          route.verb,
+          route.path(),
+          route.allowed,
+          route.body?.(),
+        );
 
         expect(response.status).toBe(200);
         const text = response.text;
@@ -931,10 +958,16 @@ describe('Owner-only access to bookings (e2e, ACC-11)', () => {
         const before = await snapshot();
         const foreign = route.foreign as { actor: StaffLabel; message: string };
 
-        const response = await send(route.verb, route.path(), foreign.actor);
+        const response = await send(
+          route.verb,
+          route.path(),
+          foreign.actor,
+          route.body?.(),
+        );
 
         expect(response.status).toBe(403);
         expect(response.body.message).toBe(foreign.message);
+        await route.unchanged?.();
         expect(await snapshot()).toEqual(before);
       },
     );
@@ -945,15 +978,28 @@ describe('Owner-only access to bookings (e2e, ACC-11)', () => {
         const before = await snapshot();
 
         for (const label of everyoneElse(route)) {
-          const response = await send(route.verb, route.path(), label);
+          const response = await send(
+            route.verb,
+            route.path(),
+            label,
+            route.body?.(),
+          );
           expect({ label, status: response.status }).toEqual({
             label,
             status: 403,
           });
           expect(response.body.message).toBe(ROLE_REFUSED_MESSAGE);
+          await route.unchanged?.();
         }
-        const guest = await send(route.verb, route.path(), null);
+        const guest = await send(
+          route.verb,
+          route.path(),
+          null,
+          route.body?.(),
+        );
         expect(guest.status).toBe(401);
+        expect(guest.body.message).toBe(LOGIN_REQUIRED_MESSAGE);
+        await route.unchanged?.();
         expect(await snapshot()).toEqual(before);
       },
       MANY_REQUESTS_TIMEOUT,
