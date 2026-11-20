@@ -36,6 +36,7 @@ interface ReviewBody {
   bookingId: string;
   rating: number;
   text: string | null;
+  reply: { text: string; repliedAt: string } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -241,6 +242,7 @@ describe('Hotel ratings and reviews (e2e, HTL-23)', () => {
       bookingId: ids.get('first'),
       rating: 4,
       text: 'Quiet rooms.',
+      reply: null,
       createdAt: expect.stringMatching(/Z$/),
       updatedAt: expect.stringMatching(/Z$/),
     });

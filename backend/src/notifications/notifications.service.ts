@@ -5,6 +5,8 @@ import {
   paginate,
   type PaginatedResponse,
 } from '../common/dto/paginated-response.dto';
+import { UserStatus } from '../common/enums/user-status.enum';
+import { User } from '../users/models/user.schema';
 import type { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
 import type {
   MarkAllReadResponseDto,
@@ -13,6 +15,7 @@ import type {
 } from './dto/notification-response.dto';
 import type { NotificationLinkType } from './enums/notification-link-type.enum';
 import type { NotificationType } from './enums/notification-type.enum';
+import { type EmailRecipient, EmailService } from './email.service';
 import { toNotificationResponse } from './mappers/notification.mapper';
 import { Notification } from './models/notification.schema';
 import { NOTIFICATION_NOT_FOUND_MESSAGE } from './notifications.constants';
@@ -26,7 +29,8 @@ export interface NotificationLink {
 /**
  * Owns the `notifications` collection (GEN-01). Other modules import
  * `NotificationsModule` and call `notify` or `notifyMany` after their own
- * write has succeeded.
+ * write has succeeded. Each notification is also sent by email (GEN-01-B)
+ * when SMTP is configured.
  */
 @Injectable()
 export class NotificationsService {
@@ -35,6 +39,9 @@ export class NotificationsService {
   constructor(
     @InjectModel(Notification.name)
     private readonly notifications: Model<Notification>,
+    // GEN-01-B: read only, the address and name of each recipient.
+    @InjectModel(User.name) private readonly users: Model<User>,
+    private readonly email: EmailService,
   ) {}
 
   /**
@@ -55,6 +62,12 @@ export class NotificationsService {
    * Sends the same notification to several users in one write, for example
    * every passenger of a changed or cancelled flight (FLT-05, FLT-06). A user
    * listed twice is notified once. It never throws, like `notify`.
+   *
+   * GEN-01-B: after the insert attempt, the same text is emailed to the same
+   * users as a second, independent step: it runs even if the insert failed,
+   * its failure never removes the in-app notification, and the caller does
+   * not wait for the mail server. Nothing is looked up or sent when email is
+   * switched off.
    */
   async notifyMany(
     userIds: (string | Types.ObjectId)[],
@@ -87,6 +100,34 @@ export class NotificationsService {
         error instanceof Error ? error.stack : undefined,
       );
     }
+
+    if (this.email.enabled) {
+      this.email.runInBackground(
+        () => this.emailUsers(uniqueIds, type, message),
+        `"${type}" notification`,
+      );
+    }
+  }
+
+  /**
+   * GEN-01-B: one query for the address and name of every recipient, then
+   * one email each. A deactivated account (ACC-12) gets no email; a
+   * suspended one still does, since it is told about its suspension.
+   */
+  private async emailUsers(
+    userIds: string[],
+    type: NotificationType,
+    message: string,
+  ): Promise<void> {
+    const recipients = await this.users
+      .find({
+        _id: { $in: userIds.map((id) => new Types.ObjectId(id)) },
+        status: { $ne: UserStatus.Deactivated },
+      })
+      .select('email name')
+      .lean<EmailRecipient[]>()
+      .exec();
+    await this.email.sendNotification(recipients, type, message);
   }
 
   /** The caller's notifications, newest first, optionally only the unread ones. */

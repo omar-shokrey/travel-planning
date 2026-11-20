@@ -2,12 +2,16 @@ import { DECORATORS } from '@nestjs/swagger';
 import { Types } from 'mongoose';
 import { ReviewModeration } from '../hotel-bookings/enums/review-moderation.enum';
 import {
+  REPLY_TEXT_MAX_LENGTH,
   REVIEW_RATING_MAX,
   REVIEW_RATING_MIN,
   REVIEW_TEXT_MAX_LENGTH,
 } from '../hotel-bookings/hotel-bookings.constants';
 import { ReviewSchema } from '../hotel-bookings/models/review.schema';
-import { HotelReviewResponseDto } from './dto/hotel-review-response.dto';
+import {
+  HotelReviewReplyResponseDto,
+  HotelReviewResponseDto,
+} from './dto/hotel-review-response.dto';
 import { HotelReviewLookup } from './hotel-review-lookup.service';
 import {
   REVIEWS_COLLECTION,
@@ -72,6 +76,16 @@ describe('HotelReviewLookup constants (HTL-24)', () => {
       maxLength: REVIEW_TEXT_MAX_LENGTH,
     });
   });
+
+  it('documents the reply text limit of hotel-bookings (HTL-26)', () => {
+    expect(
+      Reflect.getMetadata(
+        DECORATORS.API_MODEL_PROPERTIES,
+        HotelReviewReplyResponseDto.prototype,
+        'text',
+      ),
+    ).toMatchObject({ maxLength: REPLY_TEXT_MAX_LENGTH });
+  });
 });
 
 describe('HotelReviewLookup.listVisibleForHotel (HTL-24)', () => {
@@ -94,13 +108,20 @@ describe('HotelReviewLookup.listVisibleForHotel (HTL-24)', () => {
     expect(result).toEqual({ items: page, total: 12 });
   });
 
-  it('reads only the listed fields: no booking id, moderation or update time', async () => {
+  it("reads only the listed fields: the reply's text and time but no booking id, moderation, update time or reply moderator id", async () => {
     const { lookup, collection } = build();
 
     await lookup.listVisibleForHotel(HOTEL_ID, { skip: 0, limit: 10 });
 
     expect(collection.find).toHaveBeenCalledWith(expect.anything(), {
-      projection: { userId: 1, rating: 1, text: 1, createdAt: 1 },
+      projection: {
+        userId: 1,
+        rating: 1,
+        text: 1,
+        'reply.text': 1,
+        'reply.repliedAt': 1,
+        createdAt: 1,
+      },
     });
   });
 
