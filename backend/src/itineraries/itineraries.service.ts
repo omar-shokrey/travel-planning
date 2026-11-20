@@ -31,6 +31,7 @@ import {
 import {
   toItineraryDetailResponse,
   toItineraryResponse,
+  withoutLinkedBookings,
 } from './mappers/itinerary.mapper';
 import { assertNoNullFields } from './dto/null-fields';
 import type { ItineraryDay } from './models/itinerary-day.schema';
@@ -440,7 +441,8 @@ export class ItinerariesService {
       return null;
     }
     return {
-      itinerary: toItineraryDetailResponse(itinerary),
+      // ITN-27, ACC-11: an admin sees the content, never the owner's bookings.
+      itinerary: toItineraryDetailResponse(withoutLinkedBookings(itinerary)),
       hidden: itinerary.moderation === ItineraryModeration.Hidden,
     };
   }

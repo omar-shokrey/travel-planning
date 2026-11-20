@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ActivityResponseDto } from './activity-response.dto';
 import { BudgetEntryResponseDto } from './budget-entry-response.dto';
+import { LinkedBookingResponseDto } from './linked-booking-response.dto';
 import { TransportCostResponseDto } from './transport-cost-response.dto';
 
 /** One day of an itinerary as the API returns it. */
@@ -45,4 +46,11 @@ export class ItineraryDayResponseDto {
     type: [TransportCostResponseDto],
   })
   transportCosts: TransportCostResponseDto[];
+
+  @ApiProperty({
+    description:
+      'ITN-27. Your booked flights and hotels linked to this day, in the order they were linked. Only the owner sees them: always empty in the public view.',
+    type: [LinkedBookingResponseDto],
+  })
+  linkedBookings: LinkedBookingResponseDto[];
 }

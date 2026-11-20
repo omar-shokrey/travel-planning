@@ -183,6 +183,53 @@ describe('Itinerary model', () => {
     ]);
   });
 
+  it('stores a linked booking with its own id, and rejects a bad type, amount or currency (ITN-27)', async () => {
+    const link = (extra: Record<string, unknown> = {}) => ({
+      bookingType: 'flight',
+      bookingId: new Types.ObjectId(),
+      reference: 'FB-7KQ2MX',
+      amount: 52000,
+      currency: 'USD',
+      ...extra,
+    });
+    const itinerary = new ItineraryModel({
+      ...valid,
+      days: [day({ linkedBookings: [link()] })],
+    });
+
+    expect(itinerary.days[0].linkedBookings[0]._id).toBeInstanceOf(
+      Types.ObjectId,
+    );
+    expect(
+      new ItineraryModel({ ...valid, days: [day()] }).days[0].linkedBookings,
+    ).toEqual([]);
+    expect(
+      await invalidFields({
+        ...valid,
+        days: [
+          day({
+            linkedBookings: [
+              link({ bookingType: 'train' }),
+              link({ amount: 10.5 }),
+              link({ amount: -1 }),
+              link({ amount: MONEY_AMOUNT_MAX + 1 }),
+              link({ currency: 'dollars' }),
+              link({ bookingId: undefined, reference: undefined }),
+            ],
+          }),
+        ],
+      }),
+    ).toEqual([
+      'days.0.linkedBookings.0.bookingType',
+      'days.0.linkedBookings.1.amount',
+      'days.0.linkedBookings.2.amount',
+      'days.0.linkedBookings.3.amount',
+      'days.0.linkedBookings.4.currency',
+      'days.0.linkedBookings.5.bookingId',
+      'days.0.linkedBookings.5.reference',
+    ]);
+  });
+
   it('caps every amount at MONEY_AMOUNT_MAX, so no total can lose precision (ITN-14)', async () => {
     const money = (amount: number) => ({
       ...valid,

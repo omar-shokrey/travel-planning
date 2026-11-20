@@ -3,6 +3,7 @@ import type { Types } from 'mongoose';
 import { City } from '../../reference/models/city.schema';
 import { Activity, ActivitySchema } from './activity.schema';
 import { BudgetEntry, BudgetEntrySchema } from './budget-entry.schema';
+import { LinkedBooking, LinkedBookingSchema } from './linked-booking.schema';
 import { TransportCost, TransportCostSchema } from './transport-cost.schema';
 
 /**
@@ -29,6 +30,10 @@ export class ItineraryDay {
 
   @Prop({ type: [TransportCostSchema], default: [] })
   transportCosts: TransportCost[];
+
+  /** ITN-27: booked flights and hotels linked to this day, owner only. */
+  @Prop({ type: [LinkedBookingSchema], default: [] })
+  linkedBookings: LinkedBooking[];
 }
 
 export const ItineraryDaySchema = SchemaFactory.createForClass(ItineraryDay);

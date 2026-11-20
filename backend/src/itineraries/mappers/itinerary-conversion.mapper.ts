@@ -6,7 +6,7 @@ import { conversionOf, type SummaryConversion } from './budget-summary.mapper';
 /**
  * ITN-18: the itinerary as its owner opens it, with every budget amount also
  * in the owner's currency: each budget entry, each activity cost, each
- * transport cost and each city-group subtotal. Same rates, rounding and
+ * transport cost, each linked booking (ITN-27) and each city-group subtotal. Same rates, rounding and
  * `null` rules as the budget summary (`convertTotal`). The amounts as entered
  * stay as they are.
  */
@@ -35,6 +35,10 @@ export function withConvertedAmounts(
     transportCosts: day.transportCosts.map((cost) => {
       currencies.add(cost.currency);
       return { ...cost, converted: one(cost.amount, cost.currency) };
+    }),
+    linkedBookings: day.linkedBookings.map((link) => {
+      currencies.add(link.currency);
+      return { ...link, converted: one(link.amount, link.currency) };
     }),
   }));
   return {
