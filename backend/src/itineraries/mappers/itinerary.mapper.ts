@@ -6,15 +6,18 @@ import type { CityGroupResponseDto } from '../dto/city-group-response.dto';
 import type { ItineraryDayResponseDto } from '../dto/itinerary-day-response.dto';
 import type { ItineraryDetailResponseDto } from '../dto/itinerary-detail-response.dto';
 import type { ItineraryResponseDto } from '../dto/itinerary-response.dto';
+import type { LinkedBookingResponseDto } from '../dto/linked-booking-response.dto';
 import type { MoneyResponseDto } from '../dto/money-response.dto';
 import type { TransportCostResponseDto } from '../dto/transport-cost-response.dto';
 import {
   BudgetSummaryCategory,
   SUMMARY_CATEGORY_OF,
 } from '../enums/budget-summary-category.enum';
+import { LINKED_BOOKING_CATEGORY } from '../enums/linked-booking-type.enum';
 import type { Activity } from '../models/activity.schema';
 import type { BudgetEntry } from '../models/budget-entry.schema';
 import type { ItineraryDay } from '../models/itinerary-day.schema';
+import type { LinkedBooking } from '../models/linked-booking.schema';
 import type { TransportCost } from '../models/transport-cost.schema';
 import type { ItineraryDocument } from '../models/itinerary.schema';
 
@@ -60,6 +63,7 @@ export function toItineraryDayResponse(
     activities: (day.activities ?? []).map(toActivityResponse),
     budgetEntries: (day.budgetEntries ?? []).map(toBudgetEntryResponse),
     transportCosts: (day.transportCosts ?? []).map(toTransportCostResponse),
+    linkedBookings: (day.linkedBookings ?? []).map(toLinkedBookingResponse),
   };
 }
 
@@ -72,6 +76,23 @@ export function toBudgetEntryResponse(
     category: entry.category,
     amount: entry.amount,
     currency: entry.currency,
+  };
+}
+
+/**
+ * ITN-27: a booking linked to a day: the copy kept on the day, never the
+ * booking's other fields (passengers, owner, payment).
+ */
+export function toLinkedBookingResponse(
+  link: LinkedBooking,
+): LinkedBookingResponseDto {
+  return {
+    id: link._id.toString(),
+    bookingType: link.bookingType,
+    bookingId: link.bookingId.toString(),
+    reference: link.reference,
+    amount: link.amount,
+    currency: link.currency,
   };
 }
 
@@ -116,8 +137,9 @@ export interface CostLine extends MoneyResponseDto {
 /**
  * Everything a day costs, each with its summary line (ITN-14): activity costs
  * (ITN-10) under activities, budget entries under their own category, and
- * transport costs (ITN-16) under intercity transport. An activity without a
- * cost adds nothing. The one source for the city-group subtotals (ITN-09) and
+ * transport costs (ITN-16) under intercity transport, and linked bookings
+ * (ITN-27) under intercity transport (flight) or accommodation (hotel). An
+ * activity without a cost adds nothing. The one source for the city-group subtotals (ITN-09) and
  * the budget summary (ITN-14), so they can never disagree.
  */
 export function dayCostLines(day: ItineraryDay): CostLine[] {
@@ -143,6 +165,13 @@ export function dayCostLines(day: ItineraryDay): CostLine[] {
       category: BudgetSummaryCategory.IntercityTransport,
       amount: transport.amount,
       currency: transport.currency,
+    });
+  }
+  for (const link of day.linkedBookings ?? []) {
+    lines.push({
+      category: LINKED_BOOKING_CATEGORY[link.bookingType],
+      amount: link.amount,
+      currency: link.currency,
     });
   }
   return lines;

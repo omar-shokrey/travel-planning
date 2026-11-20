@@ -791,6 +791,7 @@ describe('ItinerariesService', () => {
           activities: [],
           budgetEntries: [],
           transportCosts: [],
+          linkedBookings: [],
         },
       ]);
     });
