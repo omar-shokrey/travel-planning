@@ -7,9 +7,14 @@ import {
   IsNotEmpty,
   IsString,
   IsUrl,
+  isEmail,
+  isFQDN,
+  isIP,
   Matches,
   Max,
   Min,
+  ValidateBy,
+  ValidateIf,
   validateSync,
 } from 'class-validator';
 
@@ -19,6 +24,36 @@ const toBoolean = ({ value }: { value: unknown }) => {
   if (value === 'false') return false;
   return value;
 };
+
+/**
+ * A mail sender: a plain address (`no-reply@example.com`) or a display name
+ * and an address in brackets (`Travel Platform <no-reply@example.com>`); a
+ * name is required before the brackets. The name starts with a letter or a
+ * digit and holds only letters, digits, spaces and `. ' & _ -`: no comma,
+ * colon, quote, bracket, control character or line break, so the value is
+ * always exactly one sender and can never add a recipient or a mail header.
+ */
+const MAIL_SENDER =
+  /^(?:[\p{L}\p{N}][\p{L}\p{N} .'&_-]*?\s*<([^<>\s]+)>|([^<>\s]+))$/u;
+
+export function isMailSender(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const match = MAIL_SENDER.exec(value);
+  const address = match?.[1] ?? match?.[2];
+  return address !== undefined && isEmail(address);
+}
+
+/**
+ * An SMTP host: a host name (`smtp.example.com`, `localhost`, a container
+ * name such as `mailpit` or `mail_pit`) or an IPv4 or IPv6 address.
+ */
+export function isSmtpHost(value: unknown): boolean {
+  return (
+    typeof value === 'string' &&
+    (isFQDN(value, { require_tld: false, allow_underscores: true }) ||
+      isIP(value))
+  );
+}
 
 /**
  * The environment variables the code reads, checked once at startup. A wrong
@@ -111,6 +146,69 @@ export class EnvironmentVariables {
       'STRIPE_WEBHOOK_SECRET must be empty or a Stripe signing secret (starts with whsec_)',
   })
   STRIPE_WEBHOOK_SECRET: string = '';
+
+  /**
+   * SMTP server for the email notifications (GEN-01-B), a host name or an IP
+   * address. It may stay empty: email is then switched off, the app starts,
+   * nothing is sent and nothing fails. In development use a local test inbox
+   * that catches every mail without sending it (see .env.example).
+   */
+  @ValidateIf((env: EnvironmentVariables) => env.SMTP_HOST !== '')
+  @ValidateBy({
+    name: 'isSmtpHost',
+    validator: {
+      validate: isSmtpHost,
+      defaultMessage: () =>
+        'SMTP_HOST must be empty or a host name or an IP address',
+    },
+  })
+  SMTP_HOST: string = '';
+
+  /** SMTP port (GEN-01-B). 1025 is the port of a local test inbox such as Mailpit. */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  SMTP_PORT: number = 1025;
+
+  /**
+   * Use TLS from the first byte (GEN-01-B), usually with port 465. False
+   * opens a plain connection first (ports 25, 587 or 1025).
+   */
+  @Transform(toBoolean)
+  @IsBoolean()
+  SMTP_SECURE: boolean = false;
+
+  /**
+   * SMTP login name (GEN-01-B). It may stay empty for a server that needs no
+   * login, such as a local test inbox. Never logged and never put in an error
+   * message.
+   */
+  @IsString()
+  SMTP_USER: string = '';
+
+  /**
+   * SMTP password (GEN-01-B). A secret: never logged and never put in an
+   * error message. It may stay empty for a server that needs no login.
+   */
+  @IsString()
+  SMTP_PASSWORD: string = '';
+
+  /**
+   * Sender of every email (GEN-01-B): `Name <address@host>` or a plain
+   * address (see isMailSender). Checked only when SMTP_HOST is set, since
+   * nothing is sent otherwise.
+   */
+  @ValidateIf((env: EnvironmentVariables) => env.SMTP_HOST !== '')
+  @ValidateBy({
+    name: 'isMailSender',
+    validator: {
+      validate: isMailSender,
+      defaultMessage: () =>
+        'MAIL_FROM must be an email address or "Name <address@host>" when SMTP_HOST is set',
+    },
+  })
+  MAIL_FROM: string = 'Travel Platform <no-reply@travel-platform.local>';
 }
 
 /** Passed to ConfigModule as `validate`. Returns the checked values or throws. */
