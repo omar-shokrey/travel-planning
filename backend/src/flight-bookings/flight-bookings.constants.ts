@@ -108,3 +108,28 @@ export const FLIGHT_BOOKING_COMPLETION_BATCH_SIZE = 100;
 
 /** FLT-06: how many bookings left on cancelled flights one run of the hourly sweep reads. */
 export const FLIGHT_CANCELLATION_SWEEP_BATCH_SIZE = 100;
+
+/** FLT-28: the answers of seat selection. */
+export const SEAT_TAKEN_MESSAGE = 'Seat already taken';
+export const SEATS_NOT_CONFIRMED_MESSAGE =
+  'Seats can only be chosen for a confirmed booking';
+export const SEATS_DEPARTED_MESSAGE =
+  'The flight has departed: seats can no longer be chosen';
+export const SEATS_FLIGHT_CANCELLED_MESSAGE =
+  'The airline cancelled this flight: seats can no longer be chosen';
+export const SEGMENT_INDEX_REQUIRED_MESSAGE =
+  'segmentIndex is required for a round trip: 0 is the outbound flight, 1 the return flight';
+export const segmentIndexRangeMessage = (segments: number): string =>
+  segments === 1
+    ? 'segmentIndex must be 0: this booking has one flight'
+    : `segmentIndex must be between 0 and ${segments - 1}`;
+export const passengerIndexRangeMessage = (passengers: number): string =>
+  `passengerIndex must be between 0 and ${passengers - 1}: the position of the passenger in the booking`;
+export const INFANT_SEAT_MESSAGE =
+  "An infant travels on an adult's lap and takes no seat";
+export const seatNotOnMapMessage = (
+  seatNumber: string,
+  cabin: string,
+): string => `Seat ${seatNumber} is not on the seat map of the ${cabin} cabin`;
+/** FLT-28: how many times one seat claim is tried: once more after a race on the same passenger. */
+export const SEAT_CLAIM_ATTEMPTS = 2;

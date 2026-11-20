@@ -15,6 +15,7 @@ import { CancelledBy } from './enums/cancelled-by.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { FLIGHT_CANCELLATION_SWEEP_BATCH_SIZE } from './flight-bookings.constants';
 import { FlightCancellationService } from './flight-cancellation.service';
+import type { FlightSeatsService } from './flight-seats.service';
 
 const FLIGHT_ID = new Types.ObjectId('6740f1c2a4b5c6d7e8f90456');
 const RETURN_ID = new Types.ObjectId('6740f1c2a4b5c6d7e8f90457');
@@ -93,6 +94,9 @@ function setup(affected: unknown[] = [], matched = 1) {
   const notifications = {
     notify: jest.fn((..._args: unknown[]) => Promise.resolve()),
   };
+  const seatAssignments = {
+    releaseBooking: jest.fn((..._args: unknown[]) => Promise.resolve(1)),
+  };
   const service = new FlightCancellationService(
     bookings as never,
     flights as never,
@@ -101,6 +105,7 @@ function setup(affected: unknown[] = [], matched = 1) {
     seatHolds as unknown as FlightSeatHoldsService,
     refunds as unknown as RefundsService,
     notifications as unknown as NotificationsService,
+    seatAssignments as unknown as FlightSeatsService,
   );
   return {
     service,
@@ -112,6 +117,7 @@ function setup(affected: unknown[] = [], matched = 1) {
     seatHolds,
     refunds,
     notifications,
+    seatAssignments,
   };
 }
 
@@ -191,14 +197,19 @@ describe('FlightCancellationService.cascade (FLT-06)', () => {
     );
   });
 
-  it('cancels a confirmed booking by the provider with a 100% refund, gives every seat back and notifies its owner', async () => {
+  it('cancels a confirmed booking by the provider with a 100% refund, gives every seat back, frees its chosen seats and notifies its owner', async () => {
     const roundTrip = booking(FlightBookingStatus.Confirmed, [
       { flightId: FLIGHT_ID, cabin: CabinClass.Economy, seats: 2 },
       { flightId: RETURN_ID, cabin: CabinClass.Business, seats: 2 },
     ]);
-    const { service, bookings, seatHolds, refunds, notifications } = setup([
-      roundTrip,
-    ]);
+    const {
+      service,
+      bookings,
+      seatHolds,
+      refunds,
+      notifications,
+      seatAssignments,
+    } = setup([roundTrip]);
 
     await expect(service.cascade(flight, NOW)).resolves.toEqual({
       cancelledBookings: 1,
@@ -220,6 +231,10 @@ describe('FlightCancellationService.cascade (FLT-06)', () => {
       [FLIGHT_ID, CabinClass.Economy, 2],
       [RETURN_ID, CabinClass.Business, 2],
     ]);
+    // FLT-28: one call for the whole booking, by its id.
+    expect(seatAssignments.releaseBooking.mock.calls).toEqual([
+      [roundTrip._id],
+    ]);
     expect(refunds.refund).toHaveBeenCalledWith({
       bookingType: BookingType.Flight,
       bookingId: roundTrip._id.toString(),
@@ -238,11 +253,16 @@ describe('FlightCancellationService.cascade (FLT-06)', () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
-  it('expires a hold and releases its seats, with no refund or notification', async () => {
+  it('expires a hold, releases its seats and frees any chosen seat, with no refund or notification', async () => {
     const held = booking(FlightBookingStatus.PendingPayment);
-    const { service, bookings, seatHolds, refunds, notifications } = setup([
-      held,
-    ]);
+    const {
+      service,
+      bookings,
+      seatHolds,
+      refunds,
+      notifications,
+      seatAssignments,
+    } = setup([held]);
 
     await expect(service.cascade(flight, NOW)).resolves.toEqual({
       cancelledBookings: 0,
@@ -257,18 +277,20 @@ describe('FlightCancellationService.cascade (FLT-06)', () => {
       CabinClass.Economy,
       2,
     );
+    expect(seatAssignments.releaseBooking).toHaveBeenCalledWith(held._id);
     expect(refunds.refund).not.toHaveBeenCalled();
     expect(notifications.notify).not.toHaveBeenCalled();
   });
 
   it('does nothing more for a booking another request changed first', async () => {
-    const { service, seatHolds, refunds, notifications } = setup(
-      [
-        booking(FlightBookingStatus.Confirmed),
-        booking(FlightBookingStatus.PendingPayment),
-      ],
-      0,
-    );
+    const { service, seatHolds, refunds, notifications, seatAssignments } =
+      setup(
+        [
+          booking(FlightBookingStatus.Confirmed),
+          booking(FlightBookingStatus.PendingPayment),
+        ],
+        0,
+      );
 
     await expect(service.cascade(flight, NOW)).resolves.toEqual({
       cancelledBookings: 0,
@@ -276,17 +298,22 @@ describe('FlightCancellationService.cascade (FLT-06)', () => {
     });
     expect(seatHolds.unbook).not.toHaveBeenCalled();
     expect(seatHolds.release).not.toHaveBeenCalled();
+    expect(seatAssignments.releaseBooking).not.toHaveBeenCalled();
     expect(refunds.refund).not.toHaveBeenCalled();
     expect(notifications.notify).not.toHaveBeenCalled();
   });
 
-  it('keeps the cancellation when the seats, the refund or the notification fail, and logs each', async () => {
-    const { service, seatHolds, refunds, notifications } = setup([
-      booking(FlightBookingStatus.Confirmed),
-      booking(FlightBookingStatus.PendingPayment),
-    ]);
+  it('keeps the cancellation when the seats, the chosen seats, the refund or the notification fail, and logs each', async () => {
+    const { service, seatHolds, refunds, notifications, seatAssignments } =
+      setup([
+        booking(FlightBookingStatus.Confirmed),
+        booking(FlightBookingStatus.PendingPayment),
+      ]);
     seatHolds.unbook.mockRejectedValueOnce(new Error('seats down'));
     seatHolds.release.mockRejectedValueOnce('release down');
+    seatAssignments.releaseBooking
+      .mockRejectedValueOnce(new Error('chosen down'))
+      .mockRejectedValueOnce(new Error('chosen down again'));
     refunds.refund.mockRejectedValueOnce(new Error('stripe down'));
     notifications.notify.mockRejectedValueOnce(new Error('notify down'));
 
@@ -297,11 +324,13 @@ describe('FlightCancellationService.cascade (FLT-06)', () => {
     const logged = logError.mock.calls.map((call) => String(call[0]));
     expect(logged).toEqual([
       expect.stringContaining('its seats failed'),
+      expect.stringContaining('its chosen seats (FLT-28) failed'),
       expect.stringContaining('its refund failed'),
       expect.stringContaining('its notification failed'),
       expect.stringContaining('its seats failed'),
+      expect.stringContaining('its chosen seats (FLT-28) failed'),
     ]);
-    expect(logError.mock.calls[3][1]).toBe('release down');
+    expect(logError.mock.calls[4][1]).toBe('release down');
   });
 
   it('goes on with the other bookings when one update fails, leaving it to the sweep', async () => {

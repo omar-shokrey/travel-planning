@@ -26,6 +26,7 @@ import {
 import { HotelBooking } from './../src/hotel-bookings/models/hotel-booking.schema';
 import { Notification } from './../src/notifications/models/notification.schema';
 import { Review } from './../src/hotel-bookings/models/review.schema';
+import { FlightSeatAssignment } from './../src/flight-bookings/models/flight-seat-assignment.schema';
 import { Hotel } from './../src/hotels/models/hotel.schema';
 import { BookingType } from './../src/payments/enums/booking-type.enum';
 import { PaymentStatus } from './../src/payments/enums/payment-status.enum';
@@ -195,6 +196,7 @@ describe('Owner-only access to bookings (e2e, ACC-11)', () => {
   let payments: Model<Payment>;
   let refunds: Model<Refund>;
   let reviews: Model<Review>;
+  let seatAssignments: Model<FlightSeatAssignment>;
   let stripeCalls: jest.SpyInstance[] = [];
 
   const createdUserIds: string[] = [];
@@ -251,6 +253,25 @@ describe('Owner-only access to bookings (e2e, ACC-11)', () => {
       notFound: BOOKING_NOT_FOUND_MESSAGE,
       owner: 200,
       ownerShows: 'flightBooking',
+    },
+    {
+      // FLT-28: the seat map only reads.
+      label: 'GET /api/flight-bookings/:id/seat-map',
+      verb: 'GET',
+      path: (ids) => `/api/flight-bookings/${ids.flightBooking}/seat-map`,
+      notFound: BOOKING_NOT_FOUND_MESSAGE,
+      owner: 200,
+      ownerShows: 'flightBooking',
+    },
+    {
+      // FLT-28: choosing a seat writes, so the owner is not sent it here;
+      // test/flight-seat-selection.e2e-spec.ts covers the owner.
+      label: 'PATCH /api/flight-bookings/:id/seat',
+      verb: 'PATCH',
+      path: (ids) => `/api/flight-bookings/${ids.flightBooking}/seat`,
+      body: () => ({ seats: [{ passengerIndex: 0, seatNumber: '1A' }] }),
+      notFound: BOOKING_NOT_FOUND_MESSAGE,
+      owner: null,
     },
     {
       label: 'POST /api/flight-bookings/:id/cancel',
@@ -512,6 +533,11 @@ describe('Owner-only access to bookings (e2e, ACC-11)', () => {
     refund: await refunds.findById(own.refund).lean().exec(),
     review: await reviews.findById(own.review).lean().exec(),
     flight: await fx.flights.findById(flightId).lean().exec(),
+    // FLT-28: a refused request never gives the booking a seat.
+    seats: await seatAssignments
+      .find({ bookingId: new Types.ObjectId(own.flightBooking) })
+      .lean()
+      .exec(),
   });
 
   const createActor = async (
@@ -543,6 +569,7 @@ describe('Owner-only access to bookings (e2e, ACC-11)', () => {
     payments = model<Payment>(Payment.name);
     refunds = model<Refund>(Refund.name);
     reviews = model<Review>(Review.name);
+    seatAssignments = model<FlightSeatAssignment>(FlightSeatAssignment.name);
 
     // The jobs of this app (holds, completion, refund recovery, ...) would act
     // on every record of the "-test" database, also other suites': stop them,
@@ -751,6 +778,13 @@ describe('Owner-only access to bookings (e2e, ACC-11)', () => {
       .lean()
       .exec()) {
       await notifications.deleteOne({ _id });
+    }
+    for (const { _id } of await seatAssignments
+      .find({ bookingId: new Types.ObjectId(own.flightBooking) })
+      .select('_id')
+      .lean()
+      .exec()) {
+      await seatAssignments.deleteOne({ _id });
     }
     await reviews.deleteOne({ _id: own.review });
     await refunds.deleteOne({ _id: own.refund });

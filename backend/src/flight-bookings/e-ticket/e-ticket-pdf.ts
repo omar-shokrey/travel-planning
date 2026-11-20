@@ -30,6 +30,11 @@ export interface ETicketPassenger {
   passport: string;
   /** The extra bags on each leg, in leg order, for example `2 extra bags, 40 kg`. */
   extraBaggage: string[];
+  /**
+   * FLT-28: the seat on each leg, in leg order: `seat 12C`, `seat not chosen
+   * yet`, or `no seat (infant)`.
+   */
+  seats: string[];
 }
 
 /** Everything the PDF shows. Built by `FlightBookingETicketService`. */
@@ -54,6 +59,21 @@ export function maskPassport(passportNumber: string): string {
 /** Whole cents as a price, `USD 525.00`, without floating point. */
 export function formatMoney(cents: number, currency: string): string {
   return `${currency} ${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, '0')}`;
+}
+
+/**
+ * The passengers part of the e-ticket, one line per passenger and one line
+ * per leg under it with the seat (FLT-28) and the extra bags. Kept apart from
+ * the PDF so the text can be tested: pdfkit compresses the page.
+ */
+export function passengerLines(ticket: ETicket): string[] {
+  return ticket.passengers.flatMap((passenger) => [
+    `${passenger.fullName} (${passenger.type}), passport ${passenger.passport}`,
+    ...passenger.extraBaggage.map(
+      (bags, index) =>
+        `   ${ticket.legs[index]?.label ?? 'Flight'}: ${passenger.seats[index] ?? 'seat not chosen yet'}, ${bags}`,
+    ),
+  ]);
 }
 
 /**
@@ -100,13 +120,8 @@ export function renderETicket(ticket: ETicket): Promise<Buffer> {
 
     doc.font('Helvetica-Bold').fontSize(14).text('Passengers');
     doc.font('Helvetica').fontSize(11);
-    for (const passenger of ticket.passengers) {
-      doc.text(
-        `${passenger.fullName} (${passenger.type}), passport ${passenger.passport}`,
-      );
-      passenger.extraBaggage.forEach((bags, index) => {
-        doc.text(`   ${ticket.legs[index]?.label ?? 'Flight'}: ${bags}`);
-      });
+    for (const line of passengerLines(ticket)) {
+      doc.text(line);
     }
     doc.moveDown();
 

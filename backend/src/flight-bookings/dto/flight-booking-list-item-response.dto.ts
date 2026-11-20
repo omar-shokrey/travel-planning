@@ -3,6 +3,7 @@ import { CabinClass } from '../../flights/models/cabin-class.enum';
 import { FlightStatus } from '../../flights/models/flight-status.enum';
 import { FlightBookingStatus } from '../enums/flight-booking-status.enum';
 import { PassengerType } from '../enums/passenger-type.enum';
+import { SegmentSeatsResponseDto } from './booking-seats-response.dto';
 
 /** FLT-25: the flight of one segment, with its times at each airport (GEN-06). */
 export class BookedFlightResponseDto {
@@ -118,4 +119,11 @@ export class FlightBookingListItemResponseDto {
     description: 'When it was cancelled (FLT-26, FLT-06)',
   })
   cancelledAt: string | null;
+
+  @ApiProperty({
+    type: [SegmentSeatsResponseDto],
+    description:
+      'FLT-28: one entry per segment, in segment order, with the seat of each passenger who takes one',
+  })
+  seats: SegmentSeatsResponseDto[];
 }

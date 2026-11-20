@@ -5,6 +5,7 @@ import type {
   BookedFlightResponseDto,
   FlightBookingListItemResponseDto,
 } from '../dto/flight-booking-list-item-response.dto';
+import { type SeatRecord, toSegmentSeats } from './booking-seats.mapper';
 import {
   type FlightBookingSource,
   toFlightBookingResponse,
@@ -36,12 +37,13 @@ export function toBookedFlight(
 /**
  * FLT-25: one booking in a list of its owner's bookings: reference, each
  * flight with its date, cabin and seats, the passengers' names and types,
- * and the status. Passport numbers and dates of birth are only in the
- * details.
+ * and the status, and the chosen seats (FLT-28; `seats` are the booking's
+ * assignments). Passport numbers and dates of birth are only in the details.
  */
 export function toFlightBookingListItem(
   booking: FlightBookingSource,
   flights: FlightsById,
+  seats: readonly SeatRecord[],
 ): FlightBookingListItemResponseDto {
   return {
     id: booking._id.toString(),
@@ -63,6 +65,7 @@ export function toFlightBookingListItem(
     currency: booking.currency,
     createdAt: booking.createdAt.toISOString(),
     cancelledAt: booking.cancelledAt?.toISOString() ?? null,
+    seats: toSegmentSeats(booking, seats),
   };
 }
 
@@ -70,12 +73,14 @@ export function toFlightBookingListItem(
  * FLT-25: the full details of a booking for its owner: everything the hold
  * returned (passengers with their passport numbers, bags, fares, totals),
  * the full flight of each segment, and the acceptance and cancellation
- * fields. Only owner routes call it.
+ * fields, and the chosen seats (FLT-28; `seats` are the booking's
+ * assignments). Only owner routes call it.
  */
 export function toFlightBookingDetails(
   booking: FlightBookingSource,
   flights: FlightsById,
   refund: RefundSummaryDto | null,
+  seats: readonly SeatRecord[],
 ): FlightBookingDetailsResponseDto {
   return {
     ...toFlightBookingResponse(booking),
@@ -87,5 +92,6 @@ export function toFlightBookingDetails(
     cancelledBy: booking.cancelledBy ?? null,
     refundPercent: booking.refundPercent ?? null,
     refund,
+    seats: toSegmentSeats(booking, seats),
   };
 }

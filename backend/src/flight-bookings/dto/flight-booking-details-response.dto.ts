@@ -2,12 +2,14 @@ import { ApiProperty } from '@nestjs/swagger';
 import { FlightResponseDto } from '../../flights/dto/flight-response.dto';
 import { RefundSummaryDto } from '../../payments/refunds/dto/refund-response.dto';
 import { CancelledBy } from '../enums/cancelled-by.enum';
+import { SegmentSeatsResponseDto } from './booking-seats-response.dto';
 import { FlightBookingResponseDto } from './flight-booking-response.dto';
 
 /**
  * FLT-25: the full details of one of the user's bookings: the booking as the
  * hold returned it, the flight of each segment, the policy acceptance and,
- * once cancelled, who cancelled it, the refund percent and the refund.
+ * once cancelled, who cancelled it, the refund percent and the refund. With
+ * FLT-28, the seat of each passenger on each segment.
  */
 export class FlightBookingDetailsResponseDto extends FlightBookingResponseDto {
   @ApiProperty({
@@ -46,4 +48,11 @@ export class FlightBookingDetailsResponseDto extends FlightBookingResponseDto {
     description: 'The refund (PAY-03), if one was made',
   })
   refund: RefundSummaryDto | null;
+
+  @ApiProperty({
+    type: [SegmentSeatsResponseDto],
+    description:
+      'FLT-28: one entry per segment, in segment order, with the seat of each passenger who takes one',
+  })
+  seats: SegmentSeatsResponseDto[];
 }

@@ -11,6 +11,7 @@ import {
 } from './flight-booking-e-ticket.service';
 import { E_TICKET_NOT_CONFIRMED_MESSAGE } from './flight-bookings.constants';
 import { BOOKING_NOT_FOUND_MESSAGE } from './flight-bookings.service';
+import type { FlightSeatsService } from './flight-seats.service';
 import type { FlightBookingSource } from './mappers/flight-booking.mapper';
 
 const BOOKING_ID = new Types.ObjectId();
@@ -106,18 +107,31 @@ function setup(found: unknown) {
   const flightResponses = {
     timeZonesOf: jest.fn(() => Promise.resolve(zones)),
   };
+  const seats = {
+    findByBooking: jest.fn((..._args: unknown[]) =>
+      Promise.resolve([
+        {
+          bookingId: BOOKING_ID,
+          segmentIndex: 0,
+          passengerIndex: 0,
+          seatNumber: '12C',
+        },
+      ]),
+    ),
+  };
   const service = new FlightBookingETicketService(
     bookings as never,
     flightModel as never,
     airlines as unknown as AirlinesService,
     flightResponses as unknown as FlightResponsesService,
+    seats as unknown as FlightSeatsService,
   );
-  return { service, bookings, airlines };
+  return { service, bookings, airlines, seats };
 }
 
 describe('FlightBookingETicketService (FLT-23)', () => {
-  it("looks for the user's own booking, and gives a PDF named after the reference", async () => {
-    const { service, bookings } = setup(booking());
+  it("looks for the user's own booking and its chosen seats, and gives a PDF named after the reference", async () => {
+    const { service, bookings, seats } = setup(booking());
 
     const file = await service.eTicket(
       BOOKING_ID.toString(),
@@ -130,6 +144,7 @@ describe('FlightBookingETicketService (FLT-23)', () => {
     });
     expect(file.filename).toBe('e-ticket-FB-7KQ2MX.pdf');
     expect(file.pdf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+    expect(seats.findByBooking).toHaveBeenCalledWith(BOOKING_ID);
   });
 
   it("answers 404 for a missing booking or another user's, which the owner filter makes the same", async () => {
@@ -163,6 +178,7 @@ describe('buildETicket (FLT-23)', () => {
       flights,
       ['Nile Air'],
       zones,
+      [],
     ).legs;
 
     expect(leg).toEqual({
@@ -190,6 +206,7 @@ describe('buildETicket (FLT-23)', () => {
       flights,
       ['Nile Air'],
       zones,
+      [],
     );
 
     expect(ticket.passengers).toEqual([
@@ -198,12 +215,14 @@ describe('buildETicket (FLT-23)', () => {
         type: 'Adult',
         passport: '*****678',
         extraBaggage: ['2 extra bags, 40 kg in total'],
+        seats: ['seat not chosen yet'],
       },
       {
         fullName: 'Omar Ahmed',
         type: 'Infant',
         passport: '*****432',
         extraBaggage: ['no extra bags'],
+        seats: ['no seat (infant)'],
       },
     ]);
     expect(JSON.stringify(ticket)).not.toContain('A12345678');
@@ -217,6 +236,7 @@ describe('buildETicket (FLT-23)', () => {
       flights,
       ['Nile Air'],
       zones,
+      [],
     );
 
     expect(ticket.seats).toBe(1);
@@ -242,6 +262,7 @@ describe('buildETicket (FLT-23)', () => {
       flights,
       ['Nile Air', 'Delta Sky'],
       zones,
+      [],
     );
 
     expect(ticket.legs[1]).toMatchObject({
@@ -258,9 +279,51 @@ describe('buildETicket (FLT-23)', () => {
     ]);
   });
 
+  it('shows the chosen seat of each passenger on each leg, and an infant none (FLT-28)', () => {
+    const roundTrip = booking({
+      segments: [
+        ...booking().segments,
+        {
+          flightId: RETURN_ID,
+          airlineId: AIRLINE_ID,
+          cabin: CabinClass.Business,
+          seatsReserved: 1,
+        },
+      ] as FlightBookingSource['segments'],
+    });
+
+    const ticket = buildETicket(
+      roundTrip,
+      'FB-7KQ2MX',
+      flights,
+      ['Nile Air', 'Delta Sky'],
+      zones,
+      [
+        {
+          bookingId: BOOKING_ID,
+          segmentIndex: 1,
+          passengerIndex: 0,
+          seatNumber: '2C',
+        },
+        // Another passenger's seat never shows on Sara.
+        {
+          bookingId: BOOKING_ID,
+          segmentIndex: 0,
+          passengerIndex: 5,
+          seatNumber: '1A',
+        },
+      ],
+    );
+
+    expect(ticket.passengers.map((passenger) => passenger.seats)).toEqual([
+      ['seat not chosen yet', 'seat 2C'],
+      ['no seat (infant)', 'no seat (infant)'],
+    ]);
+  });
+
   it('answers 404 when a flight of the booking is gone', () => {
     expect(() =>
-      buildETicket(booking(), 'FB-7KQ2MX', [], ['Nile Air'], zones),
+      buildETicket(booking(), 'FB-7KQ2MX', [], ['Nile Air'], zones, []),
     ).toThrow(NotFoundException);
   });
 });

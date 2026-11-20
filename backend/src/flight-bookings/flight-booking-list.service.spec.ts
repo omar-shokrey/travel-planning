@@ -8,11 +8,13 @@ import type { RefundsService } from '../payments/refunds/refunds.service';
 import { ListFlightBookingsQueryDto } from './dto/list-flight-bookings-query.dto';
 import { FlightBookingGroup } from './enums/flight-booking-group.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
+import { PassengerType } from './enums/passenger-type.enum';
 import {
   FLIGHT_BOOKING_GROUPS,
   FlightBookingListService,
 } from './flight-booking-list.service';
 import { BOOKING_NOT_FOUND_MESSAGE } from './flight-bookings.service';
+import type { FlightSeatsService } from './flight-seats.service';
 
 const USER_ID = '6740f1c2a4b5c6d7e8f90bbb';
 const BOOKING_ID = '6740f1c2a4b5c6d7e8f90aaa';
@@ -39,6 +41,35 @@ const stored = (flightIds: Types.ObjectId[]) => ({
   createdAt: new Date('2026-11-19T10:00:00.000Z'),
 });
 
+/** A stored booking with one adult and one infant (who takes no seat, FLT-12). */
+const withPassengers = (flightIds: Types.ObjectId[]) => ({
+  ...stored(flightIds),
+  passengers: [
+    {
+      fullName: 'Sara Ahmed',
+      dateOfBirth: '1990-05-14',
+      passportNumber: 'A12345678',
+      type: PassengerType.Adult,
+      baggage: [],
+    },
+    {
+      fullName: 'Baby Ahmed',
+      dateOfBirth: '2026-06-01',
+      passportNumber: 'B12345678',
+      type: PassengerType.Infant,
+      baggage: [],
+    },
+  ],
+});
+
+/** The seat assignment of the adult of `withPassengers` on segment `segmentIndex`. */
+const seat = (segmentIndex: number, seatNumber: string) => ({
+  bookingId: new Types.ObjectId(BOOKING_ID),
+  segmentIndex,
+  passengerIndex: 0,
+  seatNumber,
+});
+
 const response = (id: Types.ObjectId) => ({
   id: id.toString(),
   flightNumber: `F${id.toString().slice(-3)}`,
@@ -48,6 +79,7 @@ function setup(
   aggregated: unknown[] = [],
   found: unknown = null,
   refund: unknown = null,
+  ownSeats: unknown[] = [],
 ) {
   const aggregate = jest.fn((..._args: unknown[]) => ({
     exec: () => Promise.resolve(aggregated),
@@ -77,11 +109,18 @@ function setup(
       Promise.resolve(refund),
     ),
   };
+  const seats = {
+    findByBooking: jest.fn((..._args: unknown[]) => Promise.resolve(ownSeats)),
+    findByBookings: jest.fn((..._args: unknown[]) =>
+      Promise.resolve(new Map([[BOOKING_ID, ownSeats]])),
+    ),
+  };
   const service = new FlightBookingListService(
     bookings as never,
     flights as never,
     flightResponses as unknown as FlightResponsesService,
     refunds as unknown as RefundsService,
+    seats as unknown as FlightSeatsService,
   );
   return {
     service,
@@ -90,6 +129,7 @@ function setup(
     flightsFind,
     flightResponses,
     refunds,
+    seats,
   };
 }
 
@@ -224,6 +264,35 @@ describe('FlightBookingListService.list (FLT-25)', () => {
     });
   });
 
+  it('shows the chosen seats of each booking of the page, read in one query (FLT-28)', async () => {
+    const page = [withPassengers([FLIGHT_A, FLIGHT_B])];
+    const { service, seats } = setup(
+      [{ page, total: [{ count: 1 }] }],
+      null,
+      null,
+      [seat(1, '30F')],
+    );
+
+    const result = await service.list(USER_ID, query(), NOW);
+
+    expect(seats.findByBookings).toHaveBeenCalledTimes(1);
+    expect(seats.findByBookings).toHaveBeenCalledWith([page[0]._id]);
+    expect(result.items[0].seats).toEqual([
+      {
+        segmentIndex: 0,
+        flightId: FLIGHT_A.toString(),
+        cabin: CabinClass.Economy,
+        passengers: [{ passengerIndex: 0, seatNumber: null }],
+      },
+      {
+        segmentIndex: 1,
+        flightId: FLIGHT_B.toString(),
+        cabin: CabinClass.Economy,
+        passengers: [{ passengerIndex: 0, seatNumber: '30F' }],
+      },
+    ]);
+  });
+
   it('answers an empty page without reading any flight', async () => {
     const { service, flightsFind } = setup([{ page: [], total: [] }]);
 
@@ -279,8 +348,25 @@ describe('FlightBookingListService.details (FLT-25)', () => {
     });
   });
 
+  it('shows the chosen seat of each passenger who takes one (FLT-28)', async () => {
+    const booking = withPassengers([FLIGHT_A]);
+    const { service, seats } = setup([], booking, null, [seat(0, '12C')]);
+
+    const details = await service.details(BOOKING_ID, USER_ID, NOW);
+
+    expect(seats.findByBooking).toHaveBeenCalledWith(booking._id);
+    expect(details.seats).toEqual([
+      {
+        segmentIndex: 0,
+        flightId: FLIGHT_A.toString(),
+        cabin: CabinClass.Economy,
+        passengers: [{ passengerIndex: 0, seatNumber: '12C' }],
+      },
+    ]);
+  });
+
   it('answers 404 for a missing booking or another user’s, and reads nothing else', async () => {
-    const { service, flightsFind, refunds } = setup([], null);
+    const { service, flightsFind, refunds, seats } = setup([], null);
 
     const error = await service
       .details(BOOKING_ID, USER_ID)
@@ -289,5 +375,6 @@ describe('FlightBookingListService.details (FLT-25)', () => {
     expect((error as Error).message).toBe(BOOKING_NOT_FOUND_MESSAGE);
     expect(flightsFind).not.toHaveBeenCalled();
     expect(refunds.findSummaryByBooking).not.toHaveBeenCalled();
+    expect(seats.findByBooking).not.toHaveBeenCalled();
   });
 });

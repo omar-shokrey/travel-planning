@@ -21,6 +21,7 @@ import { CancelledBy } from './enums/cancelled-by.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { flightCancelledMessage } from './flight-cancelled-message';
 import { FLIGHT_CANCELLATION_SWEEP_BATCH_SIZE } from './flight-bookings.constants';
+import { FlightSeatsService } from './flight-seats.service';
 import { FlightBooking } from './models/flight-booking.schema';
 
 /** What the cascade reads of a booking. */
@@ -58,6 +59,7 @@ export class FlightCancellationService {
     private readonly seatHolds: FlightSeatHoldsService,
     private readonly refunds: RefundsService,
     private readonly notifications: NotificationsService,
+    private readonly seatAssignments: FlightSeatsService,
   ) {}
 
   /**
@@ -226,6 +228,11 @@ export class FlightCancellationService {
         .unbook(segment.flightId, segment.cabin, segment.seatsReserved)
         .catch((error: unknown) => this.logFailure(id, 'seats', error));
     }
+    await this.seatAssignments
+      .releaseBooking(booking._id)
+      .catch((error: unknown) =>
+        this.logFailure(id, 'chosen seats (FLT-28)', error),
+      );
     await this.refunds
       .refund({
         bookingType: BookingType.Flight,
@@ -267,6 +274,11 @@ export class FlightCancellationService {
         .release(segment.flightId, segment.cabin, segment.seatsReserved)
         .catch((error: unknown) => this.logFailure(id, 'seats', error));
     }
+    await this.seatAssignments
+      .releaseBooking(booking._id)
+      .catch((error: unknown) =>
+        this.logFailure(id, 'chosen seats (FLT-28)', error),
+      );
     return 1;
   }
 

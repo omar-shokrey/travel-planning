@@ -2,6 +2,7 @@ import {
   type ETicket,
   formatMoney,
   maskPassport,
+  passengerLines,
   renderETicket,
 } from './e-ticket-pdf';
 
@@ -31,6 +32,7 @@ const ticket: ETicket = {
       type: 'Adult',
       passport: '*****01X',
       extraBaggage: ['no extra bags'],
+      seats: ['seat 12C'],
     },
   ],
   seats: 1,
@@ -54,6 +56,54 @@ describe('formatMoney (FLT-23)', () => {
     [0, 'USD 0.00'],
   ])('formats %p cents as %p', (cents, expected) => {
     expect(formatMoney(cents, 'USD')).toBe(expected);
+  });
+});
+
+describe('passengerLines (FLT-23, FLT-28)', () => {
+  it('prints each passenger, then the seat and the extra bags on each leg', () => {
+    expect(passengerLines(ticket)).toEqual([
+      'Test Adult (Adult), passport *****01X',
+      '   Outbound: seat 12C, no extra bags',
+    ]);
+  });
+
+  it('prints a seat not chosen yet and an infant without a seat, on every leg of a round trip', () => {
+    const roundTrip: ETicket = {
+      ...ticket,
+      legs: [...ticket.legs, { ...ticket.legs[0], label: 'Return' }],
+      passengers: [
+        {
+          ...ticket.passengers[0],
+          extraBaggage: ['no extra bags', '1 extra bag, 20 kg in total'],
+          seats: ['seat not chosen yet', 'seat 13A'],
+        },
+        {
+          fullName: 'Test Infant',
+          type: 'Infant',
+          passport: '*****02Y',
+          extraBaggage: ['no extra bags', 'no extra bags'],
+          seats: ['no seat (infant)', 'no seat (infant)'],
+        },
+      ],
+    };
+
+    expect(passengerLines(roundTrip)).toEqual([
+      'Test Adult (Adult), passport *****01X',
+      '   Outbound: seat not chosen yet, no extra bags',
+      '   Return: seat 13A, 1 extra bag, 20 kg in total',
+      'Test Infant (Infant), passport *****02Y',
+      '   Outbound: no seat (infant), no extra bags',
+      '   Return: no seat (infant), no extra bags',
+    ]);
+  });
+
+  it('says "seat not chosen yet" for a leg that has no seat line', () => {
+    const lines = passengerLines({
+      ...ticket,
+      passengers: [{ ...ticket.passengers[0], seats: [] }],
+    });
+
+    expect(lines[1]).toBe('   Outbound: seat not chosen yet, no extra bags');
   });
 });
 
