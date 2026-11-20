@@ -5,6 +5,7 @@ import {
   CancellationTierSchema,
 } from '../../flights/models/airline-policy.schema';
 import { CabinClass } from '../../flights/models/cabin-class.enum';
+import { CancelledBy } from '../enums/cancelled-by.enum';
 import { FlightBookingStatus } from '../enums/flight-booking-status.enum';
 import { PassengerType } from '../enums/passenger-type.enum';
 import {
@@ -214,8 +215,8 @@ export const PassengerSchema = SchemaFactory.createForClass(Passenger);
  * A flight booking, as in `FLIGHT_BOOKING` of the data model in
  * `specs/travel-platform.md`: the seats are held for 10 minutes while the
  * payment is pending (FLT-22), with the passengers and their extra bags
- * (FLT-19). `policyAcceptedAt` is set by PAY-02. The fields of later issues
- * (`cancelledAt`, `cancelledBy`, `refundPercent` FLT-26) are added by them.
+ * (FLT-19). `policyAcceptedAt` is set by PAY-02; `cancelledAt`, `cancelledBy`
+ * and `refundPercent` by a cancellation (FLT-26, later FLT-06).
  */
 @Schema({ collection: 'flight_bookings', timestamps: true })
 export class FlightBooking {
@@ -248,6 +249,18 @@ export class FlightBooking {
    */
   @Prop({ type: Date })
   policyAcceptedAt?: Date;
+
+  /** FLT-26: when the booking was cancelled; set once, with the status. */
+  @Prop({ type: Date })
+  cancelledAt?: Date;
+
+  /** FLT-26 (`user`), FLT-06 (`provider`). */
+  @Prop({ type: String, enum: Object.values(CancelledBy) })
+  cancelledBy?: CancelledBy;
+
+  /** FLT-26: the refund in percent (0 to 100) decided at the cancellation. */
+  @Prop({ type: Number, min: 0, max: 100 })
+  refundPercent?: number;
 
   /** The platform currency (PAY-04). */
   @Prop({ type: String, required: true })
