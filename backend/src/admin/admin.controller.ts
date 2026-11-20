@@ -33,7 +33,10 @@ import { ProviderType } from '../common/enums/provider-type.enum';
 import { Role } from '../common/enums/role.enum';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { UserResponseDto } from '../users/dto/user-response.dto';
+import { AdminBookingsService } from './admin-bookings.service';
 import { AdminService } from './admin.service';
+import { AdminBookingResponseDto } from './dto/admin-booking-response.dto';
+import { ListAdminBookingsQueryDto } from './dto/list-admin-bookings-query.dto';
 import { CreateModeratorDto } from './dto/create-moderator.dto';
 import { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
 import { ListAuditLogsQueryDto } from './dto/list-audit-logs-query.dto';
@@ -55,7 +58,10 @@ export const PROVIDER_TYPE_PIPE = new ParseEnumPipe(ProviderType, {
 @Roles(Role.Admin)
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly adminBookingsService: AdminBookingsService,
+  ) {}
 
   @Get('accounts')
   @ApiOperation({
@@ -75,6 +81,26 @@ export class AdminController {
     @Query() query: ListAccountsQueryDto,
   ): Promise<PaginatedResponse<UserResponseDto>> {
     return this.adminService.listAccounts(query);
+  }
+
+  @Get('bookings')
+  @ApiOperation({
+    summary: 'List all bookings (ACC-17)',
+    description:
+      'Admin only, read only. Every flight booking and hotel reservation, newest first (when it was made), 10 per page by default (GEN-05). Each row: the reference (null until confirmed), the status, the account that booked (`id`, `name`, `email`), the providers (the hotel, or the distinct airlines of the flights), the trip dates (flight: first departure and last arrival in UTC; hotel: check-in and check-out as YYYY-MM-DD), the amount in minor units with its currency, and when it was made. All five statuses are listed, `pending_payment` and `expired` too. `type` (flight or hotel) and `status` filter; `from` and `to` (YYYY-MM-DD, both included, UTC) filter on the day the booking was made, not on the travel dates. All given filters must match. An empty result is `items: []`. No passenger, payment or policy data is returned.',
+  })
+  @ApiPaginatedResponse(AdminBookingResponseDto)
+  @ApiBadRequestResponse({
+    description:
+      '`page`, `limit`, `type`, `status`, `from` or `to` is invalid, `from` is after `to`, or the query has a parameter that is not allowed',
+  })
+  @ApiForbiddenResponse({
+    description: 'The caller is not an administrator, or is suspended',
+  })
+  listBookings(
+    @Query() query: ListAdminBookingsQueryDto,
+  ): Promise<PaginatedResponse<AdminBookingResponseDto>> {
+    return this.adminBookingsService.list(query);
   }
 
   @Get('audit-logs')
