@@ -111,7 +111,8 @@ describe('Bookings linked to itinerary days (e2e, ITN-27)', () => {
   const link = (
     itineraryId: string,
     body: Record<string, unknown>,
-    cookie: string | undefined = owner.cookie,
+    // `null` for a guest: an explicit `undefined` would take the default.
+    cookie: string | null = owner.cookie,
   ) => {
     const call = http().post(`/api/itineraries/${itineraryId}/bookings`);
     return (cookie ? call.set('Cookie', cookie) : call).send(body);
@@ -335,7 +336,7 @@ describe('Bookings linked to itinerary days (e2e, ITN-27)', () => {
       const response = await link(
         itinerary.id,
         flight(itinerary.days[0].id),
-        undefined,
+        null,
       );
 
       expect(response.status).toBe(401);
