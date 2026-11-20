@@ -373,7 +373,7 @@ describe('Hotel reservation confirmation (e2e, HTL-17)', () => {
     expect(await notificationsOf(id)).toHaveLength(1);
   });
 
-  it('does not confirm a payment that arrives after the hold ended', async () => {
+  it('does not confirm a payment that arrives after the hold ended, and only notifies the refund (PAY-03)', async () => {
     const room = await createRoom('704', 'Double');
     const id = await reserve([room], newStay(2));
     const payment = await startPayment(id);
@@ -397,7 +397,10 @@ describe('Hotel reservation confirmation (e2e, HTL-17)', () => {
     expect(
       (await nightsOf(id)).some((n) => n.state === RoomNightState.Booked),
     ).toBe(false);
-    expect(await notificationsOf(id)).toHaveLength(0);
+    // PAY-03: the late payment is refunded in full and the user is told so.
+    // There is no booking confirmation.
+    const sent = await notificationsOf(id);
+    expect(sent.map((n) => n.type)).toEqual([NotificationType.Refund]);
   });
 
   it('the expiry job never releases a confirmed reservation, even once its old hold end has passed', async () => {

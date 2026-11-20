@@ -321,7 +321,7 @@ describe('Flight booking confirmation (e2e, FLT-23)', () => {
     expect(await notificationsOf(booking.id)).toHaveLength(1);
   });
 
-  it('does not confirm a payment that arrives after the hold ended: no reference, no booked seat', async () => {
+  it('does not confirm a payment that arrives after the hold ended: no reference, no booked seat, only the refund notification (PAY-03)', async () => {
     const booking = await heldBooking();
     const payment = await startPayment(booking.id);
     // The hold ends before Stripe reports the payment (this suite's own booking).
@@ -339,7 +339,10 @@ describe('Flight booking confirmation (e2e, FLT-23)', () => {
     expect(stored.status).not.toBe(FlightBookingStatus.Confirmed);
     expect(stored.reference).toBeUndefined();
     expect((await cabinOf(booking.flightId)).bookedSeats).toBe(0);
-    expect(await notificationsOf(booking.id)).toHaveLength(0);
+    // PAY-03: the late payment is refunded in full and the user is told so.
+    // There is no booking confirmation.
+    const sent = await notificationsOf(booking.id);
+    expect(sent.map((n) => n.type)).toEqual([NotificationType.Refund]);
   });
 
   describe('GET /api/flight-bookings/:id/e-ticket', () => {
