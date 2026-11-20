@@ -39,6 +39,30 @@ export const HOTEL_SEARCH_ROOMS_MAX = 20;
 export const HOTEL_SEARCH_GUESTS_MAX = 100;
 
 /**
+ * HTL-12: the orders of hotel search. `name` is the order of HTL-11 and the
+ * default; `price` is the hotel's lowest price per night for the stay;
+ * `rating` is its average rating.
+ */
+export const HOTEL_SEARCH_SORTS = ['name', 'price', 'rating'] as const;
+export type HotelSearchSort = (typeof HOTEL_SEARCH_SORTS)[number];
+
+/** HTL-12: the direction of `sortBy` (the same values as the flight search). */
+export const HOTEL_SEARCH_SORT_ORDERS = ['asc', 'desc'] as const;
+export type HotelSearchSortOrder = (typeof HOTEL_SEARCH_SORT_ORDERS)[number];
+
+/**
+ * HTL-12: a hotel's average rating runs from 1 to 5 (HTL-23). Must match
+ * `REVIEW_RATING_MIN` and `REVIEW_RATING_MAX` in hotel-bookings.constants.ts;
+ * it is a copy because this module must not import hotel-bookings.
+ */
+export const HOTEL_RATING_MIN = 1;
+export const HOTEL_RATING_MAX = 5;
+
+/** HTL-12: the answer to a price range whose minimum is above its maximum. */
+export const HOTEL_PRICE_RANGE_MESSAGE =
+  'minPrice must not be greater than maxPrice';
+
+/**
  * The reservations' collection, as the data model names it. The hotels module
  * reads it only through `HotelBookingLookup`, because the hotel-bookings
  * module imports this one and not the other way round.
