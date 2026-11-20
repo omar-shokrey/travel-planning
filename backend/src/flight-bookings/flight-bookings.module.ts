@@ -14,10 +14,17 @@ import { FlightBookingsController } from './flight-bookings.controller';
 import { FlightCancellationController } from './flight-cancellation.controller';
 import { FlightCancellationService } from './flight-cancellation.service';
 import { FlightBookingsService } from './flight-bookings.service';
+import { FlightSeatSelectionService } from './flight-seat-selection.service';
+import { FlightSeatsController } from './flight-seats.controller';
+import { FlightSeatsService } from './flight-seats.service';
 import {
   FlightBooking,
   FlightBookingSchema,
 } from './models/flight-booking.schema';
+import {
+  FlightSeatAssignment,
+  FlightSeatAssignmentSchema,
+} from './models/flight-seat-assignment.schema';
 
 @Module({
   imports: [
@@ -27,6 +34,8 @@ import {
       // departure date and bag weight before the seats are held. The seats
       // themselves are changed only through FlightSeatHoldsService.
       { name: Flight.name, schema: FlightSchema },
+      // FLT-28: the chosen seats, a collection of this module.
+      { name: FlightSeatAssignment.name, schema: FlightSeatAssignmentSchema },
     ]),
     // FlightSeatHoldsService: the flight owns the seat counters (FLT-22).
     FlightsModule,
@@ -38,7 +47,11 @@ import {
     RefundsModule,
   ],
   // FlightCancellationController: POST /api/flights/:id/cancel (FLT-06).
-  controllers: [FlightBookingsController, FlightCancellationController],
+  controllers: [
+    FlightBookingsController,
+    FlightSeatsController,
+    FlightCancellationController,
+  ],
   // FlightBookingExpiryService: the hold-expiry job (FLT-22).
   // FlightBookingConfirmationService and FlightBookingETicketService: FLT-23.
   // FlightBookingCancellationService: FLT-26.
@@ -54,6 +67,8 @@ import {
     FlightBookingListService,
     // FLT-06: the cancellation by the airline, its cascade and its hourly sweep.
     FlightCancellationService,
+    FlightSeatsService,
+    FlightSeatSelectionService,
   ],
   // FlightBookingsService: the owner lookup and the policy acceptance for the
   // payments module (PAY-02). The payments module imports this one, never the
