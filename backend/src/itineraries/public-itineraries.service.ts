@@ -42,6 +42,19 @@ export const PUBLICLY_VISIBLE = {
   authorDeactivated: false,
 } as const;
 
+/**
+ * BLG-13: what a blog post shows of the itinerary attached to it. Only the
+ * fields of a search result's header: never the days, activities, budget,
+ * linked bookings (ITN-27) or the owner id.
+ */
+export interface PublicItinerarySummary {
+  id: string;
+  title: string;
+  countries: string[];
+  startDate: string;
+  dayCount: number;
+}
+
 /** Escapes a keyword so it is matched as plain text, never as a pattern. */
 export function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -103,6 +116,31 @@ export class PublicItinerariesService {
       { ...PUBLICLY_VISIBLE, ownerId: new Types.ObjectId(authorId) },
       query,
     );
+  }
+
+  /**
+   * BLG-13, for the blog module (never through a controller): the summary of
+   * an itinerary attached to a post, or `null` when it is not publicly
+   * visible now: private, hidden by an admin (GEN-10), its owner deactivated
+   * (ACC-12) or deleted. One query with the same filter as search and the
+   * public view (`PUBLICLY_VISIBLE`), so they can never disagree.
+   */
+  async findPublicSummary(id: string): Promise<PublicItinerarySummary | null> {
+    const found = await this.itineraries
+      .findOne({ _id: id, ...PUBLICLY_VISIBLE })
+      .select('title countries startDate dayCount')
+      .lean()
+      .exec();
+    if (!found) {
+      return null;
+    }
+    return {
+      id: found._id.toString(),
+      title: found.title,
+      countries: [...found.countries],
+      startDate: found.startDate,
+      dayCount: found.dayCount,
+    };
   }
 
   /** ITN-21: a public itinerary, read-only, with its author, days, activities and budget. */

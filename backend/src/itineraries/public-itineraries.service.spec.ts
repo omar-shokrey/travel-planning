@@ -467,4 +467,65 @@ describe('PublicItinerariesService', () => {
       'a\\.b\\*c\\+d\\?e\\^f\\$g\\{h\\}i\\(j\\)k\\|l\\[m\\]n\\\\o',
     );
   });
+
+  describe('findPublicSummary (BLG-13)', () => {
+    const withFound = (found: unknown) => {
+      const chain = {
+        select: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue(found),
+      };
+      const findOne = jest
+        .spyOn(ItineraryModel, 'findOne')
+        .mockReturnValue(chain as never);
+      return { chain, findOne };
+    };
+
+    it('reads with the same filter as search and the public view: public, not hidden, owner active', async () => {
+      const id = new Types.ObjectId();
+      const { chain, findOne } = withFound(null);
+
+      await service.findPublicSummary(id.toString());
+
+      expect(findOne).toHaveBeenCalledWith({
+        _id: id.toString(),
+        ...PUBLICLY_VISIBLE,
+      });
+      expect(PUBLICLY_VISIBLE).toEqual({
+        visibility: ItineraryVisibility.Public,
+        moderation: ItineraryModeration.Visible,
+        authorDeactivated: false,
+      });
+      expect(chain.select).toHaveBeenCalledWith(
+        'title countries startDate dayCount',
+      );
+    });
+
+    it('gives the summary, with exactly these fields, of a publicly visible itinerary', async () => {
+      const id = new Types.ObjectId();
+      withFound({
+        _id: id,
+        title: 'Ten days in Egypt',
+        countries: ['EG'],
+        startDate: '2026-12-20',
+        dayCount: 10,
+      });
+
+      expect(await service.findPublicSummary(id.toString())).toEqual({
+        id: id.toString(),
+        title: 'Ten days in Egypt',
+        countries: ['EG'],
+        startDate: '2026-12-20',
+        dayCount: 10,
+      });
+    });
+
+    it('gives null when the filter finds nothing: missing, private, hidden or owner deactivated', async () => {
+      withFound(null);
+
+      expect(
+        await service.findPublicSummary(new Types.ObjectId().toString()),
+      ).toBeNull();
+    });
+  });
 });
