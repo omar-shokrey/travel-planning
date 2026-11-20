@@ -46,3 +46,6 @@ export const MODERATOR_ROLE_NAMES: Readonly<
   [Role.HotelModerator]: 'a hotel moderator',
   [Role.AirlineModerator]: 'an airline moderator',
 };
+
+/** ACC-02: the subject of the email with the verification link. */
+export const EMAIL_VERIFICATION_SUBJECT = 'Verify your email address';

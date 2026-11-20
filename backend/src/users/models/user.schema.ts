@@ -61,6 +61,15 @@ export class User {
   @Prop({ default: false })
   mustChangePassword: boolean;
 
+  /**
+   * ACC-02: false only for an account registered while email is switched on,
+   * until it opens the verification link; such an account cannot book. Every
+   * other account (moderators, admins, accounts made before ACC-02, accounts
+   * registered while email is off) has no field or `true`: verified.
+   */
+  @Prop({ type: Boolean, default: true })
+  emailVerified: boolean;
+
   @Prop()
   deactivatedAt?: Date;
 

@@ -271,6 +271,7 @@ describe('PATCH /api/users/me (e2e, ACC-09)', () => {
       ['role', 'admin'],
       ['status', 'active'],
       ['mustChangePassword', false],
+      ['emailVerified', true],
     ])('refuses to change %s', async (field, value) => {
       const user = await createUser();
 

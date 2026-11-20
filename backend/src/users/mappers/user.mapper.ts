@@ -7,7 +7,9 @@ export type UserSource = Pick<
   User,
   'name' | 'email' | 'role' | 'status' | 'mustChangePassword' | 'createdAt'
 > &
-  Partial<Pick<User, 'phone' | 'preferredCurrency' | 'assignment'>> & {
+  Partial<
+    Pick<User, 'phone' | 'preferredCurrency' | 'assignment' | 'emailVerified'>
+  > & {
     _id: Types.ObjectId;
   };
 
@@ -20,6 +22,8 @@ export function toUserResponse(user: UserSource): UserResponseDto {
     role: user.role,
     status: user.status,
     mustChangePassword: user.mustChangePassword,
+    // ACC-02: an account saved without the field is verified.
+    emailVerified: user.emailVerified !== false,
     // Left out when the account has none (ACC-09).
     ...(user.phone != null && { phone: user.phone }),
     ...(user.preferredCurrency != null && {

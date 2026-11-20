@@ -23,9 +23,23 @@ describe('toUserResponse', () => {
       role: 'user',
       status: 'active',
       mustChangePassword: false,
+      emailVerified: true,
       createdAt: '2026-11-05T11:00:00.000Z',
     });
   });
+
+  it.each([
+    ['false while it is not verified', false, false],
+    ['true once it is verified', true, true],
+    ['true for an account saved before the field existed', undefined, true],
+  ])(
+    'tells whether the email is verified (ACC-02): %s',
+    (_label, emailVerified, expected) => {
+      expect(toUserResponse({ ...source, emailVerified }).emailVerified).toBe(
+        expected,
+      );
+    },
+  );
 
   it('tells when the account must set a new password (ACC-07a, ACC-13)', () => {
     expect(
@@ -84,6 +98,7 @@ describe('toUserResponse', () => {
     expect(Object.keys(toUserResponse(stored)).sort()).toEqual([
       'createdAt',
       'email',
+      'emailVerified',
       'id',
       'mustChangePassword',
       'name',

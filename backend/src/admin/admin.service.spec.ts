@@ -365,6 +365,7 @@ describe('AdminService', () => {
           role: 'user',
           status: 'active',
           mustChangePassword: false,
+          emailVerified: true,
           createdAt: '2026-11-14T10:00:00.000Z',
         },
       ]);

@@ -8,6 +8,8 @@ import { ConfigService } from '@nestjs/config';
 import type { EnvironmentVariables } from '../config/env.validation';
 import {
   type EmailContent,
+  type EmailVerificationRequest,
+  emailVerificationEmail,
   type InvitedModerator,
   moderatorInvitationEmail,
   notificationEmail,
@@ -43,14 +45,15 @@ function errorCode(error: unknown): string {
 }
 
 /**
- * GEN-01-B: sends the email notifications and the moderator invitations
- * through the SMTP transport. When SMTP_HOST is empty there is no transport:
+ * GEN-01-B: sends the email notifications, the moderator invitations and the
+ * verification links (ACC-02) through the SMTP transport. When SMTP_HOST is empty there is no transport:
  * `enabled` is false and every method returns at once, sending nothing.
  *
  * Sending never throws and is bounded: at most MAX_EMAILS_IN_FLIGHT emails at
  * once across the whole app (one queue for every caller), every SMTP step
- * times out (mail-transport.ts), and one failed email never stops the others. A failure is logged with what was sent and how many
- * failed only, never an address, a name, a message or an SMTP credential.
+ * times out (mail-transport.ts), and one failed email never stops the others.
+ * A failure is logged with what was sent and how many failed only, never an
+ * address, a name, a message, a token or an SMTP credential.
  */
 @Injectable()
 export class EmailService implements OnApplicationShutdown {
@@ -97,6 +100,24 @@ export class EmailService implements OnApplicationShutdown {
         },
       ],
       'moderator invitation',
+    );
+  }
+
+  /**
+   * ACC-02: the email with the verification link. The token is in the link
+   * only; it is never logged.
+   */
+  async sendEmailVerification(
+    request: EmailVerificationRequest,
+  ): Promise<void> {
+    await this.sendAll(
+      [
+        {
+          to: request.email,
+          ...emailVerificationEmail(request, this.loginUrl()),
+        },
+      ],
+      'email verification',
     );
   }
 

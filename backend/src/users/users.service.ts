@@ -36,6 +36,11 @@ export interface CreateUserInput {
   password: string;
   /** When the user accepted the terms and the privacy policy. */
   consentAcceptedAt: Date;
+  /**
+   * ACC-02: false when the email must be verified before booking. Left out,
+   * the account is verified.
+   */
+  emailVerified?: boolean;
 }
 
 /**
@@ -80,7 +85,8 @@ export class UsersService {
   constructor(@InjectModel(User.name) private readonly users: Model<User>) {}
 
   /**
-   * Creates an active account with the `user` role (ACC-01). It returns the
+   * Creates an active account with the `user` role (ACC-01), verified unless
+   * `emailVerified` is false (ACC-02). It returns the
    * entity, for other services: map it with `toUserResponse` before it leaves
    * the API.
    */
@@ -101,6 +107,7 @@ export class UsersService {
       role: Role.User,
       status: UserStatus.Active,
       consentAcceptedAt: input.consentAcceptedAt,
+      emailVerified: input.emailVerified ?? true,
     });
   }
 
@@ -229,6 +236,17 @@ export class UsersService {
         { returnDocument: 'after', runValidators: true },
       )
       .exec();
+  }
+
+  /**
+   * ACC-02: marks the email of the account as verified. Returns false when
+   * the account no longer exists.
+   */
+  async markEmailVerified(id: Types.ObjectId): Promise<boolean> {
+    const { matchedCount } = await this.users
+      .updateOne({ _id: id }, { $set: { emailVerified: true } })
+      .exec();
+    return matchedCount > 0;
   }
 
   /**
