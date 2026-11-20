@@ -57,10 +57,13 @@ const PUBLIC_WRITES: ReadonlySet<string> = new Set([
 
 /**
  * Areas that hold private data. No route under one of these is public, so a
- * guest cannot read someone's bookings, payments, notifications or account.
+ * guest cannot read someone's bookings, payments, notifications, favourites
+ * or account.
  * Public itineraries are the one exception (ITN-21).
  */
 const PRIVATE_AREAS = [
+  // BON-02: a user's favourites.
+  '/api/favourites',
   '/api/flight-bookings',
   '/api/hotel-bookings',
   '/api/payments',
