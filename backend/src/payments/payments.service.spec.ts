@@ -8,9 +8,14 @@ import { Types } from 'mongoose';
 import type { BookingPoliciesService } from './booking-policies.service';
 import { BookingType } from './enums/booking-type.enum';
 import { PaymentStatus } from './enums/payment-status.enum';
+import type {
+  FlightChangePayable,
+  FlightChangePaymentPort,
+} from './flight-change-payment-port';
 import type { Payment } from './models/payment.schema';
 import {
   ALREADY_PAID_MESSAGE,
+  BOOKING_NOT_FOUND_MESSAGE,
   HOLD_EXPIRED_MESSAGE,
   PAYMENT_CANCELLED_MESSAGE,
   PAYMENT_FAILED_MESSAGE,
@@ -385,5 +390,184 @@ describe('PaymentsService.findOne (PAY-01)', () => {
 
     expect(error).toBeInstanceOf(NotFoundException);
     expect(error.message).toBe(PAYMENT_NOT_FOUND_MESSAGE);
+  });
+});
+
+describe('PaymentsService for a flight change (FLT-27)', () => {
+  const CHANGE = '6740f1c2a4b5c6d7e8f90ccc';
+  const changeDto = {
+    bookingType: BookingType.FlightChange,
+    bookingId: CHANGE,
+  };
+  // The service checks the port's hold against the real clock.
+  const CHANGE_HOLD_END = new Date(Date.now() + 10 * 60 * 1000);
+
+  function setupChange(port?: Partial<FlightChangePaymentPort>) {
+    const base = setup();
+    const service = new PaymentsService(
+      base.model as unknown as Model<Payment>,
+      base.policies as unknown as BookingPoliciesService,
+      base.gateway as unknown as StripeGateway,
+      port as FlightChangePaymentPort | undefined,
+    );
+    return { ...base, service };
+  }
+
+  const changePort = (
+    payableChange: Partial<FlightChangePayable> = {},
+  ): Partial<FlightChangePaymentPort> & {
+    findPayable: jest.Mock;
+  } => ({
+    findPayable: jest.fn(() =>
+      Promise.resolve({
+        amount: 4200,
+        currency: 'USD',
+        holdExpiresAt: CHANGE_HOLD_END,
+        ...payableChange,
+      }),
+    ),
+  });
+
+  it('answers 404 "Booking not found" while no flight change port is provided, and calls nothing', async () => {
+    const { service, policies, gateway, model } = setupChange();
+
+    const error = await failureOf(service.start(USER, changeDto));
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(error.message).toBe(BOOKING_NOT_FOUND_MESSAGE);
+    expect(policies.findPayableOrThrow).not.toHaveBeenCalled();
+    expect(gateway.createPaymentIntent).not.toHaveBeenCalled();
+    expect(model.create).not.toHaveBeenCalled();
+  });
+
+  it('charges the amount and currency the port gives, keyed on the change, and never asks the policy rules', async () => {
+    const port = changePort();
+    const { service, policies, gateway, model } = setupChange(port);
+
+    await service.start(USER, changeDto);
+
+    expect(port.findPayable).toHaveBeenCalledWith(
+      CHANGE,
+      USER,
+      expect.any(Date),
+    );
+    expect(policies.findPayableOrThrow).not.toHaveBeenCalled();
+    expect(gateway.createPaymentIntent).toHaveBeenCalledWith(
+      {
+        amount: 4200,
+        currency: 'USD',
+        bookingType: 'flight_change',
+        bookingId: CHANGE,
+      },
+      `payment-flight_change-${CHANGE}`,
+    );
+    expect(model.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingType: BookingType.FlightChange,
+        bookingId: new Types.ObjectId(CHANGE),
+        amount: 4200,
+        currency: 'USD',
+        holdExpiresAt: CHANGE_HOLD_END,
+      }),
+    );
+  });
+
+  it("passes on the port's 404 and 409 and calls Stripe for neither", async () => {
+    for (const failure of [
+      new NotFoundException('Booking not found'),
+      new ConflictException(HOLD_EXPIRED_MESSAGE),
+    ]) {
+      const port = changePort();
+      port.findPayable.mockRejectedValueOnce(failure);
+      const { service, gateway } = setupChange(port);
+
+      await expect(service.start(USER, changeDto)).rejects.toBe(failure);
+      expect(gateway.createPaymentIntent).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([0, -100, 12.5])(
+    'refuses an amount of %p from the port (never charges a wrong amount)',
+    async (amount) => {
+      const { service, gateway } = setupChange(changePort({ amount }));
+
+      await expect(service.start(USER, changeDto)).rejects.toThrow(
+        /whole number of at least 1/,
+      );
+      expect(gateway.createPaymentIntent).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['a currency other than USD', { currency: 'EUR' }, /must be USD/],
+    [
+      'a hold that has ended',
+      { holdExpiresAt: new Date('2020-01-01T00:00:00.000Z') },
+      /hold that is not live/,
+    ],
+  ])(
+    'refuses %s from the port and calls Stripe for nothing',
+    async (_name, fields, message) => {
+      const { service, gateway, model } = setupChange(changePort(fields));
+
+      await expect(service.start(USER, changeDto)).rejects.toThrow(message);
+      expect(gateway.createPaymentIntent).not.toHaveBeenCalled();
+      expect(model.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not retry a change payment once the port says it is no longer payable (409)', async () => {
+    const port = changePort();
+    port.findPayable.mockRejectedValueOnce(
+      new ConflictException(HOLD_EXPIRED_MESSAGE),
+    );
+    const { service, model, gateway } = setupChange(port);
+    model.findOne.mockReturnValueOnce(
+      query(
+        stored({
+          bookingType: BookingType.FlightChange,
+          bookingId: new Types.ObjectId(CHANGE),
+          status: PaymentStatus.Failed,
+        }),
+      ),
+    );
+
+    await expect(service.retry(PAYMENT, USER)).rejects.toThrow(
+      new ConflictException(HOLD_EXPIRED_MESSAGE),
+    );
+    expect(gateway.retrievePaymentIntent).not.toHaveBeenCalled();
+    expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('retries a failed change payment only while the port still says it is payable', async () => {
+    const port = changePort();
+    const { service, model, policies } = setupChange(port);
+    model.findOne.mockReturnValueOnce(
+      query(
+        stored({
+          bookingType: BookingType.FlightChange,
+          bookingId: new Types.ObjectId(CHANGE),
+          status: PaymentStatus.Failed,
+        }),
+      ),
+    );
+    model.findOneAndUpdate.mockReturnValueOnce(
+      query(
+        stored({
+          bookingType: BookingType.FlightChange,
+          bookingId: new Types.ObjectId(CHANGE),
+        }),
+      ),
+    );
+
+    const answer = await service.retry(PAYMENT, USER);
+
+    expect(port.findPayable).toHaveBeenCalledWith(
+      CHANGE,
+      USER,
+      expect.any(Date),
+    );
+    expect(policies.findPayableOrThrow).not.toHaveBeenCalled();
+    expect(answer).toMatchObject({ bookingType: 'flight_change' });
   });
 });

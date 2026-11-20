@@ -7,11 +7,14 @@ import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service';
 import {
   BOOKING_PAYMENT_HANDLERS,
   type BookingPaymentHandlers,
-  paymentHandlerOf,
+  paymentHandlersOf,
 } from './booking-payment-handler';
 import { BookingPoliciesController } from './booking-policies.controller';
 import { BookingPoliciesService } from './booking-policies.service';
-import { BookingType } from './enums/booking-type.enum';
+import {
+  FLIGHT_CHANGE_PAYMENT_PORT,
+  type FlightChangePaymentPort,
+} from './flight-change-payment-port';
 import { Payment, PaymentSchema } from './models/payment.schema';
 import { StripeEvent, StripeEventSchema } from './models/stripe-event.schema';
 import { PaymentExpiryService } from './payment-expiry.service';
@@ -51,16 +54,21 @@ import { StripeWebhookService } from './stripe-webhook.service';
     {
       // PAY-01 -> FLT-23, HTL-17: who confirms a booking once its payment
       // succeeded. A booking service is a handler as soon as it has
-      // `confirmPaid` (see booking-payment-handler.ts).
+      // `confirmPaid` (see booking-payment-handler.ts). FLT-27: a flight
+      // change is confirmed by the port the flight-bookings module provides;
+      // until it does, there is no handler (and no payment) for it.
       provide: BOOKING_PAYMENT_HANDLERS,
-      inject: [FlightBookingsService, HotelBookingsService],
+      inject: [
+        FlightBookingsService,
+        HotelBookingsService,
+        { token: FLIGHT_CHANGE_PAYMENT_PORT, optional: true },
+      ],
       useFactory: (
         flightBookings: FlightBookingsService,
         hotelBookings: HotelBookingsService,
-      ): BookingPaymentHandlers => ({
-        [BookingType.Flight]: paymentHandlerOf(flightBookings),
-        [BookingType.Hotel]: paymentHandlerOf(hotelBookings),
-      }),
+        flightChanges?: FlightChangePaymentPort,
+      ): BookingPaymentHandlers =>
+        paymentHandlersOf(flightBookings, hotelBookings, flightChanges),
     },
   ],
   // BookingPoliciesService.findPayableOrThrow: the "payment is blocked until

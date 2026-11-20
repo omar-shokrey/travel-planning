@@ -1,17 +1,24 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum, IsMongoId } from 'class-validator';
-import { BookingType } from '../enums/booking-type.enum';
+import { IsIn, IsMongoId } from 'class-validator';
+import {
+  BOOKING_KINDS,
+  type BookingKind,
+  BookingType,
+} from '../enums/booking-type.enum';
 
-/** The path of `/api/bookings/:type/:id/...` (PAY-02), validated like a body. */
+/**
+ * The path of `/api/bookings/:type/:id/...` (PAY-02), validated like a body.
+ * Only a real booking has policies: `flight_change` (FLT-27) is 400.
+ */
 export class BookingPathDto {
   @ApiProperty({
-    enum: BookingType,
-    enumName: 'BookingType',
+    enum: BOOKING_KINDS,
+    enumName: 'BookingKind',
     description: 'The kind of booking: a flight booking or a hotel reservation',
     example: BookingType.Flight,
   })
-  @IsEnum(BookingType, { message: 'type must be one of: flight, hotel' })
-  type: BookingType;
+  @IsIn(BOOKING_KINDS, { message: 'type must be one of: flight, hotel' })
+  type: BookingKind;
 
   @ApiProperty({
     description: 'Id of the booking',

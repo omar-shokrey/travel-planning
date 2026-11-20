@@ -12,6 +12,7 @@ import {
   type BookingPaymentHandlers,
 } from './booking-payment-handler';
 import type { WebhookResponseDto } from './dto/payment-response.dto';
+import { BookingType } from './enums/booking-type.enum';
 import { PaymentStatus } from './enums/payment-status.enum';
 import { Payment } from './models/payment.schema';
 import { StripeEvent } from './models/stripe-event.schema';
@@ -151,10 +152,12 @@ export class StripeWebhookService {
     const handler = this.handlers[payment.bookingType];
     if (!handler) {
       // Not an "ignore": answering 503 keeps the event out of stripe_events,
-      // so Stripe sends it again (for up to 3 days) until FLT-23 / HTL-17
-      // confirm bookings. Remembering it would lose the confirmation forever.
+      // so Stripe sends it again (for up to 3 days) until a handler exists
+      // (FLT-23, HTL-17; the flight change port of FLT-27). Remembering it would lose the confirmation forever.
       this.logger.error(
-        `Payment ${payment._id.toString()} succeeded, but nothing confirms ${payment.bookingType} bookings yet (FLT-23, HTL-17). Stripe will send the event again.`,
+        payment.bookingType === BookingType.FlightChange
+          ? `Payment ${payment._id.toString()} succeeded, but no flight change port applies flight changes yet (FLT-27). Stripe will send the event again.`
+          : `Payment ${payment._id.toString()} succeeded, but nothing confirms ${payment.bookingType} bookings yet (FLT-23, HTL-17). Stripe will send the event again.`,
       );
       throw new ServiceUnavailableException(
         BOOKING_CONFIRMATION_UNAVAILABLE_MESSAGE,
@@ -165,11 +168,16 @@ export class StripeWebhookService {
       now,
     );
     if (!confirmed) {
-      // PAY-03: a late payment is refunded in full. refund() is idempotent
-      // per booking, so a repeated event refunds once. An unexpected error
+      // PAY-03: a late payment (of a booking or of a flight change, FLT-27)
+      // is refunded in full. refund() is idempotent per (bookingType,
+      // bookingId), so a repeated event refunds once. An unexpected error
       // (the database) answers 500 and Stripe sends the event again.
       this.logger.warn(
-        `Payment ${payment._id.toString()} succeeded after the hold of ${payment.bookingType} booking ${payment.bookingId.toString()} ended. It is refunded in full (PAY-03).`,
+        `Payment ${payment._id.toString()} succeeded after the hold of ${
+          payment.bookingType === BookingType.FlightChange
+            ? 'flight change'
+            : `${payment.bookingType} booking`
+        } ${payment.bookingId.toString()} ended. It is refunded in full (PAY-03).`,
       );
       await this.refunds.refund({
         bookingType: payment.bookingType,

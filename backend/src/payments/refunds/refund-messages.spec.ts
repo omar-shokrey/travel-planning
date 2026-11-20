@@ -62,4 +62,33 @@ describe('refundMessage (PAY-03)', () => {
       'Your refund of 125.50 USD for your flight booking has been sent to your card.',
     );
   });
+
+  it('explains a cheaper flight (fare_difference, FLT-27) the first time, then follows the status of the flight booking', () => {
+    const fare = refund({
+      bookingType: BookingType.FlightChange,
+      amount: 4000,
+      reason: RefundReason.FareDifference,
+    });
+
+    expect(refundMessage(fare, true)).toBe(
+      'Your new flight costs less: the fare difference of 40.00 USD is being refunded to your card.',
+    );
+    expect(refundMessage({ ...fare, status: RefundStatus.Failed }, false)).toBe(
+      'Your refund of 40.00 USD for your flight booking failed. Our team will contact you.',
+    );
+  });
+
+  it('names a flight_change refund as a flight booking (a late change payment)', () => {
+    expect(
+      refundMessage(
+        refund({
+          bookingType: BookingType.FlightChange,
+          status: RefundStatus.Refunded,
+        }),
+        true,
+      ),
+    ).toBe(
+      'Your refund of 125.50 USD for your flight booking has been sent to your card.',
+    );
+  });
 });

@@ -7,7 +7,7 @@ import type {
   BookingPoliciesResponseDto,
   PayableBooking,
 } from './dto/booking-policies-response.dto';
-import { BookingType } from './enums/booking-type.enum';
+import { type BookingKind, BookingType } from './enums/booking-type.enum';
 import {
   toFlightBookingPolicies,
   toHotelBookingPolicies,
@@ -28,7 +28,9 @@ type OwnedBooking =
 /**
  * PAY-02: the provider's policies shown before payment and their acceptance.
  * The booking modules own the bookings; this service reaches them only
- * through `findOwnedEntityOrThrow` and `acceptPolicies`.
+ * through `findOwnedEntityOrThrow` and `acceptPolicies`. It takes only a real
+ * booking's type (`BookingKind`): a flight change (FLT-27) is paid through the
+ * flight change port, never through these rules.
  */
 @Injectable()
 export class BookingPoliciesService {
@@ -39,7 +41,7 @@ export class BookingPoliciesService {
 
   /** The policies of the user's own booking, in any status (404 otherwise). */
   async findPolicies(
-    type: BookingType,
+    type: BookingKind,
     id: string,
     userId: string,
   ): Promise<BookingPoliciesResponseDto> {
@@ -56,7 +58,7 @@ export class BookingPoliciesService {
    * ended.
    */
   async acceptPolicies(
-    type: BookingType,
+    type: BookingKind,
     id: string,
     userId: string,
   ): Promise<BookingPoliciesResponseDto> {
@@ -89,7 +91,7 @@ export class BookingPoliciesService {
    * route uses it: `PaymentsService` calls it before it creates a PaymentIntent (PAY-01).
    */
   async findPayableOrThrow(
-    type: BookingType,
+    type: BookingKind,
     id: string,
     userId: string,
     now: Date,
@@ -109,7 +111,7 @@ export class BookingPoliciesService {
   }
 
   private async findOwned(
-    type: BookingType,
+    type: BookingKind,
     id: string,
     userId: string,
   ): Promise<OwnedBooking> {

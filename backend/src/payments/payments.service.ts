@@ -1,11 +1,14 @@
 import {
   BadGatewayException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
+import { PLATFORM_CURRENCY } from '../common/constants/currency';
 import { BookingPoliciesService } from './booking-policies.service';
 import type { CreatePaymentDto } from './dto/create-payment.dto';
 import type {
@@ -15,6 +18,10 @@ import type {
 import { BookingType } from './enums/booking-type.enum';
 import { PaymentStatus } from './enums/payment-status.enum';
 import {
+  FLIGHT_CHANGE_PAYMENT_PORT,
+  type FlightChangePaymentPort,
+} from './flight-change-payment-port';
+import {
   toPaymentIntentResponse,
   toPaymentResponse,
   type PaymentSource,
@@ -22,6 +29,7 @@ import {
 import { Payment } from './models/payment.schema';
 import {
   ALREADY_PAID_MESSAGE,
+  BOOKING_NOT_FOUND_MESSAGE,
   PAYMENT_CANCELLED_MESSAGE,
   PAYMENT_FAILED_MESSAGE,
   PAYMENT_NOT_FOUND_MESSAGE,
@@ -41,6 +49,14 @@ const isDuplicateKey = (error: unknown): boolean =>
   'code' in error &&
   error.code === MONGO_DUPLICATE_KEY;
 
+/** What may be charged, whoever owns the payable thing. */
+interface Payable {
+  /** Minor units of `currency`. */
+  amount: number;
+  currency: string;
+  holdExpiresAt: Date;
+}
+
 /**
  * PAY-01: paying a booking with Stripe (test mode). The frontend confirms the
  * PaymentIntent with Stripe Elements, so card details never reach the backend.
@@ -56,6 +72,10 @@ export class PaymentsService {
     @InjectModel(Payment.name) private readonly payments: Model<Payment>,
     private readonly policies: BookingPoliciesService,
     private readonly gateway: StripeGateway,
+    // FLT-27: provided by the flight-bookings module; absent until it is.
+    @Optional()
+    @Inject(FLIGHT_CHANGE_PAYMENT_PORT)
+    private readonly flightChanges?: FlightChangePaymentPort,
   ) {}
 
   /**
@@ -65,13 +85,15 @@ export class PaymentsService {
    * Stripe is not called. The amount and the currency are the booking's, never
    * the client's. A booking has one payment: asking again returns the same
    * PaymentIntent while it waits for the card, and 409 once it succeeded,
-   * failed (use the retry) or was cancelled.
+   * failed (use the retry) or was cancelled. A flight change (FLT-27) is paid
+   * the same way; its amount is the fare difference the flight change port
+   * gives (`findPayable`).
    */
   async start(
     userId: string,
     dto: CreatePaymentDto,
   ): Promise<PaymentIntentResponseDto> {
-    const payable = await this.policies.findPayableOrThrow(
+    const payable = await this.findPayableOrThrow(
       dto.bookingType,
       dto.bookingId,
       userId,
@@ -84,7 +106,7 @@ export class PaymentsService {
 
     const intent = await this.gateway.createPaymentIntent(
       {
-        amount: payable.total,
+        amount: payable.amount,
         currency: payable.currency,
         bookingType: dto.bookingType,
         bookingId: dto.bookingId,
@@ -98,7 +120,7 @@ export class PaymentsService {
         bookingId: new Types.ObjectId(dto.bookingId),
         userId: new Types.ObjectId(userId),
         stripePaymentIntentId: intent.id,
-        amount: payable.total,
+        amount: payable.amount,
         currency: payable.currency,
         status: PaymentStatus.RequiresPayment,
         holdExpiresAt: payable.holdExpiresAt,
@@ -128,7 +150,7 @@ export class PaymentsService {
   async retry(id: string, userId: string): Promise<PaymentIntentResponseDto> {
     const payment = await this.findOwnedOrThrow(id, userId);
     assertNotFinal(payment.status);
-    await this.policies.findPayableOrThrow(
+    await this.findPayableOrThrow(
       payment.bookingType,
       payment.bookingId.toString(),
       userId,
@@ -166,6 +188,61 @@ export class PaymentsService {
   /** The user's own payment (404 for a missing one or someone else's, ACC-11). */
   async findOne(id: string, userId: string): Promise<PaymentResponseDto> {
     return toPaymentResponse(await this.findOwnedOrThrow(id, userId));
+  }
+
+  /**
+   * PAY-02 for a booking, the flight change port for a change (FLT-27). The
+   * amount never comes from the client. Without the port, a change is 404
+   * "Booking not found", as a missing booking is.
+   */
+  private async findPayableOrThrow(
+    type: BookingType,
+    id: string,
+    userId: string,
+    now: Date,
+  ): Promise<Payable> {
+    if (type !== BookingType.FlightChange) {
+      const booking = await this.policies.findPayableOrThrow(
+        type,
+        id,
+        userId,
+        now,
+      );
+      return {
+        amount: booking.total,
+        currency: booking.currency,
+        holdExpiresAt: booking.holdExpiresAt,
+      };
+    }
+    if (!this.flightChanges) {
+      throw new NotFoundException(BOOKING_NOT_FOUND_MESSAGE);
+    }
+    const change = await this.flightChanges.findPayable(id, userId, now);
+    // A wrong answer is a programming error in the port: never store it or
+    // send it to Stripe.
+    if (!Number.isInteger(change.amount) || change.amount < 1) {
+      throw new Error(
+        `Flight change ${id}: the amount to pay must be a whole number of at least 1, got ${change.amount}`,
+      );
+    }
+    if (change.currency !== PLATFORM_CURRENCY) {
+      throw new Error(
+        `Flight change ${id}: the currency must be ${PLATFORM_CURRENCY} (PAY-04), got ${change.currency}`,
+      );
+    }
+    if (
+      !(change.holdExpiresAt instanceof Date) ||
+      !(change.holdExpiresAt.getTime() > now.getTime())
+    ) {
+      throw new Error(
+        `Flight change ${id}: the port gave a hold that is not live`,
+      );
+    }
+    return {
+      amount: change.amount,
+      currency: change.currency,
+      holdExpiresAt: change.holdExpiresAt,
+    };
   }
 
   private async findOwnedOrThrow(

@@ -70,7 +70,7 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **All five statuses are listed** (`pending_payment`, `confirmed`, `completed`, `expired`, `cancelled`, GEN-11), so the admin sees abandoned holds too.
 - **Newest first across both kinds**, by `createdAt` and then `_id`, so two bookings made at the same moment keep a stable order. Pagination follows GEN-05: 10 per page by default, at most 50, `{ items, meta }`, `items: []` when nothing matches.
 - **Filters**, all optional, and all given ones must match:
-  - `type`: `flight` or `hotel` (`BookingType`). Without it, both.
+  - `type`: `flight` or `hotel` (`BookingKind`; `flight_change`, a flight change of FLT-27, is not a booking and is 400). Without it, both.
   - `status`: one of the five values. Flight bookings and hotel reservations have their own enum with the same values; a unit test checks the two sets stay equal, so one filter serves both.
   - `from` and `to`: `YYYY-MM-DD`, both included, **the day the booking was made** (`createdAt`, in UTC). `from` is 00:00 UTC of that day and `to` covers its whole day: the filter is `createdAt >= from` and `createdAt < to + 1 day`. They use the same validator as the hotel search's `checkIn` (`IsDateOnly`), so `2026-02-30` or a time part answers 400; `from` after `to` answers 400 "from must be on or before to".
   - **Why the booking day and not the travel dates:** a flight booking stores no travel dates (they live on the flights), so filtering by them would need a lookup on every query. The row still shows the travel dates. This is flagged in the PR for the team leader.

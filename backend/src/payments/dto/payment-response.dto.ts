@@ -10,7 +10,11 @@ export class PaymentResponseDto {
   @ApiProperty({ enum: BookingType, enumName: 'BookingType' })
   bookingType: BookingType;
 
-  @ApiProperty({ example: '6740f1c2a4b5c6d7e8f90789' })
+  @ApiProperty({
+    description:
+      'Id of the booking, or of the flight change for `flight_change` (FLT-27)',
+    example: '6740f1c2a4b5c6d7e8f90789',
+  })
   bookingId: string;
 
   @ApiProperty({

@@ -12,11 +12,14 @@ export function formatMoney(amount: number, currency: string): string {
 const BOOKING_LABEL: Record<BookingType, string> = {
   [BookingType.Flight]: 'flight booking',
   [BookingType.Hotel]: 'hotel booking',
+  // FLT-27: the fare difference of a change is about the flight booking.
+  [BookingType.FlightChange]: 'flight booking',
 };
 
 /**
  * PAY-03: the in-app notification of a refund, by its status. A late payment
- * (`late_payment`) first gets its own text, because the user never cancelled.
+ * (`late_payment`) and a cheaper flight (`fare_difference`, FLT-27) first get
+ * their own text, because the user never cancelled.
  */
 export function refundMessage(
   refund: {
@@ -31,6 +34,9 @@ export function refundMessage(
   const money = formatMoney(refund.amount, refund.currency);
   if (first && refund.reason === RefundReason.LatePayment) {
     return `Your payment arrived after your booking hold ended, so it is being refunded in full (${money}).`;
+  }
+  if (first && refund.reason === RefundReason.FareDifference) {
+    return `Your new flight costs less: the fare difference of ${money} is being refunded to your card.`;
   }
   const booking = BOOKING_LABEL[refund.bookingType];
   switch (refund.status) {

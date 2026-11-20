@@ -1,4 +1,9 @@
-/** The answers of the policy routes (PAY-02). A missing booking is "Booking not found" (the booking modules). */
+/**
+ * The answers of the policy routes (PAY-02). A missing booking is "Booking
+ * not found", answered by the booking modules; the payments module answers it
+ * itself only for a flight change without the flight change port (FLT-27).
+ */
+export const BOOKING_NOT_FOUND_MESSAGE = 'Booking not found';
 export const NOT_WAITING_FOR_PAYMENT_MESSAGE =
   'This booking is not waiting for payment';
 export const HOLD_EXPIRED_MESSAGE =

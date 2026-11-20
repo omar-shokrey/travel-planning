@@ -7,11 +7,13 @@ import { RefundStatus } from '../enums/refund-status.enum';
 const isWholeNumber = (value: number): boolean => Number.isInteger(value);
 
 /**
- * The refund of one booking (PAY-03). It follows `REFUND` of the data model,
- * plus `currency` (a copy of the payment's, PAY-04). The amount, the currency,
- * the payment and the owner come from the payment, never from a caller. A
- * booking has at most one refund. `stripeRefundId` is set once Stripe took
- * the refund; a refund without it is retried by the recovery job.
+ * The refund of one booking, or of one flight change (FLT-27), PAY-03. It
+ * follows `REFUND` of the data model, plus `currency` (a copy of the
+ * payment's, PAY-04). The currency, the payment and the owner come from the
+ * payment, never from a caller. One (`bookingType`, `bookingId`) has at most
+ * one refund; the refunds against one payment never add up to more than it.
+ * `stripeRefundId` is set once Stripe took the refund; a refund without it is
+ * retried by the recovery job.
  */
 @Schema({ collection: 'refunds', timestamps: true })
 export class Refund {
@@ -27,7 +29,10 @@ export class Refund {
   @Prop({ type: SchemaTypes.ObjectId, ref: 'User', required: true })
   userId: Types.ObjectId;
 
-  /** Minor units of `currency`: payment amount × percent / 100, rounded. */
+  /**
+   * Minor units of `currency`: what is left of the payment × percent / 100,
+   * rounded; or the exact amount of a fare difference (FLT-27).
+   */
   @Prop({
     type: Number,
     required: true,
@@ -73,7 +78,9 @@ export class Refund {
 export type RefundDocument = HydratedDocument<Refund>;
 export const RefundSchema = SchemaFactory.createForClass(Refund);
 
-// A booking has at most one refund (a retried cancellation finds it).
+// One refund per (bookingType, bookingId): a retried cancellation finds it. A
+// flight change (FLT-27) has its own key, so a booking can also have the
+// refunds of its changes.
 RefundSchema.index({ bookingType: 1, bookingId: 1 }, { unique: true });
 // The webhook finds a refund by Stripe's id; only sent refunds have one.
 RefundSchema.index({ stripeRefundId: 1 }, { unique: true, sparse: true });

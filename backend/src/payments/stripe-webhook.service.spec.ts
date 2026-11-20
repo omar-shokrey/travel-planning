@@ -457,3 +457,91 @@ describe('StripeWebhookService: refunds (PAY-03)', () => {
     expect(cancelled.confirmPaid).not.toHaveBeenCalled();
   });
 });
+
+describe('StripeWebhookService: a flight change payment (FLT-27)', () => {
+  const CHANGE = new Types.ObjectId('6740f1c2a4b5c6d7e8f90ccc');
+  const changePayment = () =>
+    stored({ bookingType: BookingType.FlightChange, bookingId: CHANGE });
+
+  it('marks it succeeded and asks the flight change port, never the flight booking handler, to apply the change', async () => {
+    const flightConfirm = jest.fn(() => Promise.resolve(true));
+    const changeConfirm = jest.fn(() => Promise.resolve(true));
+    const s = setup({
+      payment: changePayment(),
+      handlers: {
+        [BookingType.Flight]: { confirmPaid: flightConfirm },
+        [BookingType.FlightChange]: { confirmPaid: changeConfirm },
+      },
+    });
+
+    await deliver(s, event('payment_intent.succeeded'));
+
+    expect(s.payments.updateOne).toHaveBeenCalledWith(
+      {
+        _id: PAYMENT,
+        status: {
+          $in: [PaymentStatus.RequiresPayment, PaymentStatus.Failed],
+        },
+      },
+      { $set: { status: PaymentStatus.Succeeded } },
+    );
+    expect(changeConfirm).toHaveBeenCalledWith(
+      CHANGE.toString(),
+      expect.any(Date),
+    );
+    expect(flightConfirm).not.toHaveBeenCalled();
+    expect(s.refunds.refund).not.toHaveBeenCalled();
+    expect(s.events.create).toHaveBeenCalled();
+  });
+
+  it('refunds 100% of the change payment, keyed on the change, when the port answers false (late payment, PAY-03)', async () => {
+    const s = setup({
+      payment: changePayment(),
+      handlers: {
+        [BookingType.FlightChange]: {
+          confirmPaid: jest.fn(() => Promise.resolve(false)),
+        },
+      },
+    });
+
+    await deliver(s, event('payment_intent.succeeded'));
+
+    expect(s.refunds.refund).toHaveBeenCalledTimes(1);
+    expect(s.refunds.refund).toHaveBeenCalledWith({
+      bookingType: BookingType.FlightChange,
+      bookingId: CHANGE.toString(),
+      refundPercent: 100,
+      reason: 'late_payment',
+    });
+  });
+
+  it('answers 503 and forgets the event when no flight change port exists, so Stripe sends it again', async () => {
+    const s = setup({
+      payment: changePayment(),
+      handlers: { [BookingType.Flight]: { confirmPaid: jest.fn() } },
+    });
+
+    await expect(deliver(s, event('payment_intent.succeeded'))).rejects.toThrow(
+      new ServiceUnavailableException(BOOKING_CONFIRMATION_UNAVAILABLE_MESSAGE),
+    );
+    expect(s.events.create).not.toHaveBeenCalled();
+    expect(s.refunds.refund).not.toHaveBeenCalled();
+  });
+
+  it('passes a fare_difference refund event to the refunds like any other refund', async () => {
+    const s = setup();
+
+    await deliver(s, {
+      id: 'evt_refund_fare',
+      type: 'refund.updated',
+      intent: null,
+      refund: { id: 're_fare', status: 'succeeded', paymentIntentId: 'pi_1' },
+    });
+
+    expect(s.refunds.applyStripeStatus).toHaveBeenCalledWith(
+      're_fare',
+      'succeeded',
+    );
+    expect(s.payments.findOne).not.toHaveBeenCalled();
+  });
+});

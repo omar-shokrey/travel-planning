@@ -10,7 +10,10 @@ import { Airline } from '../flights/models/airline.schema';
 import { Flight } from '../flights/models/flight.schema';
 import { HotelBooking } from '../hotel-bookings/models/hotel-booking.schema';
 import { Hotel } from '../hotels/models/hotel.schema';
-import { BookingType } from '../payments/enums/booking-type.enum';
+import {
+  type BookingKind,
+  BookingType,
+} from '../payments/enums/booking-type.enum';
 import { User } from '../users/models/user.schema';
 import type { AdminBookingResponseDto } from './dto/admin-booking-response.dto';
 import type { ListAdminBookingsQueryDto } from './dto/list-admin-bookings-query.dto';
@@ -26,7 +29,7 @@ import {
 export interface AdminBookingPageRow {
   _id: Types.ObjectId;
   createdAt: Date;
-  kind: BookingType;
+  kind: BookingKind;
 }
 
 /** The single result document of the `$facet` of phase (a). */
@@ -104,7 +107,7 @@ export class AdminBookingsService {
     query: ListAdminBookingsQueryDto,
   ): Promise<{ rows: AdminBookingPageRow[]; total: number }> {
     const match = this.buildMatch(query);
-    const side = (kind: BookingType): PipelineStage.FacetPipelineStage[] => [
+    const side = (kind: BookingKind): PipelineStage.FacetPipelineStage[] => [
       { $match: match },
       { $project: { _id: 1, createdAt: 1, kind: { $literal: kind } } },
     ];
@@ -151,7 +154,7 @@ export class AdminBookingsService {
   private async hydrate(
     rows: AdminBookingPageRow[],
   ): Promise<AdminBookingResponseDto[]> {
-    const idsOf = (kind: BookingType) =>
+    const idsOf = (kind: BookingKind) =>
       rows.filter((row) => row.kind === kind).map((row) => row._id);
     const flightIds = idsOf(BookingType.Flight);
     const hotelIds = idsOf(BookingType.Hotel);
