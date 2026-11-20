@@ -7,15 +7,20 @@ import {
   ItinerarySchema,
 } from '../models/itinerary.schema';
 import { BudgetCategory } from '../enums/budget-category.enum';
+import { BudgetSummaryCategory } from '../enums/budget-summary-category.enum';
+import { LinkedBookingType } from '../enums/linked-booking-type.enum';
 import {
+  dayCostLines,
   dayCosts,
   dayDate,
   toActivityResponse,
+  toLinkedBookingResponse,
   toTransportCostResponse,
   toCityGroups,
   toItineraryDetailResponse,
   toItineraryResponse,
   totalPerCurrency,
+  withoutLinkedBookings,
 } from './itinerary.mapper';
 
 const mongoose = new Mongoose();
@@ -136,6 +141,7 @@ describe('toItineraryDetailResponse', () => {
         activities: [],
         budgetEntries: [],
         transportCosts: [],
+        linkedBookings: [],
       },
       {
         id: itinerary.days[1]._id.toString(),
@@ -145,6 +151,7 @@ describe('toItineraryDetailResponse', () => {
         activities: [],
         budgetEntries: [],
         transportCosts: [],
+        linkedBookings: [],
       },
       {
         id: itinerary.days[2]._id.toString(),
@@ -154,6 +161,7 @@ describe('toItineraryDetailResponse', () => {
         activities: [],
         budgetEntries: [],
         transportCosts: [],
+        linkedBookings: [],
       },
     ]);
   });
@@ -170,6 +178,7 @@ describe('toItineraryDetailResponse', () => {
       'date',
       'dayNumber',
       'id',
+      'linkedBookings',
       'transportCosts',
     ]);
   });
@@ -439,6 +448,142 @@ describe('toTransportCostResponse (ITN-16)', () => {
       amount: 90000,
       currency: 'EGP',
     });
+  });
+});
+
+describe('linked bookings (ITN-27)', () => {
+  const flightId = new Types.ObjectId();
+  const hotelId = new Types.ObjectId();
+  const flightLink = {
+    bookingType: LinkedBookingType.Flight,
+    bookingId: flightId,
+    reference: 'FB-7KQ2MX',
+    amount: 52000,
+    currency: 'USD',
+  };
+  const hotelLink = {
+    bookingType: LinkedBookingType.Hotel,
+    bookingId: hotelId,
+    reference: 'HB-3PRT9W',
+    amount: 37500,
+    currency: 'USD',
+  };
+
+  it('returns the copy kept on the day, with string ids, and nothing else', () => {
+    const [day] = stored({
+      days: [{ cityId: 'cairo', linkedBookings: [flightLink] }],
+    }).days;
+    const [link] = day.linkedBookings;
+
+    expect(toLinkedBookingResponse(link)).toEqual({
+      id: link._id.toString(),
+      bookingType: 'flight',
+      bookingId: flightId.toString(),
+      reference: 'FB-7KQ2MX',
+      amount: 52000,
+      currency: 'USD',
+    });
+  });
+
+  it('lists the links of a day in the order they were linked', () => {
+    const itinerary = stored({
+      days: [{ cityId: 'cairo', linkedBookings: [flightLink, hotelLink] }],
+    });
+    const [day] = toItineraryDetailResponse(itinerary).days;
+
+    expect(day.linkedBookings.map((link) => link.reference)).toEqual([
+      'FB-7KQ2MX',
+      'HB-3PRT9W',
+    ]);
+  });
+
+  it('counts a flight under intercity_transport and a hotel under accommodation', () => {
+    const [day] = stored({
+      days: [{ cityId: 'cairo', linkedBookings: [flightLink, hotelLink] }],
+    }).days;
+
+    expect(dayCostLines(day)).toEqual([
+      {
+        category: BudgetSummaryCategory.IntercityTransport,
+        amount: 52000,
+        currency: 'USD',
+      },
+      {
+        category: BudgetSummaryCategory.Accommodation,
+        amount: 37500,
+        currency: 'USD',
+      },
+    ]);
+  });
+
+  it('adds the links to the city-group subtotal of their day', () => {
+    const itinerary = stored({
+      days: [
+        {
+          cityId: 'cairo',
+          budgetEntries: [
+            { category: BudgetCategory.Food, amount: 1000, currency: 'USD' },
+          ],
+          linkedBookings: [flightLink],
+        },
+        { cityId: 'cairo', linkedBookings: [hotelLink] },
+      ],
+    });
+
+    const [cairo] = toCityGroups(itinerary.days, itinerary.startDate);
+
+    expect(cairo.budgetSubtotal).toEqual([
+      { amount: 1000 + 52000 + 37500, currency: 'USD' },
+    ]);
+  });
+
+  it('withoutLinkedBookings: a copy with every link left out, the rest kept', () => {
+    const itinerary = stored({
+      days: [
+        {
+          cityId: 'cairo',
+          budgetEntries: [
+            { category: BudgetCategory.Food, amount: 1000, currency: 'USD' },
+          ],
+          linkedBookings: [flightLink],
+        },
+        { cityId: 'dubai', linkedBookings: [hotelLink] },
+      ],
+    });
+
+    const detail = toItineraryDetailResponse(withoutLinkedBookings(itinerary));
+
+    expect(detail.days.map((day) => day.linkedBookings)).toEqual([[], []]);
+    expect(detail.days[0].id).toBe(itinerary.days[0]._id.toString());
+    expect(detail.days[0].budgetEntries).toHaveLength(1);
+    expect(detail.cityGroups.map((group) => group.budgetSubtotal)).toEqual([
+      [{ amount: 1000, currency: 'USD' }],
+      [],
+    ]);
+    expect(detail.id).toBe(itinerary._id.toString());
+    expect(itinerary.days[0].linkedBookings).toHaveLength(1);
+  });
+
+  it('leaves a day without links as it was', () => {
+    const [day] = stored({
+      days: [
+        {
+          cityId: 'cairo',
+          budgetEntries: [
+            { category: BudgetCategory.Food, amount: 1000, currency: 'EGP' },
+          ],
+        },
+      ],
+    }).days;
+
+    expect(day.linkedBookings).toEqual([]);
+    expect(dayCostLines(day)).toEqual([
+      {
+        category: BudgetSummaryCategory.Food,
+        amount: 1000,
+        currency: 'EGP',
+      },
+    ]);
   });
 });
 

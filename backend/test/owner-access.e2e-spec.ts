@@ -68,10 +68,10 @@ interface SwaggerOperation {
  * hotel or airline (FLT-29, HTL-22), but nobody except the owner reads or
  * changes a private itinerary, whatever their role.
  *
- * Bookings do not exist yet (FLT-22 and HTL-18 come later), so these tests
- * cover what exists today: private itineraries and the own-account route. The
- * `it.todo` lines at the end mark the booking checks that the booking pull
- * requests add.
+ * This file covers private itineraries and the own-account route. The
+ * booking half of ACC-11 (flight bookings, hotel reservations, payments,
+ * refunds, policies and reviews, and the admin and moderator booking routes)
+ * is in owner-access-bookings.e2e-spec.ts.
  *
  * Itineraries are for registered users only (ITN-01, ITN-21): an
  * administrator and both moderators are refused by their role (403) before
@@ -595,13 +595,4 @@ describe('Owner-only access (e2e, ACC-11)', () => {
       );
     });
   });
-
-  // The booking routes arrive with FLT-22, HTL-18 and the "my bookings" issues.
-  // Each of those pull requests adds its own ownership checks and removes its line here.
-  it.todo(
-    'a flight booking is for its owner only; an administrator may read all, an airline moderator only those of their own airline (FLT-25, FLT-29, ACC-17)',
-  );
-  it.todo(
-    'a hotel reservation is for its owner only; an administrator may read all, a hotel moderator only those of their own hotel (HTL-20, HTL-22, ACC-17)',
-  );
 });

@@ -1,6 +1,7 @@
 import { Mongoose, Types } from 'mongoose';
 import type { MoneyResponseDto } from '../dto/money-response.dto';
 import { BudgetCategory } from '../enums/budget-category.enum';
+import { LinkedBookingType } from '../enums/linked-booking-type.enum';
 import {
   BUDGET_SUMMARY_CATEGORIES,
   BudgetSummaryCategory,
@@ -200,6 +201,60 @@ describe('toBudgetSummaryResponse (ITN-14)', () => {
       ),
     ).toEqual(summary.total);
     // Each day's five lines add up to that day's total too.
+    for (const day of summary.byDay) {
+      expect(sumOf(day.byCategory.map((entry) => entry.total))).toEqual(
+        day.total,
+      );
+    }
+  });
+
+  it('counts linked bookings (ITN-27) on their line, and every total still agrees', () => {
+    const itinerary = trip();
+    itinerary.days[1].linkedBookings.push({
+      bookingType: LinkedBookingType.Flight,
+      bookingId: new Types.ObjectId(),
+      reference: 'FB-7KQ2MX',
+      amount: 52000,
+      currency: 'USD',
+    } as never);
+    itinerary.days[2].linkedBookings.push({
+      bookingType: LinkedBookingType.Hotel,
+      bookingId: new Types.ObjectId(),
+      reference: 'HB-3PRT9W',
+      amount: 37500,
+      currency: 'USD',
+    } as never);
+    const before = toBudgetSummaryResponse(trip(), NO_RATES);
+    const summary = toBudgetSummaryResponse(itinerary, NO_RATES);
+    const sumOf = (totals: MoneyResponseDto[][]) =>
+      totalPerCurrency(totals.flat());
+    const usd = (totals: MoneyResponseDto[] | undefined) =>
+      totals?.find((money) => money.currency === 'USD')?.amount ?? 0;
+
+    expect(
+      usd(line(summary.byCategory, BudgetSummaryCategory.IntercityTransport)),
+    ).toBe(
+      usd(line(before.byCategory, BudgetSummaryCategory.IntercityTransport)) +
+        52000,
+    );
+    expect(
+      usd(line(summary.byCategory, BudgetSummaryCategory.Accommodation)),
+    ).toBe(
+      usd(line(before.byCategory, BudgetSummaryCategory.Accommodation)) + 37500,
+    );
+    expect(usd(summary.total)).toBe(usd(before.total) + 52000 + 37500);
+    expect(summary.byCategory).toHaveLength(5);
+    expect(sumOf(summary.byDay.map((day) => day.total))).toEqual(summary.total);
+    expect(sumOf(summary.byCategory.map((entry) => entry.total))).toEqual(
+      summary.total,
+    );
+    expect(
+      sumOf(
+        toCityGroups(itinerary.days, itinerary.startDate).map(
+          (group) => group.budgetSubtotal,
+        ),
+      ),
+    ).toEqual(summary.total);
     for (const day of summary.byDay) {
       expect(sumOf(day.byCategory.map((entry) => entry.total))).toEqual(
         day.total,
