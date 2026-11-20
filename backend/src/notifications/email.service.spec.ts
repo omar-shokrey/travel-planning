@@ -321,6 +321,59 @@ describe('EmailService.sendModeratorInvitation (ACC-13, GEN-01-B)', () => {
   });
 });
 
+describe('EmailService.sendEmailVerification (ACC-02, GEN-01-B)', () => {
+  const request = {
+    name: 'Sara Ahmed',
+    email: 'sara@example.com',
+    token: 'q3Zf8kV1uX9cLr0bT2mN7pQwYh5sJd4eAiOgKl6zRvE',
+    expiresInHours: 24,
+  };
+
+  it('emails the link to the frontend page with the token, from MAIL_FROM, with the fixed subject', async () => {
+    const { sent, transport } = fakeTransport();
+    const service = new EmailService(transport, config);
+
+    await service.sendEmailVerification(request);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      from: 'Travel Platform <no-reply@example.com>',
+      to: 'sara@example.com',
+      subject: 'Verify your email address',
+    });
+    expect(sent[0].text).toContain(
+      `http://localhost:3000/verify-email?token=${request.token}`,
+    );
+    expect(sent[0].text).toContain('expires in 24 hours');
+  });
+
+  it('sends nothing when email is switched off', async () => {
+    const service = new EmailService(null, config);
+
+    await expect(
+      service.sendEmailVerification(request),
+    ).resolves.toBeUndefined();
+  });
+
+  it('never throws when the server refuses it, and logs neither the address nor the token', async () => {
+    const sendMail = jest.fn().mockRejectedValue(
+      Object.assign(new Error(`sara@example.com ${request.token}`), {
+        code: 'ECONNECTION',
+      }),
+    );
+    const service = new EmailService({ sendMail }, config);
+
+    await expect(
+      service.sendEmailVerification(request),
+    ).resolves.toBeUndefined();
+    expect(warn.mock.calls[0][0]).toBe(
+      'Could not email the email verification to 1 of 1 recipient(s) (ECONNECTION)',
+    );
+    expect(logged()).not.toContain('sara@example.com');
+    expect(logged()).not.toContain(request.token);
+  });
+});
+
 describe('EmailService.runInBackground (GEN-01-B)', () => {
   it('does not make the caller wait, and whenIdle waits for the task', async () => {
     const service = new EmailService(null, config);
