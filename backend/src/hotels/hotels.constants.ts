@@ -68,3 +68,19 @@ export const HOTEL_PRICE_RANGE_MESSAGE =
  * module imports this one and not the other way round.
  */
 export const HOTEL_BOOKINGS_COLLECTION = 'hotel_bookings';
+
+/**
+ * HTL-24: the reviews' collection, as the data model names it, and the
+ * `moderation` value of a review that is shown. The hotel-bookings module
+ * owns reviews (HTL-23) and imports this module, so this one reads them only
+ * through `HotelReviewLookup`. A spec checks both against the `Review` schema
+ * and `ReviewModeration.Visible`.
+ */
+export const REVIEWS_COLLECTION = 'reviews';
+export const VISIBLE_REVIEW_MODERATION = 'visible';
+
+/**
+ * HTL-24, ACC-12: the author shown for a review whose account is gone or
+ * deactivated. The same text as `DELETED_USER_NAME` of the blog module.
+ */
+export const DELETED_AUTHOR_NAME = 'Deleted user';
