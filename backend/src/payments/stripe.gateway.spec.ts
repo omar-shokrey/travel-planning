@@ -17,6 +17,7 @@ import { StripeGateway } from './stripe.gateway';
 const mockCreate = jest.fn();
 const mockRetrieve = jest.fn();
 const mockCancel = jest.fn();
+const mockRefundCreate = jest.fn();
 const mockConstructEvent = jest.fn();
 const mockStripe = jest.fn();
 jest.mock('stripe', () => ({
@@ -29,6 +30,7 @@ jest.mock('stripe', () => ({
         retrieve: mockRetrieve,
         cancel: mockCancel,
       },
+      refunds: { create: mockRefundCreate },
       webhooks: { constructEvent: mockConstructEvent },
     };
   },
@@ -175,6 +177,7 @@ describe('StripeGateway.constructEvent (PAY-01)', () => {
         amountReceived: 52500,
         currency: 'usd',
       },
+      refund: null,
     });
   });
 
@@ -209,5 +212,112 @@ describe('StripeGateway.constructEvent (PAY-01)', () => {
     expect(() =>
       setup({ STRIPE_SECRET_KEY: '' }).constructEvent(rawBody, 'sig'),
     ).toThrow(ServiceUnavailableException);
+  });
+});
+
+describe('StripeGateway: refunds (PAY-03)', () => {
+  const newRefund = {
+    paymentIntentId: 'pi_1',
+    amount: 26250,
+    metadata: { bookingType: 'flight', bookingId: '6740f1c2a4b5c6d7e8f90789' },
+  };
+  const stripeRefund = (fields: Record<string, unknown> = {}) => ({
+    id: 're_1',
+    status: 'succeeded',
+    amount: 26250,
+    currency: 'usd',
+    payment_intent: 'pi_1',
+    ...fields,
+  });
+
+  it('refunds through the PaymentIntent with the amount, the metadata and the idempotency key', async () => {
+    mockRefundCreate.mockResolvedValue(stripeRefund());
+
+    const refund = await setup().createRefund(
+      newRefund,
+      'refund-flight-6740f1c2a4b5c6d7e8f90789',
+    );
+
+    expect(mockRefundCreate).toHaveBeenCalledWith(
+      {
+        payment_intent: 'pi_1',
+        amount: 26250,
+        metadata: {
+          bookingType: 'flight',
+          bookingId: '6740f1c2a4b5c6d7e8f90789',
+        },
+      },
+      { idempotencyKey: 'refund-flight-6740f1c2a4b5c6d7e8f90789' },
+    );
+    expect(refund).toEqual({
+      id: 're_1',
+      status: 'succeeded',
+      amount: 26250,
+      currency: 'usd',
+      paymentIntentId: 'pi_1',
+    });
+  });
+
+  it('reads the PaymentIntent id from an expanded intent, and a missing status as pending', async () => {
+    mockRefundCreate.mockResolvedValue(
+      stripeRefund({ payment_intent: { id: 'pi_2' }, status: null }),
+    );
+
+    await expect(setup().createRefund(newRefund, 'key')).resolves.toMatchObject(
+      { paymentIntentId: 'pi_2', status: 'pending' },
+    );
+  });
+
+  it('answers 502 when Stripe fails, without passing its error on', async () => {
+    mockRefundCreate.mockRejectedValue(
+      new Error('charge_already_refunded, key sk_test_abc'),
+    );
+
+    const failure = await setup()
+      .createRefund(newRefund, 'key')
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(BadGatewayException);
+    expect((failure as Error).message).toBe(PAYMENT_UNAVAILABLE_MESSAGE);
+  });
+
+  it('answers 503 and calls nothing when there is no secret key', async () => {
+    const failure = await setup({ STRIPE_SECRET_KEY: '' })
+      .createRefund(newRefund, 'key')
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ServiceUnavailableException);
+    expect(mockRefundCreate).not.toHaveBeenCalled();
+  });
+
+  it.each(['refund.created', 'refund.updated', 'refund.failed'])(
+    'reads a %s event as a refund, with no intent',
+    (type) => {
+      mockConstructEvent.mockReturnValue({
+        id: 'evt_r',
+        type,
+        data: { object: stripeRefund({ status: 'failed' }) },
+      });
+
+      expect(setup().constructEvent(Buffer.from('{}'), 't=1,v1=abc')).toEqual({
+        id: 'evt_r',
+        type,
+        intent: null,
+        refund: { id: 're_1', status: 'failed', paymentIntentId: 'pi_1' },
+      });
+    },
+  );
+
+  it('keeps a payment_intent event without a refund part', () => {
+    mockConstructEvent.mockReturnValue({
+      id: 'evt_p',
+      type: 'payment_intent.payment_failed',
+      data: { object: stripeIntent() },
+    });
+
+    const event = setup().constructEvent(Buffer.from('{}'), 'sig');
+
+    expect(event.refund).toBeNull();
+    expect(event.intent).toMatchObject({ id: 'pi_1' });
   });
 });

@@ -15,6 +15,8 @@ import type { WebhookResponseDto } from './dto/payment-response.dto';
 import { PaymentStatus } from './enums/payment-status.enum';
 import { Payment } from './models/payment.schema';
 import { StripeEvent } from './models/stripe-event.schema';
+import { RefundReason } from './refunds/enums/refund-reason.enum';
+import { RefundsService } from './refunds/refunds.service';
 import {
   BOOKING_CONFIRMATION_UNAVAILABLE_MESSAGE,
   INVALID_SIGNATURE_MESSAGE,
@@ -46,6 +48,7 @@ export class StripeWebhookService {
     private readonly gateway: StripeGateway,
     @Inject(BOOKING_PAYMENT_HANDLERS)
     private readonly handlers: BookingPaymentHandlers,
+    private readonly refunds: RefundsService,
   ) {}
 
   async handle(
@@ -66,6 +69,15 @@ export class StripeWebhookService {
   }
 
   private async process(event: GatewayEvent, now: Date): Promise<void> {
+    if (event.refund) {
+      // refund.created, refund.updated, refund.failed (PAY-03): Stripe sends
+      // no refund.succeeded; a success arrives as refund.updated.
+      await this.refunds.applyStripeStatus(
+        event.refund.id,
+        event.refund.status,
+      );
+      return;
+    }
     const intent = event.intent;
     if (!intent) {
       return;
@@ -153,9 +165,18 @@ export class StripeWebhookService {
       now,
     );
     if (!confirmed) {
+      // PAY-03: a late payment is refunded in full. refund() is idempotent
+      // per booking, so a repeated event refunds once. An unexpected error
+      // (the database) answers 500 and Stripe sends the event again.
       this.logger.warn(
-        `Payment ${payment._id.toString()} succeeded after the hold of ${payment.bookingType} booking ${payment.bookingId.toString()} ended. It needs a refund (PAY-03).`,
+        `Payment ${payment._id.toString()} succeeded after the hold of ${payment.bookingType} booking ${payment.bookingId.toString()} ended. It is refunded in full (PAY-03).`,
       );
+      await this.refunds.refund({
+        bookingType: payment.bookingType,
+        bookingId: payment.bookingId.toString(),
+        refundPercent: 100,
+        reason: RefundReason.LatePayment,
+      });
     }
   }
 
