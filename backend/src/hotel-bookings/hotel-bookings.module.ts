@@ -3,6 +3,8 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { HotelsModule } from '../hotels/hotels.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RefundsModule } from '../payments/refunds/refunds.module';
+import { HotelBookingCancellationController } from './hotel-booking-cancellation.controller';
+import { HotelBookingCancellationService } from './hotel-booking-cancellation.service';
 import { HotelBookingConfirmationService } from './hotel-booking-confirmation.service';
 import { HotelBookingCompletionService } from './hotel-booking-completion.service';
 import { HotelBookingExpiryService } from './hotel-booking-expiry.service';
@@ -25,12 +27,16 @@ import {
     // HTL-17: the in-app notification of a confirmed reservation (GEN-01). It
     // imports nothing of the booking modules, so there is no cycle.
     NotificationsModule,
+    // HTL-21: the refund of a cancelled reservation (PAY-03). RefundsModule
+    // imports no booking module, so there is no cycle.
     // HTL-20: the refund shown on the reservation details (PAY-03).
     // RefundsModule imports no booking module, so there is no cycle.
     RefundsModule,
   ],
   controllers: [
     HotelBookingsController,
+    // HTL-21: cancel a hotel reservation.
+    HotelBookingCancellationController,
     // HTL-20: my hotel reservations.
     HotelReservationsController,
   ],
@@ -42,6 +48,8 @@ import {
     HotelBookingConfirmationService,
     // GEN-11: the completion job (Confirmed -> Completed).
     HotelBookingCompletionService,
+    // HTL-21: cancel a hotel reservation.
+    HotelBookingCancellationService,
     // HTL-20: my hotel reservations.
     HotelReservationsService,
   ],

@@ -332,6 +332,26 @@ export class HotelRoomHoldsService {
   }
 
   /**
+   * HTL-21: frees every night of a reservation that was cancelled, so all
+   * its rooms are free again for those dates. Only this reservation's nights
+   * are deleted, found by `bookingId`: its `booked` nights, and also any
+   * night still `held` (the confirmation books the nights after it confirms
+   * the reservation, so a cancellation can come in between; a later retry of
+   * the confirmation then finds nothing to book). Blocked nights have no
+   * `bookingId` and are never touched. Running it again deletes nothing.
+   * Returns how many nights were freed.
+   */
+  async unbook(bookingId: Types.ObjectId): Promise<number> {
+    const { deletedCount } = await this.roomNights
+      .deleteMany({
+        bookingId,
+        state: { $in: [RoomNightState.Held, RoomNightState.Booked] },
+      })
+      .exec();
+    return deletedCount;
+  }
+
+  /**
    * Whether the hotel is still active and every room still exists, is active
    * and has the whole stay inside its availability. The nights are this
    * call's own by now, so only the availability is left to check.
