@@ -2255,6 +2255,20 @@ Accepted: the design. Changed after the reviewer agent: a once-a-minute limit Cl
 ================================================
 Date: 2026-11-20
 Student: Ali Ghayesh
+Tool: Claude (claude.ai agent workspace, model Claude Opus 5.5)
+Branch / Issue: fix/ci-e2e-memory-limit / no issue (found by the CI of #277)
+Related Requirement: none (CI only; it unblocks BON-02, #277)
+Prompt:
+CI of #277 (BON-02) failed in the E2E tests step. I asked Claude to find why and, after I chose the fix, to open a separate shared-layer pull request with no feature code.
+How the output was used:
+Claude read the CI log: no test failed; the single e2e process (--runInBand) ran out of memory at the 4 GB limit (FATAL ERROR: JavaScript heap out of memory, exit 134) after 99 suites passed, and develop's last green run had exactly 99 e2e suites, so the 100th suite of any pull request crosses the limit. It raised NODE_OPTIONS --max-old-space-size from 4096 to 6144 in .github/workflows/ci.yml and updated the comment there. Nothing else changed; CI of this pull request is the check.
+Accepted, changed, or rejected:
+Accepted: the diagnosis and the one-line fix. Rejected: re-running #277 without a fix, because the memory grows with every suite and it would crash again.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Ali Ghayesh
 Tool: Claude (claude.ai agent workspace, model Claude Opus 5.5, with its reviewer agent)
 Branch / Issue: feature/BON-02-favourites / #264
 Related Requirement: BON-02 (bonus, approved by the team leader; with HTL-11 for hotels, ITN-21 for public itineraries, ACC-15 and ACC-12 for what is no longer public)
