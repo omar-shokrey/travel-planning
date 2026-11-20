@@ -19,11 +19,46 @@ import type { BudgetEntry } from '../models/budget-entry.schema';
 import type { ItineraryDay } from '../models/itinerary-day.schema';
 import type { LinkedBooking } from '../models/linked-booking.schema';
 import type { TransportCost } from '../models/transport-cost.schema';
-import type { ItineraryDocument } from '../models/itinerary.schema';
+import type { Types } from 'mongoose';
+import type { Itinerary, ItineraryDocument } from '../models/itinerary.schema';
+
+/**
+ * What the itinerary mappers read: a stored itinerary (a Mongoose document)
+ * or a plain copy of one, such as `withoutLinkedBookings` returns.
+ */
+export type ItinerarySource = Pick<
+  Itinerary,
+  | 'ownerId'
+  | 'title'
+  | 'countries'
+  | 'startDate'
+  | 'visibility'
+  | 'moderation'
+  | 'dayCount'
+  | 'days'
+  | 'cloneSource'
+> & { _id: Types.ObjectId };
+
+/**
+ * ITN-27, ACC-11: a plain copy of the itinerary whose days have no linked
+ * bookings, for every view that is not the owner's (the public view ITN-21,
+ * the admin view GEN-10). Mapping this copy leaves the links out of the days
+ * AND out of the city-group subtotals, so no booking id, reference or amount
+ * can reach anyone but the owner. The stored itinerary is not changed.
+ */
+export function withoutLinkedBookings(
+  itinerary: ItineraryDocument,
+): ItinerarySource {
+  const plain = itinerary.toObject<Itinerary & { _id: Types.ObjectId }>();
+  return {
+    ...plain,
+    days: plain.days.map((day) => ({ ...day, linkedBookings: [] })),
+  };
+}
 
 /** Turns a stored itinerary into what the API returns. */
 export function toItineraryResponse(
-  itinerary: ItineraryDocument,
+  itinerary: ItinerarySource,
 ): ItineraryResponseDto {
   return {
     id: itinerary._id.toString(),
@@ -241,7 +276,7 @@ export function toCityGroups(
 
 /** An itinerary with its days in order (ITN-03) and its city groups (ITN-09). */
 export function toItineraryDetailResponse(
-  itinerary: ItineraryDocument,
+  itinerary: ItinerarySource,
 ): ItineraryDetailResponseDto {
   return {
     ...toItineraryResponse(itinerary),

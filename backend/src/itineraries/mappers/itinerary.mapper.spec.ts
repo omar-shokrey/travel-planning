@@ -20,6 +20,7 @@ import {
   toItineraryDetailResponse,
   toItineraryResponse,
   totalPerCurrency,
+  withoutLinkedBookings,
 } from './itinerary.mapper';
 
 const mongoose = new Mongoose();
@@ -534,6 +535,33 @@ describe('linked bookings (ITN-27)', () => {
     expect(cairo.budgetSubtotal).toEqual([
       { amount: 1000 + 52000 + 37500, currency: 'USD' },
     ]);
+  });
+
+  it('withoutLinkedBookings: a copy with every link left out, the rest kept', () => {
+    const itinerary = stored({
+      days: [
+        {
+          cityId: 'cairo',
+          budgetEntries: [
+            { category: BudgetCategory.Food, amount: 1000, currency: 'USD' },
+          ],
+          linkedBookings: [flightLink],
+        },
+        { cityId: 'dubai', linkedBookings: [hotelLink] },
+      ],
+    });
+
+    const detail = toItineraryDetailResponse(withoutLinkedBookings(itinerary));
+
+    expect(detail.days.map((day) => day.linkedBookings)).toEqual([[], []]);
+    expect(detail.days[0].id).toBe(itinerary.days[0]._id.toString());
+    expect(detail.days[0].budgetEntries).toHaveLength(1);
+    expect(detail.cityGroups.map((group) => group.budgetSubtotal)).toEqual([
+      [{ amount: 1000, currency: 'USD' }],
+      [],
+    ]);
+    expect(detail.id).toBe(itinerary._id.toString());
+    expect(itinerary.days[0].linkedBookings).toHaveLength(1);
   });
 
   it('leaves a day without links as it was', () => {

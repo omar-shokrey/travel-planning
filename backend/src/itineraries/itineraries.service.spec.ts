@@ -146,6 +146,32 @@ describe('ItinerariesService', () => {
       },
     );
 
+    it("findForAdmin: never shows the owner's linked bookings (ITN-27)", async () => {
+      const itinerary = stored();
+      itinerary.days.push({
+        cityId: 'cairo',
+        linkedBookings: [
+          {
+            bookingType: 'hotel',
+            bookingId: new Types.ObjectId(),
+            reference: 'HB-3PRT9W',
+            amount: 37500,
+            currency: 'USD',
+          },
+        ],
+      } as never);
+      jest
+        .spyOn(ItineraryModel, 'findById')
+        .mockReturnValue(query(itinerary) as never);
+
+      const found = await service.findForAdmin(id);
+
+      expect(found?.itinerary.days[0].linkedBookings).toEqual([]);
+      expect(found?.itinerary.cityGroups[0].budgetSubtotal).toEqual([]);
+      expect(JSON.stringify(found)).not.toContain('HB-3PRT9W');
+      expect(itinerary.days[0].linkedBookings).toHaveLength(1);
+    });
+
     it('findForAdmin: null when there is no such itinerary', async () => {
       jest
         .spyOn(ItineraryModel, 'findById')

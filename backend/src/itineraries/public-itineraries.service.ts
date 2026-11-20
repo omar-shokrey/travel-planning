@@ -25,6 +25,7 @@ import { ItineraryVisibility } from './enums/itinerary-visibility.enum';
 import {
   toItineraryDetailResponse,
   toItineraryResponse,
+  withoutLinkedBookings,
 } from './mappers/itinerary.mapper';
 import { Itinerary, type ItineraryDocument } from './models/itinerary.schema';
 
@@ -109,13 +110,15 @@ export class PublicItinerariesService {
     const itinerary = await this.findPublicOrThrow(id);
     const authors = await this.authorsOf([itinerary]);
     return {
-      ...toItineraryDetailResponse(itinerary),
+      // ITN-27, ACC-11: the owner's linked bookings never reach the public.
+      ...toItineraryDetailResponse(withoutLinkedBookings(itinerary)),
       author: this.authorOf(itinerary, authors),
     };
   }
 
   /**
-   * ITN-21: copy a public itinerary for the logged-in user. The clone has all
+   * ITN-21: copy a public itinerary for the logged-in user (never its
+   * linked bookings, ITN-27). The clone has all
    * days, activities, budget entries and transport costs with new ids, is
    * private, credits the original author, and shares nothing with the
    * original, so later changes or a delete of either leave the other alone.
@@ -152,6 +155,8 @@ export class PublicItinerariesService {
           amount: cost.amount,
           currency: cost.currency,
         })),
+        // ITN-27, ACC-11: the author's bookings are never copied.
+        linkedBookings: [],
       })),
       dayCount: source.days.length,
       cloneSource: {
