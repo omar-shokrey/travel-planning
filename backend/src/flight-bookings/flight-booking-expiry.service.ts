@@ -5,6 +5,7 @@ import type { Model } from 'mongoose';
 import { FlightSeatHoldsService } from '../flights/flight-seat-holds.service';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { FLIGHT_BOOKING_EXPIRY_BATCH_SIZE } from './flight-bookings.constants';
+import { FlightSeatsService } from './flight-seats.service';
 import { FlightBooking } from './models/flight-booking.schema';
 
 /**
@@ -27,6 +28,7 @@ export class FlightBookingExpiryService {
     @InjectModel(FlightBooking.name)
     private readonly bookings: Model<FlightBooking>,
     private readonly seatHolds: FlightSeatHoldsService,
+    private readonly seatAssignments: FlightSeatsService,
   ) {}
 
   /** The scheduled run. A job must never crash the app, so every error is logged. */
@@ -48,8 +50,9 @@ export class FlightBookingExpiryService {
   /**
    * Expires the `pending_payment` bookings whose hold ended at or before
    * `now`, at most FLIGHT_BOOKING_EXPIRY_BATCH_SIZE per run, oldest first,
-   * and releases their seats. One failing booking is logged and does not stop
-   * the others. Returns how many bookings this run expired.
+   * and releases their seats, held and chosen (FLT-28). One failing booking
+   * is logged and does not stop the others. Returns how many bookings this
+   * run expired.
    */
   async expireDueHolds(now: Date): Promise<number> {
     const due = await this.bookings
@@ -103,6 +106,17 @@ export class FlightBookingExpiryService {
             error instanceof Error ? error.stack : error,
           );
         }
+      }
+      // FLT-28: a booking waiting for payment cannot choose seats, so this
+      // frees nothing today; it keeps the rule "no booking that stopped
+      // needing its seats holds any" true whatever the route allows.
+      try {
+        await this.seatAssignments.releaseBooking(booking._id);
+      } catch (error) {
+        this.logger.error(
+          `Flight booking ${id} expired but its chosen seats were not freed`,
+          error instanceof Error ? error.stack : error,
+        );
       }
     }
     return expired;

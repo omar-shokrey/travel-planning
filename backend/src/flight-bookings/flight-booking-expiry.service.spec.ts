@@ -5,6 +5,7 @@ import type { FlightSeatHoldsService } from '../flights/flight-seat-holds.servic
 import { CabinClass } from '../flights/models/cabin-class.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
+import type { FlightSeatsService } from './flight-seats.service';
 
 /** A fixed "now" for every run. */
 const NOW = new Date('2026-11-19T10:00:00.000Z');
@@ -50,11 +51,27 @@ function setup() {
       return Promise.resolve(true);
     }),
   };
+  const seatAssignments = {
+    releaseBooking: jest.fn((..._args: unknown[]) => {
+      calls.push('free chosen seats');
+      return Promise.resolve(0);
+    }),
+  };
   const service = new FlightBookingExpiryService(
     bookings as never,
     seatHolds as unknown as FlightSeatHoldsService,
+    seatAssignments as unknown as FlightSeatsService,
   );
-  return { service, bookings, query, seatHolds, finds, matches, calls };
+  return {
+    service,
+    bookings,
+    query,
+    seatHolds,
+    seatAssignments,
+    finds,
+    matches,
+    calls,
+  };
 }
 
 let logError: jest.SpyInstance;
@@ -83,8 +100,9 @@ describe('FlightBookingExpiryService.expireDueHolds (FLT-22)', () => {
     expect(query.limit).toHaveBeenCalledWith(100);
   });
 
-  it('expires a due booking, then releases its seats once', async () => {
-    const { service, bookings, seatHolds, finds, calls } = setup();
+  it('expires a due booking, then releases its seats once and frees its chosen seats (FLT-28)', async () => {
+    const { service, bookings, seatHolds, seatAssignments, finds, calls } =
+      setup();
     const booking = dueBooking(CabinClass.Business, 3);
     finds.push([booking]);
 
@@ -98,23 +116,25 @@ describe('FlightBookingExpiryService.expireDueHolds (FLT-22)', () => {
       },
       { $set: { status: FlightBookingStatus.Expired } },
     );
-    expect(calls).toEqual(['expire', 'release']);
+    expect(calls).toEqual(['expire', 'release', 'free chosen seats']);
     expect(seatHolds.release).toHaveBeenCalledTimes(1);
     expect(seatHolds.release).toHaveBeenCalledWith(
       booking.segments[0].flightId,
       CabinClass.Business,
       3,
     );
+    expect(seatAssignments.releaseBooking).toHaveBeenCalledWith(booking._id);
   });
 
   it('never releases the seats of a booking confirmed since it was read', async () => {
-    const { service, seatHolds, finds, matches } = setup();
+    const { service, seatHolds, seatAssignments, finds, matches } = setup();
     finds.push([dueBooking()]);
     // The update matches only a booking still pending_payment.
     matches.push(0);
 
     await expect(service.expireDueHolds(NOW)).resolves.toBe(0);
     expect(seatHolds.release).not.toHaveBeenCalled();
+    expect(seatAssignments.releaseBooking).not.toHaveBeenCalled();
   });
 
   it('releases once when two runs expire the same booking at the same moment', async () => {
@@ -152,6 +172,37 @@ describe('FlightBookingExpiryService.expireDueHolds (FLT-22)', () => {
     );
     expect(logError).toHaveBeenCalledTimes(1);
     expect(logError.mock.calls[0][0]).toContain(first._id.toString());
+  });
+
+  it('logs a failure to free the chosen seats and still counts the booking as expired', async () => {
+    const { service, seatAssignments, finds } = setup();
+    const booking = dueBooking();
+    finds.push([booking]);
+    seatAssignments.releaseBooking.mockImplementationOnce(() =>
+      Promise.reject(new Error('free failed')),
+    );
+
+    await expect(service.expireDueHolds(NOW)).resolves.toBe(1);
+
+    expect(logError).toHaveBeenCalledTimes(1);
+    expect(logError.mock.calls[0][0]).toContain(
+      `${booking._id.toString()} expired but its chosen seats were not freed`,
+    );
+    expect(logError.mock.calls[0][1]).toEqual(
+      expect.stringContaining('free failed'),
+    );
+  });
+
+  it('logs a non-Error failure to free the chosen seats as it is', async () => {
+    const { service, seatAssignments, finds } = setup();
+    finds.push([dueBooking()]);
+    seatAssignments.releaseBooking.mockImplementationOnce(() =>
+      Promise.reject('down'),
+    );
+
+    await service.expireDueHolds(NOW);
+
+    expect(logError.mock.calls[0][1]).toBe('down');
   });
 
   it('logs a failed status update, releases nothing for it, and goes on', async () => {

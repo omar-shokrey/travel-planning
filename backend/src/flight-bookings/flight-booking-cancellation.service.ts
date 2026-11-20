@@ -27,6 +27,7 @@ import {
   REFUND_CHANGED_MESSAGE,
 } from './flight-bookings.constants';
 import { BOOKING_NOT_FOUND_MESSAGE } from './flight-bookings.service';
+import { FlightSeatsService } from './flight-seats.service';
 import type { FlightBookingSource } from './mappers/flight-booking.mapper';
 import { FlightBooking } from './models/flight-booking.schema';
 
@@ -50,6 +51,7 @@ export class FlightBookingCancellationService {
     @InjectModel(Flight.name) private readonly flights: Model<Flight>,
     private readonly seatHolds: FlightSeatHoldsService,
     private readonly refunds: RefundsService,
+    private readonly seatAssignments: FlightSeatsService,
   ) {}
 
   /**
@@ -71,9 +73,9 @@ export class FlightBookingCancellationService {
    * one the user confirmed; 409 otherwise). One conditional update moves it
    * from `confirmed` to `cancelled`, so a second cancellation, or the
    * completion job, at the same moment never cancels it twice. Then the
-   * booked seats of every segment go back and the refund is created. A
-   * failure after the cancellation is saved is logged, never thrown: the
-   * booking stays cancelled, the seat counters can be recomputed from the
+   * booked seats of every segment go back, the chosen seats are freed
+   * (FLT-28) and the refund is created. A failure after the cancellation is
+   * saved is logged, never thrown: the booking stays cancelled, the seat counters can be recomputed from the
    * bookings and a refund that was not sent is retried by PAY-03.
    */
   async cancel(
@@ -120,6 +122,15 @@ export class FlightBookingCancellationService {
           ),
         );
     }
+    // FLT-28: the chosen seats are free again for other users.
+    await this.seatAssignments
+      .releaseBooking(booking._id)
+      .catch((error: unknown) =>
+        this.logger.error(
+          `Booking ${quote.bookingId} is cancelled, but its chosen seats were not freed`,
+          error instanceof Error ? error.stack : error,
+        ),
+      );
 
     let refund: FlightBookingCancellationResponseDto['refund'] = null;
     try {

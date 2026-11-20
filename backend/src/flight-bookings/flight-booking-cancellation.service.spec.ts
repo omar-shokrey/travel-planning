@@ -17,6 +17,7 @@ import {
   REFUND_CHANGED_MESSAGE,
 } from './flight-bookings.constants';
 import { BOOKING_NOT_FOUND_MESSAGE } from './flight-bookings.service';
+import type { FlightSeatsService } from './flight-seats.service';
 
 const BOOKING_ID = '6740f1c2a4b5c6d7e8f90aaa';
 const USER_ID = '6740f1c2a4b5c6d7e8f90bbb';
@@ -91,13 +92,25 @@ function setup(
   const refunds = {
     refund: jest.fn((..._args: unknown[]) => Promise.resolve(REFUND)),
   };
+  const seatAssignments = {
+    releaseBooking: jest.fn((..._args: unknown[]) => Promise.resolve(2)),
+  };
   const service = new FlightBookingCancellationService(
     bookings as never,
     flights as never,
     seatHolds as unknown as FlightSeatHoldsService,
     refunds as unknown as RefundsService,
+    seatAssignments as unknown as FlightSeatsService,
   );
-  return { service, bookings, flights, select, seatHolds, refunds };
+  return {
+    service,
+    bookings,
+    flights,
+    select,
+    seatHolds,
+    refunds,
+    seatAssignments,
+  };
 }
 
 describe('FlightBookingCancellationService.preview (FLT-26)', () => {
@@ -255,8 +268,8 @@ describe('FlightBookingCancellationService.cancel (FLT-26)', () => {
     error.mockRestore();
   });
 
-  it('cancels with one conditional update, gives the seats back, then refunds the confirmed percent', async () => {
-    const { service, bookings, seatHolds, refunds } = setup();
+  it('cancels with one conditional update, gives the seats back, frees the chosen seats, then refunds the confirmed percent', async () => {
+    const { service, bookings, seatHolds, refunds, seatAssignments } = setup();
 
     await expect(service.cancel(BOOKING_ID, USER_ID, 50, NOW)).resolves.toEqual(
       {
@@ -304,6 +317,17 @@ describe('FlightBookingCancellationService.cancel (FLT-26)', () => {
       refundPercent: 50,
       reason: RefundReason.UserCancellation,
     });
+    // FLT-28: the booking's chosen seats, by its id only.
+    expect(seatAssignments.releaseBooking).toHaveBeenCalledTimes(1);
+    expect(String(seatAssignments.releaseBooking.mock.calls[0][0])).toBe(
+      BOOKING_ID,
+    );
+    expect(
+      seatAssignments.releaseBooking.mock.invocationCallOrder[0],
+    ).toBeGreaterThan(seatHolds.unbook.mock.invocationCallOrder[0]);
+    expect(refunds.refund.mock.invocationCallOrder[0]).toBeGreaterThan(
+      seatAssignments.releaseBooking.mock.invocationCallOrder[0],
+    );
     expect(error).not.toHaveBeenCalled();
   });
 
@@ -343,7 +367,7 @@ describe('FlightBookingCancellationService.cancel (FLT-26)', () => {
   });
 
   it('answers 409 when the booking was cancelled or completed in between, and gives back nothing', async () => {
-    const { service, bookings, seatHolds, refunds } = setup();
+    const { service, bookings, seatHolds, refunds, seatAssignments } = setup();
     bookings.updateOne.mockReturnValueOnce({
       exec: jest.fn(() => Promise.resolve({ matchedCount: 0 })),
     });
@@ -354,6 +378,7 @@ describe('FlightBookingCancellationService.cancel (FLT-26)', () => {
     expect(failure).toBeInstanceOf(ConflictException);
     expect((failure as Error).message).toBe(NOT_CANCELLABLE_MESSAGE);
     expect(seatHolds.unbook).not.toHaveBeenCalled();
+    expect(seatAssignments.releaseBooking).not.toHaveBeenCalled();
     expect(refunds.refund).not.toHaveBeenCalled();
   });
 
@@ -400,6 +425,30 @@ describe('FlightBookingCancellationService.cancel (FLT-26)', () => {
     expect(error).toHaveBeenCalledTimes(1);
     expect(error.mock.calls[0][0]).toContain('were not given back');
     expect(error.mock.calls[0][1]).toEqual(expect.stringContaining('network'));
+  });
+
+  it('keeps the cancellation and still refunds when freeing the chosen seats fails (FLT-28)', async () => {
+    const { service, seatAssignments, refunds } = setup();
+    seatAssignments.releaseBooking.mockRejectedValueOnce(
+      new Error('db down') as never,
+    );
+
+    await expect(
+      service.cancel(BOOKING_ID, USER_ID, 50, NOW),
+    ).resolves.toMatchObject({ status: FlightBookingStatus.Cancelled });
+    expect(refunds.refund).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0][0]).toContain('chosen seats were not freed');
+    expect(error.mock.calls[0][1]).toEqual(expect.stringContaining('db down'));
+  });
+
+  it('logs a non-Error failure to free the chosen seats as it is', async () => {
+    const { service, seatAssignments } = setup();
+    seatAssignments.releaseBooking.mockRejectedValueOnce('down' as never);
+
+    await service.cancel(BOOKING_ID, USER_ID, 50, NOW);
+
+    expect(error.mock.calls[0][1]).toBe('down');
   });
 
   it('logs a non-Error rejection as it is', async () => {
