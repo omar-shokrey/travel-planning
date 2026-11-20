@@ -285,6 +285,53 @@ export class HotelRoomHoldsService {
   }
 
   /**
+   * HTL-17: keeps the reservation's held nights from expiring while it is
+   * being confirmed after payment. Only nights this reservation holds with a
+   * hold that is still live at `now` get the later `until`; nothing else is
+   * touched. Without it, a payment in the last moments of the hold could be
+   * confirmed just as the nights expire, and another reservation's `hold`
+   * would then remove them (an expired hold no longer counts). Returns how
+   * many nights were kept.
+   */
+  async secureHold(
+    bookingId: Types.ObjectId,
+    until: Date,
+    now: Date,
+  ): Promise<number> {
+    const { modifiedCount } = await this.roomNights
+      .updateMany(
+        {
+          bookingId,
+          state: RoomNightState.Held,
+          holdExpiresAt: { $gt: now },
+        },
+        { $set: { holdExpiresAt: until } },
+      )
+      .exec();
+    return modifiedCount;
+  }
+
+  /**
+   * HTL-17: the nights a confirmed reservation holds become booked: state
+   * `booked` and no `holdExpiresAt`, so they never expire and the free-room
+   * rule always counts them as taken. Only this reservation's held nights
+   * are changed, never a broad filter. Running it again changes nothing.
+   * Returns how many nights became booked.
+   */
+  async confirm(bookingId: Types.ObjectId): Promise<number> {
+    const { modifiedCount } = await this.roomNights
+      .updateMany(
+        { bookingId, state: RoomNightState.Held },
+        {
+          $set: { state: RoomNightState.Booked },
+          $unset: { holdExpiresAt: '' },
+        },
+      )
+      .exec();
+    return modifiedCount;
+  }
+
+  /**
    * Whether the hotel is still active and every room still exists, is active
    * and has the whole stay inside its availability. The nights are this
    * call's own by now, so only the availability is left to check.

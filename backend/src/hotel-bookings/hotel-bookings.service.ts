@@ -7,6 +7,7 @@ import { nightCount } from '../hotels/room-dates';
 import type { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import type { HotelBookingResponseDto } from './dto/hotel-booking-response.dto';
 import { HotelBookingStatus } from './enums/hotel-booking-status.enum';
+import { HotelBookingConfirmationService } from './hotel-booking-confirmation.service';
 import { HOTEL_BOOKING_HOLD_MINUTES } from './hotel-bookings.constants';
 import {
   type HotelBookingSource,
@@ -24,7 +25,20 @@ export class HotelBookingsService {
     @InjectModel(HotelBooking.name)
     private readonly bookings: Model<HotelBooking>,
     private readonly roomHolds: HotelRoomHoldsService,
+    // HTL-17: what happens once the payment succeeded.
+    private readonly confirmation: HotelBookingConfirmationService,
   ) {}
+
+  /**
+   * HTL-17: the `BookingPaymentHandler` of PAY-01. The payments webhook calls
+   * it once Stripe reports the money arrived; `PaymentsModule` finds it on
+   * this service. See `HotelBookingConfirmationService.confirmPaid`: one
+   * conditional update to `confirmed` while the hold is live, all the rooms
+   * together, idempotent, `false` for a late payment.
+   */
+  confirmPaid(bookingId: string, now: Date): Promise<boolean> {
+    return this.confirmation.confirmPaid(bookingId, now);
+  }
 
   /**
    * HTL-16: reserves one or more rooms of one hotel for the same dates, with
