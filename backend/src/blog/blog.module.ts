@@ -34,7 +34,9 @@ import { TagsController } from './tags.controller';
     // UploadsService: post images (BLG-10, GEN-08).
     UploadsModule,
     // PublicItinerariesService: the public itineraries of the author page
-    // (BLG-12). ItinerariesModule does not import BlogModule, so no cycle.
+    // (BLG-12) and the itinerary summary of a post page (BLG-13).
+    // ItinerariesService: the author's own itinerary to attach to a post
+    // (BLG-13). ItinerariesModule does not import BlogModule, so no cycle.
     ItinerariesModule,
   ],
   controllers: [

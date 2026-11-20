@@ -1223,6 +1223,21 @@ describe('PostsService', () => {
       },
     );
 
+    it('answers 409, and keeps the link, when the attached itinerary is sent again after it became private', async () => {
+      const { service, findOneAndUpdate } = setup({
+        post: storedPost(ITINERARY_ID),
+        itinerary: {
+          visibility: ItineraryVisibility.Private,
+          moderation: ItineraryModeration.Visible,
+        },
+      });
+
+      await expect(
+        service.attachItinerary(POST_ID, { itineraryId: ITINERARY_ID }, AUTHOR),
+      ).rejects.toThrow(new ConflictException(ONLY_PUBLIC_ITINERARY_MESSAGE));
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
     it('answers 404 when the post was deleted between the check and the update', async () => {
       const { service } = setup({ updated: null });
 
