@@ -528,4 +528,106 @@ describe('PublicItinerariesService', () => {
       ).toBeNull();
     });
   });
+
+  describe('findPublicCards (BON-02)', () => {
+    const withRows = (rows: unknown[]) => {
+      Object.assign(users, { collection: { collectionName: 'users' } });
+      const exec = jest.fn().mockResolvedValue(rows);
+      const aggregate = jest
+        .spyOn(ItineraryModel, 'aggregate')
+        .mockReturnValue({ exec } as never);
+      return { aggregate };
+    };
+
+    it('reads the cards of every id in one aggregation, with the same filter as search, and joins only the author name', async () => {
+      const a = new Types.ObjectId();
+      const b = new Types.ObjectId();
+      const { aggregate } = withRows([]);
+
+      await service.findPublicCards([a, b.toString(), a.toString()]);
+
+      expect(aggregate).toHaveBeenCalledTimes(1);
+      const [pipeline] = aggregate.mock.calls[0] as unknown as [
+        Record<string, unknown>[],
+      ];
+      expect(pipeline[0]).toEqual({
+        $match: { _id: { $in: [a, b] }, ...PUBLICLY_VISIBLE },
+      });
+      expect(pipeline[1]).toEqual({
+        $project: {
+          title: 1,
+          countries: 1,
+          startDate: 1,
+          dayCount: 1,
+          ownerId: 1,
+        },
+      });
+      expect(pipeline[2]).toEqual({
+        $lookup: {
+          from: 'users',
+          localField: 'ownerId',
+          foreignField: '_id',
+          pipeline: [{ $project: { _id: 0, name: 1 } }],
+          as: 'author',
+        },
+      });
+      expect(pipeline[3]).toEqual({ $project: { ownerId: 0 } });
+    });
+
+    it('gives each card the header fields and the author name, never the owner id, keyed by id', async () => {
+      const id = new Types.ObjectId();
+      withRows([
+        {
+          _id: id,
+          title: 'Ten days in Egypt',
+          countries: ['EG'],
+          startDate: '2026-12-20',
+          dayCount: 10,
+          author: [{ name: 'Sara Ahmed' }],
+        },
+      ]);
+
+      const cards = await service.findPublicCards([id]);
+
+      expect([...cards.entries()]).toEqual([
+        [
+          id.toString(),
+          {
+            id: id.toString(),
+            title: 'Ten days in Egypt',
+            countries: ['EG'],
+            startDate: '2026-12-20',
+            dayCount: 10,
+            authorName: 'Sara Ahmed',
+          },
+        ],
+      ]);
+    });
+
+    it(`names a missing author "${UNKNOWN_AUTHOR}"`, async () => {
+      const id = new Types.ObjectId();
+      withRows([
+        {
+          _id: id,
+          title: 'Ten days in Egypt',
+          countries: ['EG'],
+          startDate: '2026-12-20',
+          dayCount: 10,
+          author: [],
+        },
+      ]);
+
+      expect(
+        (await service.findPublicCards([id])).get(id.toString())?.authorName,
+      ).toBe(UNKNOWN_AUTHOR);
+    });
+
+    it('reads nothing for no ids or ids that are not valid', async () => {
+      const { aggregate } = withRows([]);
+
+      expect((await service.findPublicCards([])).size).toBe(0);
+      expect((await service.findPublicCards(['not-an-id'])).size).toBe(0);
+      expect(aggregate).not.toHaveBeenCalled();
+    });
+  });
 });

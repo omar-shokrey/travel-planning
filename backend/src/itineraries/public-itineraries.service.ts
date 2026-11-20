@@ -55,6 +55,15 @@ export interface PublicItinerarySummary {
   dayCount: number;
 }
 
+/**
+ * BON-02: what a favourites list shows of a public itinerary: the header of a
+ * search result and the author's name. Never the owner's id, the days, the
+ * budget or the linked bookings.
+ */
+export interface PublicItineraryCard extends PublicItinerarySummary {
+  authorName: string;
+}
+
 /** Escapes a keyword so it is matched as plain text, never as a pattern. */
 export function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -141,6 +150,68 @@ export class PublicItinerariesService {
       startDate: found.startDate,
       dayCount: found.dayCount,
     };
+  }
+
+  /**
+   * BON-02, for the favourites module (never through a controller): the card
+   * of each of these itineraries that is publicly visible now, keyed by id.
+   * One aggregation: the same filter as the search (`PUBLICLY_VISIBLE`), and
+   * the author's name joined from `users`. A private, hidden or deleted
+   * itinerary, or one whose author was deactivated, is not in the map.
+   */
+  async findPublicCards(
+    ids: readonly (string | Types.ObjectId)[],
+  ): Promise<Map<string, PublicItineraryCard>> {
+    const unique = [...new Set(ids.map((id) => id.toString()))]
+      .filter((id) => Types.ObjectId.isValid(id))
+      .map((id) => new Types.ObjectId(id));
+    if (unique.length === 0) {
+      return new Map();
+    }
+    const found = await this.itineraries
+      .aggregate<{
+        _id: Types.ObjectId;
+        title: string;
+        countries: string[];
+        startDate: string;
+        dayCount: number;
+        author: { name: string }[];
+      }>([
+        { $match: { _id: { $in: unique }, ...PUBLICLY_VISIBLE } },
+        {
+          $project: {
+            title: 1,
+            countries: 1,
+            startDate: 1,
+            dayCount: 1,
+            ownerId: 1,
+          },
+        },
+        {
+          $lookup: {
+            from: this.users.collection.collectionName,
+            localField: 'ownerId',
+            foreignField: '_id',
+            pipeline: [{ $project: { _id: 0, name: 1 } }],
+            as: 'author',
+          },
+        },
+        { $project: { ownerId: 0 } },
+      ])
+      .exec();
+    return new Map(
+      found.map((itinerary) => [
+        itinerary._id.toString(),
+        {
+          id: itinerary._id.toString(),
+          title: itinerary.title,
+          countries: [...itinerary.countries],
+          startDate: itinerary.startDate,
+          dayCount: itinerary.dayCount,
+          authorName: itinerary.author[0]?.name ?? UNKNOWN_AUTHOR,
+        },
+      ]),
+    );
   }
 
   /** ITN-21: a public itinerary, read-only, with its author, days, activities and budget. */
