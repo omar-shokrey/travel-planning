@@ -4,15 +4,16 @@ The hotels module owns the `hotels`, `rooms` and `room_nights` collections. It
 implements the hotel profile and photos (HTL-01), the hotel page (HTL-02), rooms
 and their availability, blocks and status (HTL-03 to HTL-06, HTL-08), the
 policies (HTL-09, HTL-10), hotel search with its filters and order (HTL-11,
-HTL-12) and the free rooms of a hotel
-for the searched dates (HTL-15). `HotelsService` creates profiles and lets a
-moderator update only the hotel in their user assignment. It reads cities from
-`ReferenceModule` and copies each city's country code into the hotel, so
+HTL-12), the free rooms of a hotel for the searched dates (HTL-15) and the
+public list of a hotel's reviews (HTL-24). `HotelsService` creates profiles
+and lets a moderator update only the hotel in their user assignment. It reads
+cities from `ReferenceModule` and copies each city's country code into the hotel, so
 callers cannot choose a mismatched country. Reservations belong to the
 hotel-bookings module; `HotelRoomHoldsService` here finds and holds their rooms
 (HTL-16, HTL-18) and frees them when a reservation is cancelled (HTL-21). The
 moderator's list of a hotel's reservations (HTL-22) is in this module, read
-through `HotelBookingLookup`.
+through `HotelBookingLookup`. The reviews belong to the hotel-bookings module
+too (HTL-23); the public list reads them through `HotelReviewLookup`.
 
 ## Routes
 
@@ -24,6 +25,7 @@ through `HotelBookingLookup`.
 | `DELETE /api/hotels/:id/photos/:filename`          | Its hotel moderator | HTL-01, GEN-08 |
 | `GET /api/hotels/search`                           | Public              | HTL-11, HTL-12 |
 | `GET /api/hotels/:id/rooms/available`              | Public              | HTL-15         |
+| `GET /api/hotels/:id/reviews`                      | Public              | HTL-24         |
 | `GET /api/hotels/:id`                              | Public              | HTL-02, HTL-15 |
 | `POST /api/hotels/:id/rooms`                       | Its hotel moderator | HTL-03         |
 | `PATCH /api/hotels/:id/rooms/:roomId`              | Its hotel moderator | HTL-05         |
@@ -73,7 +75,7 @@ the order and which route answers each GET path.
 - It lives in its own `HotelDetailsController` and `HotelDetailsService`, so it does not collide with the profile and search work in the same module. The controller is registered last in `HotelsModule`: a controller with a fixed path such as `GET /hotels/search` must be matched before `GET /hotels/:id`, or "search" would be read as an id and answer 400.
 - Only an active hotel is shown. A deactivated hotel answers 404, the same as a missing one, because ACC-15 hides it from the public.
 - The response is `HotelDetailsResponseDto`: the `HotelResponseDto` of HTL-01 (profile, photos with their URLs, amenities, `averageRating` and `ratingCount`) plus `policy` (HTL-09, HTL-10) and `availableRooms` (HTL-15).
-- The check-in and check-out times and the cancellation policy come in `policy` (HTL-09, HTL-10). The available rooms are on the page itself: with `checkIn` and `checkOut`, `availableRooms` lists every room free for the stay; without dates it is `null` (see "Available rooms for the searched dates" below). The reviews come from the issue that owns them, `GET /api/hotels/:id/reviews` (HTL-24), which is not built yet.
+- The check-in and check-out times and the cancellation policy come in `policy` (HTL-09, HTL-10). The available rooms are on the page itself: with `checkIn` and `checkOut`, `availableRooms` lists every room free for the stay; without dates it is `null` (see "Available rooms for the searched dates" below). The reviews are listed by `GET /api/hotels/:id/reviews` (HTL-24, see "Hotel reviews" below), so the page stays one read.
 
 ## Check-in and check-out times (HTL-09)
 
@@ -213,6 +215,19 @@ HTL-12: "The system shall allow a guest or registered user to filter hotel resul
 - **`release`.** Deletes only the `held` nights of one reservation. The reservation service calls it when it cannot save the reservation after the hold. The hold-expiry job of the hotel-bookings module (HTL-18) calls it after it sets an unpaid reservation to `expired`.
 - **`unbook` (HTL-21).** Deletes every night of one cancelled reservation, found by `bookingId`, so all its rooms are free again for those dates: its `booked` nights and any night still `held` (the confirmation books the nights after it confirms the reservation, so a cancellation can come in between, and a later retry of the confirmation then finds nothing to book). Blocked nights have no `bookingId` and are never touched, and a second call deletes nothing. It returns how many nights it freed, so the cancellation can check rooms x nights.
 
+## Hotel reviews (HTL-24)
+
+HTL-24: "The system shall allow a guest or registered user to view a hotel's average rating, number of ratings and reviews (newest first, paginated)."
+
+- **Route.** `GET /api/hotels/:id/reviews` is public: guests and users get the same answer. Its path has one more segment than `GET /api/hotels/:id`, so the hotel page never answers it (tested end to end). The average rating and the number of ratings are already on the hotel page (`averageRating`, `ratingCount`, HTL-02), kept up to date by HTL-23, so this route lists only the reviews and keeps the standard page shape.
+- **Which hotel.** A malformed id answers 400. A missing or deactivated hotel (ACC-15) answers 404 "Hotel not found", exactly like the hotel page, even when it has reviews.
+- **Which reviews.** Only reviews with `moderation: 'visible'`. A hidden review (GEN-10) is in neither the items nor `total`, as it is not counted in the rating either.
+- **Order and pages.** Newest first (`createdAt` descending), `_id` descending breaking ties, so pages never repeat or skip a review. Standard pagination (`page`, `limit`, 10 by default, GEN-05) with `paginate()`; `total` is a count with the same filter. The (`hotelId`, `createdAt` descending) index of the `Review` schema narrows the query to the hotel; the sort with the `_id` tie-break runs on that hotel's reviews, which is fine for one hotel. This module creates no index; a compound index for the sort would be a hotel-bookings change.
+- **The module boundary.** The hotel-bookings module owns reviews (HTL-23) and imports this module, so this one cannot import it back. `HotelReviewLookup` reads the `reviews` collection with the native driver and never writes, as `HotelBookingLookup` does for reservations. It reads only `userId`, `rating`, `text` and `createdAt`. `REVIEWS_COLLECTION` and `VISIBLE_REVIEW_MODERATION` are in `hotels.constants.ts`, and a spec checks them against the `Review` schema and `ReviewModeration.Visible`, so a rename in hotel-bookings fails a test here.
+- **Each review.** `id`, `rating` (1 to 5), `text` (left out when there is none), `authorName` and `createdAt` (UTC ISO). Never the author's account id, the reservation, the hotel id or the moderation flag (`HotelReviewResponseDto`, `toHotelReviewResponse`).
+- **Author names.** Read for the whole page in one query with `UsersService.findNamesByIds` (users module). An account that no longer exists or is deactivated (ACC-12) is shown as `DELETED_AUTHOR_NAME`, "Deleted user", the same text the blog module uses. A suspended author (ACC-16) keeps the name: suspension is not a deactivation.
+- **Tests:** `hotel-review-lookup.service.spec.ts` (the filter, sort, page, count, projection, no write and no index, and the two constants against hotel-bookings), `mappers/hotel-review.mapper.spec.ts`, `hotel-reviews-list.service.spec.ts`, `hotel-reviews-list.controller.spec.ts`, `UsersService.findNamesByIds` in the users spec, and `test/hotel-reviews-list.e2e-spec.ts` (on the `-test` database: the order with a tie, the fields and no leak, no text, hidden reviews, "Deleted user" for a deactivated and a missing author and the name of a suspended one, guest and user, pages, another hotel, an empty hotel, 404 for a deactivated and a missing hotel, the 400s, route matching and Swagger).
+
 ## The reservations of my hotel (HTL-22)
 
 HTL-22: "The system shall allow a hotel moderator to view reservations for their hotel (guest, dates, status)."
@@ -222,5 +237,5 @@ HTL-22: "The system shall allow a hotel moderator to view reservations for their
 - **Which reservations.** `confirmed`, `completed` and `cancelled` (`ModeratorReservationStatus`, defined in the lookup, with a spec that checks its values against the hotel-bookings enum). A reservation waiting for payment or whose hold ran out was never a stay of the hotel, so it is not shown, as in "My hotel reservations" (HTL-20). `status` filters on one of the three; any other value is 400.
 - **What a moderator sees.** For each reservation: id, reference, the guest's **name only** (no email, phone or account id), check-in, check-out, nights, each room with its adults and children's ages, the status and when it was made. No total or other price, no payment data. A deleted account shows `name: null` (the "Deleted user" label is ACC-12).
 - **Order and pages.** Most recent check-in first, `_id` breaking ties, paginated with `paginate()` (10 by default).
-- **Guest names** come from `UsersService.findEntityById`, once per distinct guest of the page (at most one page of reads). A batch lookup in the users module would need its own PR.
+- **Guest names** come from `UsersService.findEntityById`, once per distinct guest of the page (at most one page of reads). `UsersService.findNamesByIds` (HTL-24) reads the names of a page in one query; switching this list to it is a follow-up.
 - **Tests:** `hotel-booking-lookup.service.spec.ts` (`listForHotel`: the filter, sort, page, count, the projection without prices or payments, no write, and the status values), `dto/moderator-reservations-query.dto.spec.ts`, `mappers/moderator-reservation.mapper.spec.ts`, `hotel-moderator-reservations.service.spec.ts`, `hotel-moderator-reservations.controller.spec.ts`, and `test/hotel-moderator-reservations.e2e-spec.ts` (on the `-test` database, two hotels and reservations in every status: the moderator's own list in order, each status filter, pages, nothing leaked, 403 for the other hotel's moderator both ways, 403 for a user, an admin and an airline moderator, 401 for a guest, 404, 400, Swagger).
