@@ -17,9 +17,11 @@ import { UsersService } from '../../users/users.service';
 import {
   ACCOUNT_SUSPENDED_MESSAGE,
   LOGIN_REQUIRED_MESSAGE,
+  PASSWORD_CHANGE_REQUIRED_MESSAGE,
 } from '../auth.constants';
 import { AuthTokensService, type TokenClaims } from '../auth-tokens.service';
 import { SessionsService } from '../sessions.service';
+import { ALLOW_TEMPORARY_PASSWORD_KEY } from '../decorators/allow-temporary-password.decorator';
 
 /**
  * The authentication guard (ACC-04), registered for the whole app. A route
@@ -34,6 +36,13 @@ import { SessionsService } from '../sessions.service';
  * live. Logout revokes the session, and a session that had no authenticated
  * request for the inactivity limit has run out. Each request that gets in
  * counts as activity and moves the end of the session forward.
+ *
+ * A temporary password set by an admin (ACC-13, ACC-07a) must be changed
+ * first: while the account has `mustChangePassword`, every route but those
+ * marked @AllowTemporaryPassword() (GET /api/auth/me and
+ * PATCH /api/auth/change-password) answers 403. The backend enforces it
+ * (GEN-13), whatever the frontend does. The flag is read with the account on
+ * every request, so the change applies at once.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -53,8 +62,17 @@ export class JwtAuthGuard implements CanActivate {
       return true;
     }
 
+    const allowTemporaryPassword =
+      this.reflector.getAllAndOverride<boolean | undefined>(
+        ALLOW_TEMPORARY_PASSWORD_KEY,
+        [context.getHandler(), context.getClass()],
+      ) === true;
+
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    request.user = await this.authenticate(this.readToken(request));
+    request.user = await this.authenticate(
+      this.readToken(request),
+      allowTemporaryPassword,
+    );
     return true;
   }
 
@@ -69,6 +87,7 @@ export class JwtAuthGuard implements CanActivate {
 
   private async authenticate(
     token: string | undefined,
+    allowTemporaryPassword: boolean,
   ): Promise<AuthenticatedUser> {
     if (!token) {
       throw new UnauthorizedException(LOGIN_REQUIRED_MESSAGE);
@@ -102,6 +121,11 @@ export class JwtAuthGuard implements CanActivate {
     }
     if (user.status !== UserStatus.Active) {
       throw new UnauthorizedException(LOGIN_REQUIRED_MESSAGE);
+    }
+    // After the checks above, so a suspended account still gets its own 403.
+    // A document saved before the flag existed has none: it is not restricted.
+    if (user.mustChangePassword === true && !allowTemporaryPassword) {
+      throw new ForbiddenException(PASSWORD_CHANGE_REQUIRED_MESSAGE);
     }
     return { id: user._id.toString(), role: user.role };
   }
