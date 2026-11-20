@@ -3,12 +3,14 @@ import {
   EMAIL_VERIFICATION_SUBJECT,
   MODERATOR_INVITATION_SUBJECT,
   NOTIFICATION_EMAIL_SUBJECTS,
+  PASSWORD_RESET_SUBJECT,
 } from './email.constants';
 import {
   emailVerificationEmail,
   frontendLink,
   moderatorInvitationEmail,
   notificationEmail,
+  passwordResetEmail,
 } from './email-templates';
 import { NotificationType } from './enums/notification-type.enum';
 
@@ -171,6 +173,50 @@ describe('emailVerificationEmail (ACC-02)', () => {
 
     expect(text).toContain('Sara\r\nBcc: someone@example.com');
     expect(subject).toBe('Verify your email address');
+    expect(subject).not.toMatch(/[\r\n]/);
+  });
+});
+
+describe('passwordResetEmail (ACC-07)', () => {
+  const request = {
+    name: 'Sara Ahmed',
+    token: 'q3Zf8kV1uX9cLr0bT2mN7pQwYh5sJd4eAiOgKl6zRvE',
+    expiresInMinutes: 30,
+  };
+
+  it('gives the reset link, its 30 minutes, that it works once, and that nothing changed if not asked for, in plain text', () => {
+    const { subject, text } = passwordResetEmail(request, LOGIN_URL);
+
+    expect(subject).toBe(PASSWORD_RESET_SUBJECT);
+    expect(subject).toBe('Reset your password');
+    expect(text).toContain('Hello Sara Ahmed,');
+    expect(text).toContain(
+      'http://localhost:3000/reset-password?token=q3Zf8kV1uX9cLr0bT2mN7pQwYh5sJd4eAiOgKl6zRvE',
+    );
+    expect(text).toContain('This link expires in 30 minutes and works once.');
+    expect(text).toContain(
+      'If you did not ask for this, ignore this email: your password has not changed.',
+    );
+    expect(text).not.toMatch(/<[a-z]/i);
+  });
+
+  it('never holds a password, even if one is passed by mistake', () => {
+    const { subject, text } = passwordResetEmail(
+      { ...request, password: 'Passw0rdOK' } as typeof request,
+      LOGIN_URL,
+    );
+
+    expect(`${subject}${text}`).not.toContain('Passw0rdOK');
+  });
+
+  it('keeps a line break in the name in the body only: the subject stays fixed, with no line break', () => {
+    const { subject, text } = passwordResetEmail(
+      { ...request, name: 'Sara\r\nBcc: someone@example.com' },
+      LOGIN_URL,
+    );
+
+    expect(text).toContain('Sara\r\nBcc: someone@example.com');
+    expect(subject).toBe('Reset your password');
     expect(subject).not.toMatch(/[\r\n]/);
   });
 });

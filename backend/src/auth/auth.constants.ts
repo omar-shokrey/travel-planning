@@ -84,11 +84,11 @@ export const ACCOUNT_CHANGED_MESSAGE =
 export const EMAIL_VERIFICATION_TOKEN_HOURS = 24;
 
 /**
- * ACC-02: the longest verification token the route reads. A real one has 43
- * characters (32 random bytes in base64url); anything far longer is refused
- * as a bad request without a database lookup.
+ * ACC-02, ACC-07: the longest one-time token a route reads (verification and
+ * reset links). A real one has 43 characters (32 random bytes in base64url);
+ * anything far longer is refused as a bad request without a database lookup.
  */
-export const VERIFICATION_TOKEN_MAX_LENGTH = 128;
+export const ONE_TIME_TOKEN_MAX_LENGTH = 128;
 
 /** ACC-02: the answer of a route that books while the email is not verified. */
 export const EMAIL_NOT_VERIFIED_MESSAGE =
@@ -123,3 +123,34 @@ export const VERIFICATION_RESEND_INTERVAL_SECONDS = 60;
 /** ACC-02: the answer of a new verification link asked for within the minute. */
 export const VERIFICATION_RESEND_TOO_SOON_MESSAGE =
   'A verification link was sent less than a minute ago. Check your inbox, or try again in a minute';
+
+/** ACC-07: how long a password reset link works, in minutes (the workbook says 30). */
+export const PASSWORD_RESET_TOKEN_MINUTES = 30;
+
+/**
+ * ACC-07: at most this many forgot-password requests are worked on in the
+ * background at once. The route answers before its lookup runs, so without a
+ * cap a client sending requests without pause would pile lookups up in the
+ * database pool every route shares. Past the cap a request still gets the
+ * same 202 and nothing is done for it.
+ */
+export const MAX_PENDING_PASSWORD_RESETS = 20;
+
+/**
+ * ACC-07: the one answer of `POST /api/auth/forgot-password`, whatever the
+ * email, so it never tells whether an account exists.
+ */
+export const PASSWORD_RESET_REQUESTED_MESSAGE =
+  'If an account exists for this email, a reset link has been sent.';
+
+/**
+ * ACC-07: the one answer of a reset link that does not work: unknown,
+ * expired, already used, replaced by a newer one, or of an account that is no
+ * longer active. It never says which.
+ */
+export const INVALID_RESET_LINK_MESSAGE =
+  'The reset link is invalid or has expired';
+
+/** ACC-07: the answer of a successful reset. */
+export const PASSWORD_RESET_DONE_MESSAGE =
+  'Your password has been reset. Log in with the new password.';

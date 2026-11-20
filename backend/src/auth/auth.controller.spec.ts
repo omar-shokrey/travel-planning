@@ -57,6 +57,8 @@ function setup() {
     changePassword: jest.fn().mockResolvedValue(created),
     verifyEmail: jest.fn().mockResolvedValue({ verified: true }),
     resendVerification: jest.fn().mockResolvedValue({ message: 'sent' }),
+    forgotPassword: jest.fn().mockReturnValue({ message: 'requested' }),
+    resetPassword: jest.fn().mockResolvedValue({ message: 'done' }),
   };
   const authCookies = {
     setAuthCookies: jest.fn(),
@@ -327,6 +329,39 @@ describe('AuthController', () => {
       expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(
         HttpStatus.ACCEPTED,
       );
+    });
+  });
+
+  describe('forgotPassword and resetPassword (ACC-07)', () => {
+    it('hands the email to the service and returns its answer', () => {
+      const { authService, controller } = setup();
+
+      expect(controller.forgotPassword({ email: 'sara@example.com' })).toEqual({
+        message: 'requested',
+      });
+      expect(authService.forgotPassword).toHaveBeenCalledWith(
+        'sara@example.com',
+      );
+    });
+
+    it('hands the token and the new password to the service and returns its answer', async () => {
+      const { authService, controller } = setup();
+      const body = { token: 'a-one-time-token', newPassword: 'N3wPassword' };
+
+      await expect(controller.resetPassword(body)).resolves.toEqual({
+        message: 'done',
+      });
+      expect(authService.resetPassword).toHaveBeenCalledWith(body);
+    });
+
+    it.each([
+      ['forgotPassword', HttpStatus.ACCEPTED],
+      ['resetPassword', HttpStatus.OK],
+    ] as const)('%s is open to guests and answers %s', (name, status) => {
+      const handler = AuthController.prototype[name];
+
+      expect(new Reflector().get(IS_PUBLIC_KEY, handler)).toBe(true);
+      expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(status);
     });
   });
 });

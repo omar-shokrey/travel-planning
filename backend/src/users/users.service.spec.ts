@@ -614,6 +614,101 @@ describe('UsersService', () => {
     });
   });
 
+  describe('findEntityByEmail (ACC-07)', () => {
+    it('looks the account up by the trimmed, lowercased email, without the password hash', async () => {
+      const exec = jest.fn().mockResolvedValue({ _id: userObjectId });
+      const select = jest.fn();
+      const model = { findOne: jest.fn(() => ({ exec, select })) };
+      const service = new UsersService(model as unknown as Model<User>);
+
+      await expect(
+        service.findEntityByEmail('  Sara@Example.COM '),
+      ).resolves.toEqual({ _id: userObjectId });
+      expect(model.findOne).toHaveBeenCalledWith({
+        email: 'sara@example.com',
+      });
+      expect(select).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resetForgottenPassword (ACC-07)', () => {
+    function setupForgotten(updated: object | null) {
+      const exec = jest.fn().mockResolvedValue(updated);
+      const model = { findOneAndUpdate: jest.fn(() => ({ exec })) };
+      const service = new UsersService(model as unknown as Model<User>);
+      const call = () =>
+        model.findOneAndUpdate.mock.calls[0] as unknown as [
+          Record<string, unknown>,
+          { $set: Record<string, unknown>; $unset: Record<string, unknown> },
+          Record<string, unknown>,
+        ];
+      return { model, service, call };
+    }
+
+    it('updates only an active account with the user role, by id, in one update', async () => {
+      const { service, call } = setupForgotten({ _id: userObjectId });
+
+      await service.resetForgottenPassword(userObjectId, 'N3wPassword');
+
+      const [filter, , options] = call();
+      expect(filter).toEqual({
+        _id: userObjectId,
+        role: Role.User,
+        status: UserStatus.Active,
+      });
+      expect(options).toEqual({ returnDocument: 'after' });
+    });
+
+    it('stores a bcrypt hash of the new password, clears the temporary password and the lockout', async () => {
+      const { service, call } = setupForgotten({ _id: userObjectId });
+
+      await service.resetForgottenPassword(userObjectId, 'N3wPassword');
+
+      const [, update] = call();
+      expect(update.$set.passwordHash).not.toBe('N3wPassword');
+      expect(
+        await compare('N3wPassword', update.$set.passwordHash as string),
+      ).toBe(true);
+      expect(update.$set).toMatchObject({
+        mustChangePassword: false,
+        failedLoginAttempts: 0,
+      });
+      expect(update.$unset).toEqual({ lockedUntil: 1 });
+    });
+
+    it('marks the email verified, since the link reached that mailbox (ACC-02)', async () => {
+      const { service, call } = setupForgotten({ _id: userObjectId });
+
+      await service.resetForgottenPassword(userObjectId, 'N3wPassword');
+
+      const [, update] = call();
+      expect(update.$set.emailVerified).toBe(true);
+      expect(Object.keys(update.$set).sort()).toEqual([
+        'emailVerified',
+        'failedLoginAttempts',
+        'mustChangePassword',
+        'passwordHash',
+      ]);
+    });
+
+    it('returns the updated account, or null when no active registered user has this id', async () => {
+      const updated = { _id: userObjectId };
+
+      expect(
+        await setupForgotten(updated).service.resetForgottenPassword(
+          userObjectId,
+          'N3wPassword',
+        ),
+      ).toBe(updated);
+      expect(
+        await setupForgotten(null).service.resetForgottenPassword(
+          userObjectId,
+          'N3wPassword',
+        ),
+      ).toBeNull();
+    });
+  });
+
   describe('setTemporaryPassword (ACC-07a)', () => {
     function setupReset(updated: object | null) {
       const exec = jest.fn().mockResolvedValue(updated);

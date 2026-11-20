@@ -374,6 +374,54 @@ describe('EmailService.sendEmailVerification (ACC-02, GEN-01-B)', () => {
   });
 });
 
+describe('EmailService.sendPasswordReset (ACC-07, GEN-01-B)', () => {
+  const request = {
+    name: 'Sara Ahmed',
+    email: 'sara@example.com',
+    token: 'q3Zf8kV1uX9cLr0bT2mN7pQwYh5sJd4eAiOgKl6zRvE',
+    expiresInMinutes: 30,
+  };
+
+  it('emails the reset link with the token, from MAIL_FROM, with the fixed subject', async () => {
+    const { sent, transport } = fakeTransport();
+    const service = new EmailService(transport, config);
+
+    await service.sendPasswordReset(request);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      from: 'Travel Platform <no-reply@example.com>',
+      to: 'sara@example.com',
+      subject: 'Reset your password',
+    });
+    expect(sent[0].text).toContain(
+      `http://localhost:3000/reset-password?token=${request.token}`,
+    );
+  });
+
+  it('sends nothing when email is switched off', async () => {
+    await expect(
+      new EmailService(null, config).sendPasswordReset(request),
+    ).resolves.toBeUndefined();
+  });
+
+  it('never throws when the server refuses it, and logs neither the address nor the token', async () => {
+    const sendMail = jest.fn().mockRejectedValue(
+      Object.assign(new Error(`sara@example.com ${request.token}`), {
+        code: 'ETIMEDOUT',
+      }),
+    );
+    const service = new EmailService({ sendMail }, config);
+
+    await expect(service.sendPasswordReset(request)).resolves.toBeUndefined();
+    expect(warn.mock.calls[0][0]).toBe(
+      'Could not email the password reset to 1 of 1 recipient(s) (ETIMEDOUT)',
+    );
+    expect(logged()).not.toContain('sara@example.com');
+    expect(logged()).not.toContain(request.token);
+  });
+});
+
 describe('EmailService.runInBackground (GEN-01-B)', () => {
   it('does not make the caller wait, and whenIdle waits for the task', async () => {
     const service = new EmailService(null, config);

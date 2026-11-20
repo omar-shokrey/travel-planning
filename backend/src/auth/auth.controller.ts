@@ -37,8 +37,11 @@ import {
   EMAIL_NOT_VERIFIED_MESSAGE,
   EMAIL_SWITCHED_OFF_MESSAGE,
   EMAIL_VERIFICATION_TOKEN_HOURS,
+  INVALID_RESET_LINK_MESSAGE,
   INVALID_VERIFICATION_LINK_MESSAGE,
   PASSWORD_CHANGE_REQUIRED_MESSAGE,
+  PASSWORD_RESET_DONE_MESSAGE,
+  PASSWORD_RESET_TOKEN_MINUTES,
   VERIFICATION_RESEND_TOO_SOON_MESSAGE,
 } from './auth.constants';
 import { AuthService } from './auth.service';
@@ -48,7 +51,13 @@ import {
   EmailVerifiedResponseDto,
   VerificationEmailSentResponseDto,
 } from './dto/email-verification-response.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
+import {
+  PasswordResetDoneResponseDto,
+  PasswordResetRequestedResponseDto,
+} from './dto/password-reset-response.dto';
+import { ResetForgottenPasswordDto } from './dto/reset-forgotten-password.dto';
 import { RegisterDto } from './dto/register.dto';
 import { VerifyEmailQueryDto } from './dto/verify-email-query.dto';
 import { QueryFreeExceptionsFilter } from './filters/query-free-exceptions.filter';
@@ -132,6 +141,47 @@ export class AuthController {
     @CurrentUser('id') userId: string,
   ): Promise<VerificationEmailSentResponseDto> {
     return this.authService.resendVerification(userId);
+  }
+
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Ask for a password reset link by email (ACC-07)',
+    description: `Open to guests. **The answer is the same 202 and the same body for every email**: an unknown one, a deactivated, suspended, moderator or administrator account, or a registered user, so it never tells whether an account exists. The work runs after the answer: only an active account with the role \`user\` gets an email with a link that works once, for ${PASSWORD_RESET_TOKEN_MINUTES} minutes; a newer request replaces the older link, which stops working. Moderators and administrators use the admin reset (ACC-07a, POST /api/admin/users/:id/reset-password). When the server sends no email (SMTP_HOST empty), nothing is sent.`,
+  })
+  @ApiAcceptedResponse({
+    description: 'The same answer for every email',
+    type: PasswordResetRequestedResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      '`email` is missing or is not an email, or the body has another field',
+  })
+  forgotPassword(
+    @Body() dto: ForgotPasswordDto,
+  ): PasswordResetRequestedResponseDto {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Set a new password with the link from the email (ACC-07)',
+    description: `Open to guests. Send the \`token\` of the reset link and the new password (8 or more characters with a letter and a digit, as at registration). The password is checked first, so a password that breaks the rule does not use up the link. The link works once, for ${PASSWORD_RESET_TOKEN_MINUTES} minutes, and only the newest link of the account works. On success the password is replaced, a login lockout (ACC-05) and a temporary password (ACC-07a) are cleared, and **every session of the account ends**. Nobody is logged in: log in with the new password next. If the server fails (500) after the password was stored, the link is used up: ask for a new one, whose reset ends the old sessions.`,
+  })
+  @ApiOkResponse({
+    description: `"${PASSWORD_RESET_DONE_MESSAGE}"`,
+    type: PasswordResetDoneResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: `"${INVALID_RESET_LINK_MESSAGE}": the token is unknown, has expired, was already used or replaced by a newer link, or the account is no longer active. Also when \`newPassword\` breaks the password rule, \`token\` is missing, empty or too long, or the body has another field (\`errors\` lists it).`,
+  })
+  resetPassword(
+    @Body() dto: ResetForgottenPasswordDto,
+  ): Promise<PasswordResetDoneResponseDto> {
+    return this.authService.resetPassword(dto);
   }
 
   @Public()

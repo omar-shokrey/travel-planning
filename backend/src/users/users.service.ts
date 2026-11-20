@@ -181,9 +181,9 @@ export class UsersService {
   }
 
   /**
-   * Finds an account by email for the login check (ACC-04). It is the only
-   * lookup that reads `passwordHash`, which the schema hides by default. The
-   * entity is for the auth service: it never leaves the API.
+   * Finds an account by email with its password hash, for the login check
+   * (ACC-04); the schema hides `passwordHash` by default. The entity is for
+   * the auth service: it never leaves the API.
    */
   findEntityByEmailWithPasswordHash(
     email: string,
@@ -192,6 +192,15 @@ export class UsersService {
       .findOne({ email: email.trim().toLowerCase() })
       .select('+passwordHash')
       .exec();
+  }
+
+  /**
+   * ACC-07: finds an account by email, without the password hash, for the
+   * forgot-password request. The email is trimmed and lowercased as at
+   * login. `null` when there is none.
+   */
+  findEntityByEmail(email: string): Promise<UserDocument | null> {
+    return this.users.findOne({ email: email.trim().toLowerCase() }).exec();
   }
 
   /** Finds an account by id, without the password hash. `null` when there is none. */
@@ -335,6 +344,36 @@ export class UsersService {
             passwordHash,
             mustChangePassword: true,
             failedLoginAttempts: 0,
+          },
+          $unset: { lockedUntil: 1 },
+        },
+        { returnDocument: 'after' },
+      )
+      .exec();
+  }
+
+  /**
+   * ACC-07: the new password of a reset by email. In one update, and only
+   * while the account is an active registered user: it stores the hash,
+   * clears `mustChangePassword` and the login lockout (ACC-05), so a locked
+   * account is opened by its own reset, and marks the email verified
+   * (ACC-02): the link reached that mailbox. The plain password is hashed
+   * here and never stored. Returns `null` when no such active account exists.
+   */
+  async resetForgottenPassword(
+    id: Types.ObjectId,
+    password: string,
+  ): Promise<UserDocument | null> {
+    const passwordHash = await hash(password, PASSWORD_SALT_ROUNDS);
+    return this.users
+      .findOneAndUpdate(
+        { _id: id, role: Role.User, status: UserStatus.Active },
+        {
+          $set: {
+            passwordHash,
+            mustChangePassword: false,
+            failedLoginAttempts: 0,
+            emailVerified: true,
           },
           $unset: { lockedUntil: 1 },
         },
