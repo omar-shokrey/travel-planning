@@ -3,6 +3,8 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { FlightsModule } from '../flights/flights.module';
 import { Flight, FlightSchema } from '../flights/models/flight.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { RefundsModule } from '../payments/refunds/refunds.module';
+import { FlightBookingCancellationService } from './flight-booking-cancellation.service';
 import { FlightBookingConfirmationService } from './flight-booking-confirmation.service';
 import { FlightBookingETicketService } from './flight-booking-e-ticket.service';
 import { FlightBookingCompletionService } from './flight-booking-completion.service';
@@ -28,15 +30,20 @@ import {
     // FLT-23: the in-app notification of a confirmed booking (GEN-01). It
     // imports nothing of the booking modules, so there is no cycle.
     NotificationsModule,
+    // FLT-26: the refund of a cancelled booking (PAY-03). RefundsModule
+    // imports no booking module and not PaymentsModule, so there is no cycle.
+    RefundsModule,
   ],
   controllers: [FlightBookingsController],
   // FlightBookingExpiryService: the hold-expiry job (FLT-22).
   // FlightBookingConfirmationService and FlightBookingETicketService: FLT-23.
+  // FlightBookingCancellationService: FLT-26.
   providers: [
     FlightBookingsService,
     FlightBookingExpiryService,
     FlightBookingConfirmationService,
     FlightBookingETicketService,
+    FlightBookingCancellationService,
     // GEN-11: the completion job (Confirmed -> Completed).
     FlightBookingCompletionService,
   ],

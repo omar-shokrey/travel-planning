@@ -6,6 +6,7 @@ import { ROLES_KEY } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
 import { CabinClass } from '../flights/models/cabin-class.enum';
 import { FlightBookingsController } from './flight-bookings.controller';
+import type { FlightBookingCancellationService } from './flight-booking-cancellation.service';
 import type { FlightBookingETicketService } from './flight-booking-e-ticket.service';
 import type { FlightBookingsService } from './flight-bookings.service';
 
@@ -16,6 +17,7 @@ describe('FlightBookingsController (FLT-22, FLT-19)', () => {
     const controller = new FlightBookingsController(
       service as unknown as FlightBookingsService,
       {} as FlightBookingETicketService,
+      {} as FlightBookingCancellationService,
     );
     const dto = {
       flightId: '6740f1c2a4b5c6d7e8f90456',
@@ -66,6 +68,7 @@ describe('FlightBookingsController.summarise (FLT-21)', () => {
     const controller = new FlightBookingsController(
       service as unknown as FlightBookingsService,
       {} as FlightBookingETicketService,
+      {} as FlightBookingCancellationService,
     );
 
     await expect(controller.summarise(dto)).resolves.toBe(answer);
@@ -102,6 +105,7 @@ describe('FlightBookingsController.eTicket (FLT-23)', () => {
     const controller = new FlightBookingsController(
       {} as FlightBookingsService,
       eTickets as unknown as FlightBookingETicketService,
+      {} as FlightBookingCancellationService,
     );
 
     const file = await controller.eTicket('booking-1', 'user-1');
@@ -128,4 +132,62 @@ describe('FlightBookingsController.eTicket (FLT-23)', () => {
     ).toBeUndefined();
     expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe(':id/e-ticket');
   });
+});
+
+describe('FlightBookingsController cancellation (FLT-26)', () => {
+  function setup() {
+    const cancellations = {
+      preview: jest.fn().mockResolvedValue({ refundPercent: 50 }),
+      cancel: jest.fn().mockResolvedValue({ status: 'cancelled' }),
+    };
+    const controller = new FlightBookingsController(
+      {} as FlightBookingsService,
+      {} as FlightBookingETicketService,
+      cancellations as unknown as FlightBookingCancellationService,
+    );
+    return { controller, cancellations };
+  }
+
+  it('passes the id and the logged-in user to the preview', async () => {
+    const { controller, cancellations } = setup();
+
+    await expect(
+      controller.cancellationPreview('booking-1', 'user-1'),
+    ).resolves.toEqual({ refundPercent: 50 });
+    expect(cancellations.preview).toHaveBeenCalledWith('booking-1', 'user-1');
+  });
+
+  it('passes the id, the user and the confirmed percent to the cancellation', async () => {
+    const { controller, cancellations } = setup();
+
+    await expect(
+      controller.cancel('booking-1', { expectedRefundPercent: 50 }, 'user-1'),
+    ).resolves.toEqual({ status: 'cancelled' });
+    expect(cancellations.cancel).toHaveBeenCalledWith(
+      'booking-1',
+      'user-1',
+      50,
+    );
+  });
+
+  it.each([
+    ['cancellationPreview', ':id/cancel', undefined],
+    ['cancel', ':id/cancel', HttpStatus.OK],
+  ] as const)(
+    '%s is %s for registered users only, and needs a login',
+    (name, path, code) => {
+      const reflector = new Reflector();
+      const handler = FlightBookingsController.prototype[name];
+
+      expect(reflector.get(ROLES_KEY, handler)).toEqual([Role.User]);
+      expect(
+        reflector.getAllAndOverride(IS_PUBLIC_KEY, [
+          handler,
+          FlightBookingsController,
+        ]),
+      ).toBeUndefined();
+      expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe(path);
+      expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(code);
+    },
+  );
 });

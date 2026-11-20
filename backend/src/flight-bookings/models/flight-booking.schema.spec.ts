@@ -1,3 +1,4 @@
+import { CancelledBy } from '../enums/cancelled-by.enum';
 import { Mongoose, Types } from 'mongoose';
 import { CabinClass } from '../../flights/models/cabin-class.enum';
 import { FlightBookingStatus } from '../enums/flight-booking-status.enum';
@@ -333,5 +334,42 @@ describe('FlightBooking schema, passengers and baggage (FLT-19)', () => {
     for (const value of ['born-1990', 'secret-pass', 'N'.repeat(101)]) {
       expect(messages).not.toContain(value);
     }
+  });
+});
+
+describe('FlightBooking schema, cancellation (FLT-26)', () => {
+  it('has no cancellation fields until the booking is cancelled', () => {
+    const doc = new FlightBookingModel(valid());
+
+    expect(doc.toObject()).not.toHaveProperty('cancelledAt');
+    expect(doc.toObject()).not.toHaveProperty('cancelledBy');
+    expect(doc.toObject()).not.toHaveProperty('refundPercent');
+  });
+
+  it('keeps who cancelled, when, and the refund percent applied', async () => {
+    expect(FlightBookingSchema.path('cancelledBy').options).toMatchObject({
+      type: String,
+      enum: Object.values(CancelledBy),
+    });
+    expect(Object.values(CancelledBy)).toEqual(['user', 'provider']);
+    expect(
+      await invalidPaths(
+        valid({
+          status: FlightBookingStatus.Cancelled,
+          cancelledAt: new Date('2027-03-01T12:00:00.000Z'),
+          cancelledBy: CancelledBy.User,
+          refundPercent: 50,
+        }),
+      ),
+    ).toEqual([]);
+    expect(await invalidPaths(valid({ cancelledBy: 'admin' }))).toEqual([
+      'cancelledBy',
+    ]);
+    expect(await invalidPaths(valid({ refundPercent: -1 }))).toEqual([
+      'refundPercent',
+    ]);
+    expect(await invalidPaths(valid({ refundPercent: 101 }))).toEqual([
+      'refundPercent',
+    ]);
   });
 });

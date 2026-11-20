@@ -14,8 +14,8 @@ export interface RefundTier {
  * has only that segment. No segment, or no copied tiers (a booking saved
  * before PAY-02), means no tier: no refund.
  *
- * The cancellation itself (FLT-26) is not built yet; it must use this, never
- * the airline's current tiers and never the return segment's.
+ * The cancellation (FLT-26, FlightBookingCancellationService) uses this,
+ * never the airline's current tiers and never the return segment's.
  */
 export function refundTiersOf(
   booking: Pick<FlightBooking, 'segments'>,

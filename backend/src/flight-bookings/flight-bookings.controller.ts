@@ -34,17 +34,26 @@ import {
 } from '../flights/flight-seat-holds.service';
 import { FLIGHT_NOT_FOUND_MESSAGE } from '../flights/flights.constants';
 import { CabinClass } from '../flights/models/cabin-class.enum';
+import { CancelFlightBookingDto } from './dto/cancel-flight-booking.dto';
+import {
+  FlightBookingCancellationPreviewDto,
+  FlightBookingCancellationResponseDto,
+} from './dto/flight-booking-cancellation-response.dto';
 import { FlightBookingResponseDto } from './dto/flight-booking-response.dto';
 import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import {
   ADULT_MIN_AGE,
   CHILD_MIN_AGE,
+  DEPARTED_MESSAGE,
   E_TICKET_NOT_CONFIRMED_MESSAGE,
   FLIGHT_BOOKING_HOLD_MINUTES,
   FLIGHT_BOOKING_SEATS_MAX,
   FLIGHT_CHANGED_MESSAGE,
+  NOT_CANCELLABLE_MESSAGE,
+  REFUND_CHANGED_MESSAGE,
 } from './flight-bookings.constants';
+import { FlightBookingCancellationService } from './flight-booking-cancellation.service';
 import { FlightBookingETicketService } from './flight-booking-e-ticket.service';
 import {
   BOOKING_NOT_FOUND_MESSAGE,
@@ -72,7 +81,7 @@ const ROUND_TRIP_EXAMPLE = {
   ],
 };
 
-/** Flight bookings of registered users (FLT-22, FLT-19, FLT-21, FLT-12). */
+/** Flight bookings of registered users (FLT-22, FLT-19, FLT-21, FLT-12, FLT-26). */
 @ApiTags('Flight bookings')
 @ApiCookieAuth()
 @Controller('flight-bookings')
@@ -80,6 +89,7 @@ export class FlightBookingsController {
   constructor(
     private readonly flightBookings: FlightBookingsService,
     private readonly eTickets: FlightBookingETicketService,
+    private readonly cancellations: FlightBookingCancellationService,
   ) {}
 
   @Post()
@@ -241,5 +251,77 @@ export class FlightBookingsController {
       disposition: `attachment; filename="${filename}"`,
       length: pdf.length,
     });
+  }
+
+  @Get(':id/cancel')
+  @Roles(Role.User)
+  @ApiOperation({
+    summary: 'View the refund of cancelling a booking (FLT-26)',
+    description: [
+      'Registered users only, for their own confirmed booking, before its first flight departs. **Nothing changes**: this shows what `POST /api/flight-bookings/{id}/cancel` would do now, so the user can confirm it.',
+      `\`daysRemaining\` is the number of whole days left before the departure (UTC). \`refundPercent\` comes from the airline's cancellation tiers copied into the booking when it was held (FLT-09): the tier with the highest \`daysBefore\` that is at most \`daysRemaining\`, or 0 if none. \`refundAmount\` = \`total\` × \`refundPercent\` / 100, rounded to the cent, in ${PLATFORM_CURRENCY} cents. A round trip is cancelled as a whole, with the outbound flight's tiers and departure.`,
+    ].join('\n\n'),
+  })
+  @ApiOkResponse({
+    type: FlightBookingCancellationPreviewDto,
+    description: 'The refund the user would get now. Nothing changed.',
+  })
+  @ApiBadRequestResponse({ description: 'The id is not a valid id' })
+  @ApiUnauthorizedResponse({ description: 'Not logged in' })
+  @ApiForbiddenResponse({ description: 'Not a registered user' })
+  @ApiNotFoundResponse({
+    description: `"${BOOKING_NOT_FOUND_MESSAGE}": no such booking, or it belongs to another user`,
+  })
+  @ApiConflictResponse({
+    description: `"${NOT_CANCELLABLE_MESSAGE}" (waiting for payment, expired, already cancelled or completed), or "${DEPARTED_MESSAGE}"`,
+  })
+  cancellationPreview(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<FlightBookingCancellationPreviewDto> {
+    return this.cancellations.preview(id, userId);
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.User)
+  @ApiOperation({
+    summary: 'Cancel a booking and get the refund (FLT-26)',
+    description: [
+      'Registered users only, for their own confirmed booking, before its first flight departs. First view the refund with `GET /api/flight-bookings/{id}/cancel`, then send the `refundPercent` it showed as `expectedRefundPercent`. If the refund changed in between (a tier boundary passed), the answer is 409 and nothing changes: view it again and confirm the new one.',
+      'The booking becomes `cancelled` with `cancelledAt`, `cancelledBy: user` and the `refundPercent` (GEN-11: only a confirmed booking can be cancelled, and only once, even with two requests at the same moment). The seats of every flight of the booking go back to the inventory. The refund is then created through Stripe (PAY-03): `refund` is its summary, or `null` when the refund is 0%. A refund that Stripe has not accepted yet stays `pending` and is retried; it never undoes the cancellation.',
+    ].join('\n\n'),
+  })
+  @ApiBody({
+    type: CancelFlightBookingDto,
+    examples: {
+      confirm: {
+        summary: 'Confirm the 50% refund that was shown',
+        value: { expectedRefundPercent: 50 },
+      },
+    },
+  })
+  @ApiOkResponse({
+    type: FlightBookingCancellationResponseDto,
+    description: 'The booking is cancelled and the refund is created.',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'The id is not a valid id, or `expectedRefundPercent` is missing, not a whole number, or not between 0 and 100 (`errors` lists it), or another field was sent',
+  })
+  @ApiUnauthorizedResponse({ description: 'Not logged in' })
+  @ApiForbiddenResponse({ description: 'Not a registered user' })
+  @ApiNotFoundResponse({
+    description: `"${BOOKING_NOT_FOUND_MESSAGE}": no such booking, or it belongs to another user`,
+  })
+  @ApiConflictResponse({
+    description: `"${NOT_CANCELLABLE_MESSAGE}" (waiting for payment, expired, already cancelled or completed), "${DEPARTED_MESSAGE}", or "${REFUND_CHANGED_MESSAGE}". Nothing changed.`,
+  })
+  cancel(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: CancelFlightBookingDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<FlightBookingCancellationResponseDto> {
+    return this.cancellations.cancel(id, userId, dto.expectedRefundPercent);
   }
 }
