@@ -166,3 +166,7 @@ export const duplicateCabinMessage = (cabin: CabinClass): string =>
 /** FLT-12(a): the return of a round trip cannot leave before the outbound date. */
 export const RETURN_BEFORE_DEPARTURE_MESSAGE =
   'returnDate cannot be before departureDate';
+
+/** FLT-06: the answer when the flight can no longer be cancelled. */
+export const FLIGHT_NOT_CANCELLABLE_MESSAGE =
+  'Only a scheduled flight that has not departed can be cancelled';

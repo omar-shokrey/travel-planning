@@ -4,6 +4,9 @@ import { RefundsModule } from '../payments/refunds/refunds.module';
 import { FlightBookingCancellationService } from './flight-booking-cancellation.service';
 import { FlightBookingCompletionService } from './flight-booking-completion.service';
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
+import { FlightBookingListService } from './flight-booking-list.service';
+import { FlightCancellationController } from './flight-cancellation.controller';
+import { FlightCancellationService } from './flight-cancellation.service';
 import { FlightBookingsModule } from './flight-bookings.module';
 import { FlightBookingsService } from './flight-bookings.service';
 
@@ -32,5 +35,20 @@ describe('FlightBookingsModule', () => {
         FlightBookingCompletionService,
       ]),
     );
+  });
+
+  it('provides the user’s lists and details (FLT-25)', () => {
+    expect(
+      Reflect.getMetadata(MODULE_METADATA.PROVIDERS, FlightBookingsModule),
+    ).toContain(FlightBookingListService);
+  });
+
+  it('provides the cancellation by the airline (FLT-06) and its route', () => {
+    expect(
+      Reflect.getMetadata(MODULE_METADATA.PROVIDERS, FlightBookingsModule),
+    ).toContain(FlightCancellationService);
+    expect(
+      Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, FlightBookingsModule),
+    ).toContain(FlightCancellationController);
   });
 });

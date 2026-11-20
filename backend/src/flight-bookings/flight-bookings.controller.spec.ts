@@ -8,6 +8,7 @@ import { CabinClass } from '../flights/models/cabin-class.enum';
 import { FlightBookingsController } from './flight-bookings.controller';
 import type { FlightBookingCancellationService } from './flight-booking-cancellation.service';
 import type { FlightBookingETicketService } from './flight-booking-e-ticket.service';
+import type { FlightBookingListService } from './flight-booking-list.service';
 import type { FlightBookingsService } from './flight-bookings.service';
 
 describe('FlightBookingsController (FLT-22, FLT-19)', () => {
@@ -18,6 +19,7 @@ describe('FlightBookingsController (FLT-22, FLT-19)', () => {
       service as unknown as FlightBookingsService,
       {} as FlightBookingETicketService,
       {} as FlightBookingCancellationService,
+      {} as FlightBookingListService,
     );
     const dto = {
       flightId: '6740f1c2a4b5c6d7e8f90456',
@@ -69,6 +71,7 @@ describe('FlightBookingsController.summarise (FLT-21)', () => {
       service as unknown as FlightBookingsService,
       {} as FlightBookingETicketService,
       {} as FlightBookingCancellationService,
+      {} as FlightBookingListService,
     );
 
     await expect(controller.summarise(dto)).resolves.toBe(answer);
@@ -106,6 +109,7 @@ describe('FlightBookingsController.eTicket (FLT-23)', () => {
       {} as FlightBookingsService,
       eTickets as unknown as FlightBookingETicketService,
       {} as FlightBookingCancellationService,
+      {} as FlightBookingListService,
     );
 
     const file = await controller.eTicket('booking-1', 'user-1');
@@ -144,6 +148,7 @@ describe('FlightBookingsController cancellation (FLT-26)', () => {
       {} as FlightBookingsService,
       {} as FlightBookingETicketService,
       cancellations as unknown as FlightBookingCancellationService,
+      {} as FlightBookingListService,
     );
     return { controller, cancellations };
   }
@@ -188,6 +193,64 @@ describe('FlightBookingsController cancellation (FLT-26)', () => {
       ).toBeUndefined();
       expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe(path);
       expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(code);
+    },
+  );
+});
+
+describe('FlightBookingsController lists and details (FLT-25)', () => {
+  function setup() {
+    const lists = {
+      list: jest.fn().mockResolvedValue({ items: [], meta: {} }),
+      details: jest.fn().mockResolvedValue({ id: 'booking-1' }),
+    };
+    const controller = new FlightBookingsController(
+      {} as FlightBookingsService,
+      {} as FlightBookingETicketService,
+      {} as FlightBookingCancellationService,
+      lists as unknown as FlightBookingListService,
+    );
+    return { controller, lists };
+  }
+
+  it('passes the logged-in user and the query to the list', async () => {
+    const { controller, lists } = setup();
+    const query = { group: 'past', page: 2, limit: 5 } as never;
+
+    await expect(controller.list(query, 'user-1')).resolves.toEqual({
+      items: [],
+      meta: {},
+    });
+    expect(lists.list).toHaveBeenCalledWith('user-1', query);
+  });
+
+  it('passes the id and the logged-in user to the details', async () => {
+    const { controller, lists } = setup();
+
+    await expect(controller.details('booking-1', 'user-1')).resolves.toEqual({
+      id: 'booking-1',
+    });
+    expect(lists.details).toHaveBeenCalledWith('booking-1', 'user-1');
+  });
+
+  it.each([
+    ['list', ''],
+    ['details', ':id'],
+  ] as const)(
+    '%s is GET "%s" for registered users only, and needs a login',
+    (name, path) => {
+      const reflector = new Reflector();
+      const handler = FlightBookingsController.prototype[name];
+
+      expect(reflector.get(ROLES_KEY, handler)).toEqual([Role.User]);
+      expect(
+        reflector.getAllAndOverride(IS_PUBLIC_KEY, [
+          handler,
+          FlightBookingsController,
+        ]),
+      ).toBeUndefined();
+      expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe(
+        path === '' ? '/' : path,
+      );
     },
   );
 });
