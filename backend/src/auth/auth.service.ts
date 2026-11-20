@@ -11,6 +11,7 @@ import {
 import { compare, hash } from 'bcrypt';
 import { Types } from 'mongoose';
 import { PASSWORD_SALT_ROUNDS } from '../common/constants/password';
+import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import { EmailService } from '../notifications/email.service';
 import type { UserResponseDto } from '../users/dto/user-response.dto';
@@ -26,11 +27,16 @@ import {
   EMAIL_SWITCHED_OFF_MESSAGE,
   EMAIL_VERIFICATION_TOKEN_HOURS,
   INVALID_CREDENTIALS_MESSAGE,
+  INVALID_RESET_LINK_MESSAGE,
   INVALID_VERIFICATION_LINK_MESSAGE,
   LOCKOUT_MINUTES,
   LOGIN_REQUIRED_MESSAGE,
   SAME_PASSWORD_MESSAGE,
   MAX_FAILED_LOGIN_ATTEMPTS,
+  MAX_PENDING_PASSWORD_RESETS,
+  PASSWORD_RESET_DONE_MESSAGE,
+  PASSWORD_RESET_REQUESTED_MESSAGE,
+  PASSWORD_RESET_TOKEN_MINUTES,
   VERIFICATION_EMAIL_SENT_MESSAGE,
   VERIFICATION_RESEND_INTERVAL_SECONDS,
   VERIFICATION_RESEND_TOO_SOON_MESSAGE,
@@ -42,12 +48,21 @@ import type {
   VerificationEmailSentResponseDto,
 } from './dto/email-verification-response.dto';
 import type { LoginDto } from './dto/login.dto';
+import type {
+  PasswordResetDoneResponseDto,
+  PasswordResetRequestedResponseDto,
+} from './dto/password-reset-response.dto';
+import type { ResetForgottenPasswordDto } from './dto/reset-forgotten-password.dto';
 import type { RegisterDto } from './dto/register.dto';
 import { AuthTokenType } from './enums/auth-token-type.enum';
 import { SessionsService } from './sessions.service';
 
 const MILLISECONDS_PER_MINUTE = 60_000;
 const MILLISECONDS_PER_HOUR = 60 * MILLISECONDS_PER_MINUTE;
+
+/** ACC-07: how long a reset link works, in milliseconds. */
+const PASSWORD_RESET_TOKEN_MS =
+  PASSWORD_RESET_TOKEN_MINUTES * MILLISECONDS_PER_MINUTE;
 
 /** ACC-02: how long a verification link works, in milliseconds. */
 const EMAIL_VERIFICATION_TOKEN_MS =
@@ -84,6 +99,9 @@ export class AuthService {
    * has. Made on first use, once.
    */
   private unknownEmailHash: Promise<string> | undefined;
+
+  /** ACC-07: forgot-password requests being worked on in the background. */
+  private pendingPasswordResets = 0;
 
   constructor(
     private readonly usersService: UsersService,
@@ -203,6 +221,98 @@ export class AuthService {
       'email verification',
     );
     return { message: VERIFICATION_EMAIL_SENT_MESSAGE };
+  }
+
+  /**
+   * ACC-07, POST /api/auth/forgot-password: always the same answer, at once.
+   * The lookup, the token and the email run in the background after it, so
+   * neither the body, the status nor the time of the answer depends on
+   * whether an account has this email. When email is switched off nothing is
+   * started at all. At most MAX_PENDING_PASSWORD_RESETS requests are worked
+   * on at once; past that a request gets the same answer and is dropped.
+   */
+  forgotPassword(email: string): PasswordResetRequestedResponseDto {
+    if (
+      this.email.enabled &&
+      this.pendingPasswordResets < MAX_PENDING_PASSWORD_RESETS
+    ) {
+      this.pendingPasswordResets++;
+      this.email.runInBackground(async () => {
+        try {
+          await this.sendResetLink(email);
+        } finally {
+          this.pendingPasswordResets--;
+        }
+      }, 'password reset');
+    }
+    return { message: PASSWORD_RESET_REQUESTED_MESSAGE };
+  }
+
+  /**
+   * ACC-07, POST /api/auth/reset-password: the DTO has already checked the
+   * new password, so a password that breaks the rule never uses up the link.
+   * The token is consumed in one atomic step, so it works once. The password
+   * is then stored only if the account is still an active registered user;
+   * an unknown, expired, used or replaced token, or an account that is no
+   * longer active, all get the same 400. The lockout and the temporary
+   * password are cleared, the email counts as verified (the link reached
+   * it), and every session of the account ends: whoever held one must log in
+   * with the new password. Nobody is logged in here.
+   */
+  async resetPassword(
+    dto: ResetForgottenPasswordDto,
+  ): Promise<PasswordResetDoneResponseDto> {
+    const userId = await this.tokenStore.consume(
+      dto.token,
+      AuthTokenType.PasswordReset,
+    );
+    if (!userId) {
+      throw new BadRequestException(INVALID_RESET_LINK_MESSAGE);
+    }
+    const updated = await this.usersService.resetForgottenPassword(
+      userId,
+      dto.newPassword,
+    );
+    if (!updated) {
+      throw new BadRequestException(INVALID_RESET_LINK_MESSAGE);
+    }
+    try {
+      await this.sessions.revokeAllOfUser(userId.toString(), new Date());
+    } catch (error) {
+      // The new password is stored and the link is used up; the old
+      // sessions could not be ended. A new reset link ends them.
+      this.logger.error(
+        `The sessions of account ${userId.toString()} were not ended after its password reset`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
+    return { message: PASSWORD_RESET_DONE_MESSAGE };
+  }
+
+  /**
+   * ACC-07: in the background of a forgot-password request. Only an active
+   * account with the role `user` gets a link: moderators and administrators
+   * keep the admin reset (ACC-07a), and a suspended or deactivated account
+   * gets nothing. The new token replaces the account's older one, so the
+   * older link stops working.
+   */
+  private async sendResetLink(email: string): Promise<void> {
+    const user = await this.usersService.findEntityByEmail(email);
+    if (!user || user.role !== Role.User || user.status !== UserStatus.Active) {
+      return;
+    }
+    const token = await this.tokenStore.issue(
+      user._id,
+      AuthTokenType.PasswordReset,
+      PASSWORD_RESET_TOKEN_MS,
+    );
+    await this.email.sendPasswordReset({
+      name: user.name,
+      email: user.email,
+      token,
+      expiresInMinutes: PASSWORD_RESET_TOKEN_MINUTES,
+    });
   }
 
   /** ACC-02: creates the verification token of a new account and emails its link. */

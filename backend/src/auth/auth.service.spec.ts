@@ -26,11 +26,15 @@ import {
   EMAIL_ALREADY_VERIFIED_MESSAGE,
   EMAIL_SWITCHED_OFF_MESSAGE,
   INVALID_CREDENTIALS_MESSAGE,
+  INVALID_RESET_LINK_MESSAGE,
   INVALID_VERIFICATION_LINK_MESSAGE,
   SAME_PASSWORD_MESSAGE,
   LOCKOUT_MINUTES,
   LOGIN_REQUIRED_MESSAGE,
   MAX_FAILED_LOGIN_ATTEMPTS,
+  MAX_PENDING_PASSWORD_RESETS,
+  PASSWORD_RESET_DONE_MESSAGE,
+  PASSWORD_RESET_REQUESTED_MESSAGE,
   VERIFICATION_EMAIL_SENT_MESSAGE,
   VERIFICATION_RESEND_TOO_SOON_MESSAGE,
   accountLockedMessage,
@@ -109,6 +113,8 @@ function setup(
   const usersService = {
     createRegisteredUser: jest.fn().mockResolvedValue(stored),
     findEntityByEmailWithPasswordHash: jest.fn().mockResolvedValue(stored),
+    // The forgot-password lookup (ACC-07), without the hash.
+    findEntityByEmail: jest.fn().mockResolvedValue(stored),
     findEntityById: jest.fn().mockResolvedValue(stored),
     // The lockout (ACC-05): by default no failure reaches the limit.
     recordFailedLogin: jest.fn().mockResolvedValue(null),
@@ -121,6 +127,10 @@ function setup(
       .mockResolvedValue({ ...stored, mustChangePassword: false }),
     // Email verification (ACC-02).
     markEmailVerified: jest.fn().mockResolvedValue(true),
+    // Password reset by email (ACC-07).
+    resetForgottenPassword: jest
+      .fn()
+      .mockResolvedValue({ ...stored, mustChangePassword: false }),
   };
   const tokens = {
     issueTokens: jest.fn().mockResolvedValue(issuedTokens),
@@ -144,6 +154,7 @@ function setup(
       background.push({ task, what });
     }),
     sendEmailVerification: jest.fn().mockResolvedValue(undefined),
+    sendPasswordReset: jest.fn().mockResolvedValue(undefined),
   };
   const runBackground = async () => {
     for (const { task } of background.splice(0)) await task();
@@ -429,6 +440,232 @@ describe('AuthService', () => {
       await expect(
         service.resendVerification(userObjectId.toString()),
       ).rejects.toThrow(LOGIN_REQUIRED_MESSAGE);
+    });
+  });
+
+  describe('forgotPassword (ACC-07)', () => {
+    it('gives the same answer for an existing and an unknown email, before any lookup', () => {
+      const known = setup({ emailEnabled: true });
+      const unknown = setup({ emailEnabled: true });
+      unknown.usersService.findEntityByEmail.mockResolvedValue(null);
+
+      const forKnown = known.service.forgotPassword('sara@example.com');
+      const forUnknown = unknown.service.forgotPassword('nobody@example.com');
+
+      expect(forKnown).toEqual({ message: PASSWORD_RESET_REQUESTED_MESSAGE });
+      expect(forUnknown).toEqual(forKnown);
+      // The answer is ready before anything is read.
+      for (const { usersService, email } of [known, unknown]) {
+        expect(usersService.findEntityByEmail).not.toHaveBeenCalled();
+        expect(email.runInBackground).toHaveBeenCalledWith(
+          expect.any(Function),
+          'password reset',
+        );
+      }
+    });
+
+    it('in the background, looks the account up without its hash and emails an active registered user a 30-minute link', async () => {
+      const { usersService, tokenStore, email, runBackground, service } = setup(
+        { emailEnabled: true },
+      );
+
+      service.forgotPassword('sara@example.com');
+      await runBackground();
+
+      expect(usersService.findEntityByEmail).toHaveBeenCalledWith(
+        'sara@example.com',
+      );
+      expect(
+        usersService.findEntityByEmailWithPasswordHash,
+      ).not.toHaveBeenCalled();
+      expect(tokenStore.issue).toHaveBeenCalledWith(
+        userObjectId,
+        AuthTokenType.PasswordReset,
+        30 * MINUTE,
+      );
+      expect(email.sendPasswordReset).toHaveBeenCalledWith({
+        name: 'Sara Ahmed',
+        email: 'sara@example.com',
+        token: 'a-one-time-token',
+        expiresInMinutes: 30,
+      });
+    });
+
+    it('replaces the token and emails a new link on every request, so a newer request invalidates the older link', async () => {
+      const { tokenStore, email, runBackground, service } = setup({
+        emailEnabled: true,
+      });
+      tokenStore.issue
+        .mockResolvedValueOnce('first-token')
+        .mockResolvedValueOnce('second-token');
+
+      service.forgotPassword('sara@example.com');
+      service.forgotPassword('sara@example.com');
+      await runBackground();
+
+      expect(tokenStore.issue).toHaveBeenCalledTimes(2);
+      expect(
+        email.sendPasswordReset.mock.calls.map(
+          ([request]: [{ token: string }]) => request.token,
+        ),
+      ).toEqual(['first-token', 'second-token']);
+    });
+
+    it.each([
+      ['an unknown email', null],
+      ['a suspended account', { status: UserStatus.Suspended }],
+      ['a deactivated account', { status: UserStatus.Deactivated }],
+      ['an airline moderator', { role: Role.AirlineModerator }],
+      ['a hotel moderator', { role: Role.HotelModerator }],
+      ['an administrator', { role: Role.Admin }],
+    ])('creates no token and sends nothing for %s', async (_label, change) => {
+      const { usersService, tokenStore, email, runBackground, service } = setup(
+        { emailEnabled: true },
+      );
+      const found = (await usersService.findEntityByEmail()) as object;
+      usersService.findEntityByEmail.mockResolvedValue(
+        change === null ? null : { ...found, ...change },
+      );
+
+      expect(service.forgotPassword('sara@example.com')).toEqual({
+        message: PASSWORD_RESET_REQUESTED_MESSAGE,
+      });
+      await runBackground();
+
+      expect(tokenStore.issue).not.toHaveBeenCalled();
+      expect(email.sendPasswordReset).not.toHaveBeenCalled();
+    });
+
+    it(`works on at most ${MAX_PENDING_PASSWORD_RESETS} requests at once in the background, and answers the others the same`, async () => {
+      const { email, runBackground, background, service } = setup({
+        emailEnabled: true,
+      });
+
+      const answers = Array.from(
+        { length: MAX_PENDING_PASSWORD_RESETS + 3 },
+        () => service.forgotPassword('sara@example.com'),
+      );
+
+      expect(new Set(answers.map((answer) => answer.message))).toEqual(
+        new Set([PASSWORD_RESET_REQUESTED_MESSAGE]),
+      );
+      expect(background).toHaveLength(MAX_PENDING_PASSWORD_RESETS);
+
+      // Once they are done, a new request is worked on again.
+      await runBackground();
+      service.forgotPassword('sara@example.com');
+      expect(email.runInBackground).toHaveBeenCalledTimes(
+        MAX_PENDING_PASSWORD_RESETS + 1,
+      );
+    });
+
+    it('frees its place in the background work when the lookup fails', async () => {
+      const { usersService, background, service } = setup({
+        emailEnabled: true,
+      });
+      usersService.findEntityByEmail.mockRejectedValue(new Error('down'));
+
+      for (let i = 0; i < MAX_PENDING_PASSWORD_RESETS; i++) {
+        service.forgotPassword('sara@example.com');
+      }
+      for (const { task } of background.splice(0)) {
+        await expect(task()).rejects.toThrow('down');
+      }
+      service.forgotPassword('sara@example.com');
+
+      expect(background).toHaveLength(1);
+    });
+
+    it('with email off, gives the same answer and starts nothing', () => {
+      const { usersService, email, service } = setup({ emailEnabled: false });
+
+      expect(service.forgotPassword('sara@example.com')).toEqual({
+        message: PASSWORD_RESET_REQUESTED_MESSAGE,
+      });
+      expect(email.runInBackground).not.toHaveBeenCalled();
+      expect(usersService.findEntityByEmail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resetPassword (ACC-07)', () => {
+    const reset = { token: 'a-one-time-token', newPassword: 'N3wPassword' };
+
+    it('consumes the token, stores the new password and then ends every session of the account', async () => {
+      const { tokenStore, usersService, sessions, service } = setup();
+
+      await expect(service.resetPassword(reset)).resolves.toEqual({
+        message: PASSWORD_RESET_DONE_MESSAGE,
+      });
+      expect(tokenStore.consume).toHaveBeenCalledWith(
+        'a-one-time-token',
+        AuthTokenType.PasswordReset,
+      );
+      expect(usersService.resetForgottenPassword).toHaveBeenCalledWith(
+        userObjectId,
+        'N3wPassword',
+      );
+      expect(sessions.revokeAllOfUser).toHaveBeenCalledWith(
+        userObjectId.toString(),
+        expect.any(Date),
+      );
+      // No session is kept: the person is not logged in.
+      expect(sessions.revokeAllOfUser.mock.calls[0]).toHaveLength(2);
+      const order = [
+        tokenStore.consume.mock.invocationCallOrder[0],
+        usersService.resetForgottenPassword.mock.invocationCallOrder[0],
+        sessions.revokeAllOfUser.mock.invocationCallOrder[0],
+      ];
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+    });
+
+    it('logs nobody in: it issues no token and creates no session', async () => {
+      const { tokens, sessions, service } = setup();
+
+      await service.resetPassword(reset);
+
+      expect(tokens.issueTokens).not.toHaveBeenCalled();
+      expect(sessions.create).not.toHaveBeenCalled();
+    });
+
+    it('answers 400 with the one message when the token is unknown, expired, used or replaced, and changes nothing', async () => {
+      const { tokenStore, usersService, sessions, service } = setup();
+      tokenStore.consume.mockResolvedValueOnce(null);
+
+      const result = service.resetPassword(reset);
+
+      await expect(result).rejects.toBeInstanceOf(BadRequestException);
+      await expect(result).rejects.toThrow(INVALID_RESET_LINK_MESSAGE);
+      expect(usersService.resetForgottenPassword).not.toHaveBeenCalled();
+      expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+    });
+
+    it('answers the same 400 when the account is no longer an active registered user, and ends no session', async () => {
+      const { usersService, sessions, service } = setup();
+      usersService.resetForgottenPassword.mockResolvedValueOnce(null);
+
+      await expect(service.resetPassword(reset)).rejects.toThrow(
+        INVALID_RESET_LINK_MESSAGE,
+      );
+      expect(sessions.revokeAllOfUser).not.toHaveBeenCalled();
+    });
+
+    it('logs the account id, never the token or the password, and fails when the sessions cannot be ended', async () => {
+      const { sessions, service } = setup();
+      const failure = new Error('database down');
+      sessions.revokeAllOfUser.mockRejectedValueOnce(failure);
+      const logged = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+
+      await expect(service.resetPassword(reset)).rejects.toBe(failure);
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect((logged.mock.calls[0] as [string])[0]).toContain(
+        userObjectId.toString(),
+      );
+      const text = JSON.stringify(logged.mock.calls);
+      expect(text).not.toContain('a-one-time-token');
+      expect(text).not.toContain('N3wPassword');
+      logged.mockRestore();
     });
   });
 
