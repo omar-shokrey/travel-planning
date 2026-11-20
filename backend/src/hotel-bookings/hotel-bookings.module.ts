@@ -2,11 +2,14 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { HotelsModule } from '../hotels/hotels.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { RefundsModule } from '../payments/refunds/refunds.module';
 import { HotelBookingConfirmationService } from './hotel-booking-confirmation.service';
 import { HotelBookingCompletionService } from './hotel-booking-completion.service';
 import { HotelBookingExpiryService } from './hotel-booking-expiry.service';
 import { HotelBookingsController } from './hotel-bookings.controller';
 import { HotelBookingsService } from './hotel-bookings.service';
+import { HotelReservationsController } from './hotel-reservations.controller';
+import { HotelReservationsService } from './hotel-reservations.service';
 import {
   HotelBooking,
   HotelBookingSchema,
@@ -22,8 +25,15 @@ import {
     // HTL-17: the in-app notification of a confirmed reservation (GEN-01). It
     // imports nothing of the booking modules, so there is no cycle.
     NotificationsModule,
+    // HTL-20: the refund shown on the reservation details (PAY-03).
+    // RefundsModule imports no booking module, so there is no cycle.
+    RefundsModule,
   ],
-  controllers: [HotelBookingsController],
+  controllers: [
+    HotelBookingsController,
+    // HTL-20: my hotel reservations.
+    HotelReservationsController,
+  ],
   // HotelBookingExpiryService: the hold-expiry job (HTL-18).
   // HotelBookingConfirmationService: the confirmation after payment (HTL-17).
   providers: [
@@ -32,6 +42,8 @@ import {
     HotelBookingConfirmationService,
     // GEN-11: the completion job (Confirmed -> Completed).
     HotelBookingCompletionService,
+    // HTL-20: my hotel reservations.
+    HotelReservationsService,
   ],
   // HotelBookingsService: the owner lookup and the policy acceptance for the
   // payments module (PAY-02). The payments module imports this one, never the

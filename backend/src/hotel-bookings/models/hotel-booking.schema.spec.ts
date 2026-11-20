@@ -115,4 +115,10 @@ describe('HotelBooking schema', () => {
       expect.arrayContaining([[{ status: 1, holdExpiresAt: 1 }, {}]]),
     );
   });
+
+  it('has the (userId, status, checkIn) index of "My hotel reservations" (HTL-20)', () => {
+    expect(HotelBookingSchema.indexes()).toEqual(
+      expect.arrayContaining([[{ userId: 1, status: 1, checkIn: 1 }, {}]]),
+    );
+  });
 });

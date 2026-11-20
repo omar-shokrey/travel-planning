@@ -38,7 +38,7 @@ If the payment does not succeed within the 10 minutes, the reservation becomes `
 - **A late payment is not confirmed.** A reservation whose hold had ended (or is expired, or does not exist) answers `false` without throwing, so Stripe gets 200 and the payments module logs it for the refund (PAY-03). A database error throws, so the webhook answers 500 and Stripe retries.
 - **The reference** looks like `HB-7KQ2MX`: `HB-` (hotel booking, never mixed up with a flight `FB-`) and 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ`, without the look-alikes 0/O and 1/I/L, drawn with `crypto.randomInt` (about 887 million values). The unique sparse index on `reference` decides uniqueness: on a duplicate key the confirming update is tried again with a new reference, at most 5 times (`REFERENCE_ATTEMPTS`).
 - **The notification** names the reference, the hotel, the check-in and check-out dates exactly as stored (`YYYY-MM-DD` strings, never converted to a `Date`, so no time zone can shift them), the nights, each room and the guests, for example "Your reservation HB-7KQ2MX at Nile Hotel is confirmed: check-in 2027-06-15, check-out 2027-06-18 (3 nights), 2 rooms (101 (Double), 102 (Family)), 3 adults and 1 child." If reading the hotel or sending fails, it is logged with the reservation id only and the reservation stays confirmed.
-- **Confirmation page.** `GET /api/hotel-bookings/:id` does not exist yet (HTL-20 owns the list and detail routes), so it was not added; the response DTO and mapper already return `reference` and `status`.
+- **Confirmation page.** The page reads the reservation with `GET /api/hotel-bookings/:id` (HTL-20, below), which returns the `reference` and the `status`.
 - **For the admin module (ACC-15):** `findTravellerIdsOfHotel(hotelId, now)`, read only: the distinct user ids with a `confirmed` reservation of the hotel whose `checkOut` is today or later (UTC date), used to notify the travellers when the hotel is deactivated.
 
 ## Booking lifecycle (GEN-11)
@@ -53,9 +53,30 @@ GEN-11: "Flight bookings and hotel reservations shall follow the lifecycle Pendi
 ## Not in this module yet
 
 - **Policy acceptance (PAY-02)** is done in the payments module (`GET /api/bookings/hotel/:id/policies` and `POST .../accept-policies`): it shows the copied times and tiers and stores `policyAcceptedAt` through `HotelBookingsService.findOwnedEntityOrThrow` and `acceptPolicies`, which this module exports.
-- **Reading and cancelling reservations (HTL-20 to HTL-22).** They add their own indexes and the ownership checks (ACC-11).
+- **Cancelling reservations and the moderator's view (HTL-21, HTL-22).** They add their own indexes and the ownership checks (ACC-11).
 - **Refund of a late payment (PAY-03).**
 
 ## Tests (HTL-17)
 
 `booking-reference.spec.ts`, `booking-confirmation-message.spec.ts`, `hotel-booking-confirmation.service.spec.ts` (the order of the four steps, the conditional update, the notification, fewer nights than rooms x nights, a failed night update, idempotent with the repair of held nights, late and unknown reservations with the release, an invalid id, a taken reference and the limit, a database error, a failed hotel read or notification), `HotelRoomHoldsService.secureHold` and `confirm` in the hotels module, and `test/hotel-booking-confirmation.e2e-spec.ts` (on the `-test` database: a two-room reservation, accepted policies, payment with the Stripe calls replaced and a webhook with the real signature check, then the reference, 6 booked nights without a hold end and one notification; the same payment reported again; a payment after the hold ended; the expiry job after the confirmation; another reservation of the same room and dates is 409).
+
+## My hotel reservations (HTL-20)
+
+HTL-20: "The system shall allow a registered user to view their hotel reservations grouped as Upcoming, Past and Cancelled, showing reference, hotel, rooms, dates, guests, total and status, and to open full details."
+
+| Route                         | Access                                        |
+| ----------------------------- | --------------------------------------------- |
+| `GET /api/hotel-bookings`     | Registered user (role `user`), own only       |
+| `GET /api/hotel-bookings/:id` | Registered user (role `user`), own only (404) |
+
+- **The grouping rule** (`hotel-reservation-groups.ts`, one place for the list filter and the label of each item, so they can never disagree; FLT-25 can mirror it for flights). "Today" is the UTC date, as for the check-in rule of HTL-16, because the hotel's time zone is not stored.
+  - **Cancelled:** status `cancelled`.
+  - **Past:** status `completed`, or `confirmed` with a check-out before today. The completion job (GEN-11) runs every hour, so a confirmed reservation whose check-out has passed is already Past before the job labels it `completed`.
+  - **Upcoming:** status `confirmed` with a check-out today or later, so a stay that is going on is Upcoming until its last day.
+  - **In no group:** `pending_payment` and `expired`. A reservation waiting for payment is paid from the reservation itself, and an expired hold was never a stay. The details route still opens them (`group: null`), so the payment page can read a pending reservation.
+- **The list** (`GET /api/hotel-bookings`) filters by the logged-in user and, with `group`, by one group. Without `group` the three groups are listed together. Order: Upcoming soonest check-in first; Past most recent check-out first; Cancelled and the whole list most recent check-in first; `_id` breaks ties so pages never repeat or skip. Paginated (`page`, `limit`, 10 by default), with `paginate()`. Each item: id, reference, hotel (id and name), rooms (label, adults, children's ages), check-in, check-out, nights, guests (adults and children over all rooms), total, currency, status and group. The hotel names of a page are read in one query (`HotelsService.findNamesByIds`, a small read-only method added to the hotels module); a hotel that no longer exists shows `name: null`.
+- **The details** (`GET /api/hotel-bookings/:id`): everything the confirmation page and the details need, including the hotel times, each room's price and subtotal, the cancellation tiers copied at booking time and the refund with its status (PAY-03, `RefundsService.findSummaryByBooking`, `null` when there is none). Another user's reservation and a missing one are the same 404 "Booking not found" (ACC-11); a bad id is 400.
+- **Nothing internal leaves the API:** `holdExpiresAt`, `policyAcceptedAt`, the owner id and the Mongo fields are never returned (new mappers in `mappers/hotel-reservation.mapper.ts`). The response of `POST /api/hotel-bookings` keeps `holdExpiresAt`, because the payment countdown needs it.
+- **Index:** (`userId`, `status`, `checkIn`) for the list.
+- **Where it lives:** `HotelReservationsController` and `HotelReservationsService`, new files next to the booking routes, so HTL-21 to HTL-23 can add their own without touching these.
+- **Tests:** `hotel-reservation-groups.spec.ts` (every status on both sides of today, and the list filter agrees with the label for every case), `dto/hotel-reservations-query.dto.spec.ts`, `mappers/hotel-reservation.mapper.spec.ts`, `hotel-reservations.service.spec.ts`, `hotel-reservations.controller.spec.ts`, the schema index test, `HotelsService.findNamesByIds` in the hotels module, and `test/hotel-reservations.e2e-spec.ts` (on the `-test` database, reservations inserted in every status: each group, the whole list and its order, pages with no repeat, nothing internal, the details with a refund, a pending reservation, 404 for another user, 400, 401, 403, Swagger).
