@@ -15,6 +15,7 @@ describe('Review controllers (HTL-23)', () => {
     create: jest.fn().mockResolvedValue({ id: 'r1' }),
     update: jest.fn().mockResolvedValue({ id: 'r1', rating: 2 }),
     remove: jest.fn().mockResolvedValue(undefined),
+    reply: jest.fn().mockResolvedValue({ id: 'r1', reply: { text: 'Hi' } }),
   };
   const reviews = service as unknown as ReviewsService;
 
@@ -54,6 +55,24 @@ describe('Review controllers (HTL-23)', () => {
       expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe(path);
     },
   );
+
+  it('passes the review, the body and the logged-in moderator to reply (HTL-26)', async () => {
+    await expect(
+      new ReviewsController(reviews).reply('r1', { text: 'Hi' }, 'm1'),
+    ).resolves.toEqual({ id: 'r1', reply: { text: 'Hi' } });
+    expect(service.reply).toHaveBeenCalledWith('r1', 'm1', { text: 'Hi' });
+  });
+
+  it('lets only a hotel moderator reply, needs a login, and is at :id/reply (HTL-26)', () => {
+    const handler = ReviewsController.prototype.reply;
+    const reflector = new Reflector();
+
+    expect(reflector.get(ROLES_KEY, handler)).toEqual([Role.HotelModerator]);
+    expect(
+      reflector.getAllAndOverride(IS_PUBLIC_KEY, [handler, ReviewsController]),
+    ).toBeUndefined();
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe(':id/reply');
+  });
 
   it('answers a deletion with 204 and lives under /reviews', () => {
     expect(

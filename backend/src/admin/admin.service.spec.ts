@@ -5,7 +5,9 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
 import { Types } from 'mongoose';
+import type { EnvironmentVariables } from '../config/env.validation';
 import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import type { SessionsService } from '../auth/sessions.service';
@@ -35,6 +37,8 @@ import type { AirlinesService } from '../flights/airlines.service';
 import type { HotelsService } from '../hotels/hotels.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import type { NotificationsService } from '../notifications/notifications.service';
+import { EmailService } from '../notifications/email.service';
+import type { OutgoingMail } from '../notifications/mail-transport';
 import { NOTIFICATION_MESSAGE_MAX_LENGTH } from '../notifications/notifications.constants';
 import type { FlightBookingsService } from '../flight-bookings/flight-bookings.service';
 import type { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service';
@@ -104,17 +108,34 @@ function setup(role: Role = Role.User, status: UserStatus = UserStatus.Active) {
   const hotelBookings = {
     findTravellerIdsOfHotel: jest.fn().mockResolvedValue([]),
   };
+  // GEN-01-B: a real EmailService on a transport that records each email.
+  const sentEmails: OutgoingMail[] = [];
+  const sendMail = jest.fn((mail: OutgoingMail) => {
+    sentEmails.push(mail);
+    return Promise.resolve({});
+  });
+  const email = new EmailService({ sendMail }, {
+    get: (name: string) =>
+      ({
+        FRONTEND_URL: 'http://localhost:3000',
+        MAIL_FROM: 'Travel Platform <no-reply@example.com>',
+      })[name],
+  } as unknown as ConfigService<EnvironmentVariables, true>);
   const service = new AdminService(
     usersService as unknown as UsersService,
     sessions as unknown as SessionsService,
     airlines as unknown as AirlinesService,
     hotels as unknown as HotelsService,
     notifications as unknown as NotificationsService,
+    email,
     audit as unknown as AuditService,
     flightBookings as unknown as FlightBookingsService,
     hotelBookings as unknown as HotelBookingsService,
   );
   return {
+    email,
+    sendMail,
+    sentEmails,
     usersService,
     sessions,
     airlines,
@@ -434,6 +455,82 @@ describe('AdminService', () => {
       await service.createModerator(body, adminId).catch(() => undefined);
 
       expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    describe('the invitation email (GEN-01-B)', () => {
+      let warn: jest.SpyInstance;
+      beforeEach(() => {
+        warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      });
+      afterEach(() => warn.mockRestore());
+
+      it('emails the saved moderator once, after the account is created: the role and the login address, never the password', async () => {
+        const { usersService, sentEmails, email, service } = setup();
+
+        await service.createModerator(body, adminId);
+        await email.whenIdle();
+
+        expect(usersService.createModerator).toHaveBeenCalledTimes(1);
+        expect(sentEmails).toHaveLength(1);
+        expect(sentEmails[0]).toMatchObject({
+          to: 'sara@example.com',
+          subject: 'Your moderator account on the Travel Platform',
+        });
+        expect(sentEmails[0].text).toContain('Hello Sara Ahmed,');
+        expect(sentEmails[0].text).toContain('a hotel moderator account');
+        expect(sentEmails[0].text).toContain('Log in at http://localhost:3000');
+        expect(JSON.stringify(sentEmails)).not.toContain(temporaryPassword);
+      });
+
+      it('does not wait for the email: the account is returned while it is still being sent', async () => {
+        const { sendMail, email, service } = setup();
+        let release: () => void = () => undefined;
+        sendMail.mockImplementationOnce(
+          () => new Promise((resolve) => (release = () => resolve({}))),
+        );
+
+        const account = await service.createModerator(body, adminId);
+
+        expect(account.email).toBe('sara@example.com');
+        release();
+        await email.whenIdle();
+      });
+
+      it('creates the account when the email fails, and only logs the failure', async () => {
+        const { sendMail, email, audit, service } = setup();
+        sendMail.mockRejectedValueOnce(new Error('smtp down'));
+
+        const account = await service.createModerator(body, adminId);
+        await email.whenIdle();
+
+        expect(account).toMatchObject({ role: 'hotel_moderator' });
+        expect(audit.record).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(
+          'Could not email the moderator invitation to 1 of 1 recipient(s) (unknown error)',
+        );
+      });
+
+      it('sends no invitation when the account is not created', async () => {
+        const { usersService, sendMail, email, service } = setup();
+        usersService.createModerator.mockRejectedValue(new Error('conflict'));
+
+        await service.createModerator(body, adminId).catch(() => undefined);
+        await email.whenIdle();
+
+        expect(sendMail).not.toHaveBeenCalled();
+      });
+
+      it('sends no invitation when the provider does not exist', async () => {
+        const { hotels, sendMail, email, service } = setup();
+        hotels.findEntityOrThrow.mockRejectedValue(
+          new NotFoundException('Hotel not found'),
+        );
+
+        await service.createModerator(body, adminId).catch(() => undefined);
+        await email.whenIdle();
+
+        expect(sendMail).not.toHaveBeenCalled();
+      });
     });
 
     it('refuses a provider that does not exist with 400 on providerId, and creates nothing', async () => {

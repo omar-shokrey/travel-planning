@@ -21,13 +21,14 @@ const stored = (fields: Partial<ReviewSource> = {}): ReviewSource => ({
 });
 
 describe('toReviewResponse (HTL-23)', () => {
-  it('shows the ids, the rating, the text and the times', () => {
+  it('shows the ids, the rating, the text, no reply and the times', () => {
     expect(toReviewResponse(stored())).toEqual({
       id: ID.toString(),
       hotelId: HOTEL_ID.toString(),
       bookingId: BOOKING_ID.toString(),
       rating: 4,
       text: 'Quiet rooms.',
+      reply: null,
       createdAt: '2027-06-20T10:00:00.000Z',
       updatedAt: '2027-06-21T08:30:00.000Z',
     });
@@ -40,5 +41,33 @@ describe('toReviewResponse (HTL-23)', () => {
     const text = JSON.stringify(response);
     expect(text).not.toContain(USER_ID.toString());
     expect(text).not.toContain('moderation');
+  });
+});
+
+describe('toReviewResponse: the reply (HTL-26)', () => {
+  const MODERATOR_ID = new Types.ObjectId();
+  const replied = stored({
+    reply: {
+      text: 'Thank you for your stay.',
+      repliedAt: new Date('2027-06-22T09:15:00.000Z'),
+      moderatorId: MODERATOR_ID,
+    },
+  });
+
+  it('shows the reply text and its UTC time', () => {
+    expect(toReviewResponse(replied).reply).toEqual({
+      text: 'Thank you for your stay.',
+      repliedAt: '2027-06-22T09:15:00.000Z',
+    });
+  });
+
+  it("never shows the moderator's id", () => {
+    const response = toReviewResponse(replied);
+
+    expect(Object.keys(response.reply ?? {}).sort()).toEqual([
+      'repliedAt',
+      'text',
+    ]);
+    expect(JSON.stringify(response)).not.toContain(MODERATOR_ID.toString());
   });
 });

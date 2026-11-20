@@ -8,6 +8,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { HotelsService } from '../hotels/hotels.service';
+import type { CreateReviewReplyDto } from './dto/create-review-reply.dto';
 import type { CreateReviewDto } from './dto/create-review.dto';
 import type { ReviewResponseDto } from './dto/review-response.dto';
 import type { UpdateReviewDto } from './dto/update-review.dto';
@@ -18,6 +19,7 @@ import {
   REVIEW_EXISTS_MESSAGE,
   REVIEW_NOT_COMPLETED_MESSAGE,
   REVIEW_NOT_FOUND_MESSAGE,
+  REVIEW_REPLY_EXISTS_MESSAGE,
   REVIEW_UPDATE_EMPTY_MESSAGE,
 } from './hotel-bookings.constants';
 import { BOOKING_NOT_FOUND_MESSAGE } from './hotel-bookings.service';
@@ -152,6 +154,72 @@ export class ReviewsService {
       throw new NotFoundException(REVIEW_NOT_FOUND_MESSAGE);
     }
     await this.refreshRating(deleted.hotelId);
+  }
+
+  /**
+   * HTL-26, POST /api/reviews/:id/reply: the moderator of the review's hotel
+   * replies, once. A missing or hidden review (GEN-10) is the same 404
+   * "Review not found"; another hotel's moderator gets the answer of HTL-22
+   * (`HotelsService.findManagedEntityOrThrow`: 403, the hotel and the
+   * moderator's assignment read from the database, never from the request);
+   * a review that already has a reply is 409. The first read only chooses
+   * between these answers: the reply is stored by ONE conditional update
+   * (visible, no reply yet), so of two replies at the same moment exactly one
+   * matches and the other is 409. The author's `updatedAt` and the hotel's
+   * rating are left as they are.
+   */
+  async reply(
+    id: string,
+    moderatorId: string,
+    dto: CreateReviewReplyDto,
+  ): Promise<ReviewResponseDto> {
+    const visible = { _id: id, moderation: ReviewModeration.Visible };
+    const review = await this.reviews
+      .findOne(visible)
+      .select('hotelId reply')
+      .lean()
+      .exec();
+    if (!review) {
+      throw new NotFoundException(REVIEW_NOT_FOUND_MESSAGE);
+    }
+    await this.hotels.findManagedEntityOrThrow(
+      review.hotelId.toString(),
+      moderatorId,
+    );
+    if (review.reply) {
+      throw new ConflictException(REVIEW_REPLY_EXISTS_MESSAGE);
+    }
+
+    const { matchedCount } = await this.reviews
+      .updateOne(
+        { ...visible, reply: { $exists: false } },
+        {
+          $set: {
+            reply: {
+              text: dto.text,
+              repliedAt: new Date(),
+              moderatorId: new Types.ObjectId(moderatorId),
+            },
+          },
+        },
+        { runValidators: true, timestamps: false },
+      )
+      .exec();
+    if (matchedCount === 0) {
+      // Between the read and the update, another reply won, or the review
+      // was hidden or deleted.
+      const stillVisible = await this.reviews.exists(visible).exec();
+      throw stillVisible
+        ? new ConflictException(REVIEW_REPLY_EXISTS_MESSAGE)
+        : new NotFoundException(REVIEW_NOT_FOUND_MESSAGE);
+    }
+
+    const replied = await this.reviews.findById(id).lean().exec();
+    if (!replied) {
+      // Deleted by its author right after the reply.
+      throw new NotFoundException(REVIEW_NOT_FOUND_MESSAGE);
+    }
+    return toReviewResponse(replied);
   }
 
   /** The count and the average of the hotel's visible reviews, read in one aggregation. */

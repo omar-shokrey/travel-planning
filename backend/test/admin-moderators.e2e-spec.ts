@@ -1,5 +1,6 @@
 import { getModelToken } from '@nestjs/mongoose';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { compare, hash } from 'bcrypt';
 import { Types, type Model } from 'mongoose';
@@ -18,9 +19,13 @@ import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
 import { Airline } from './../src/flights/models/airline.schema';
 import { Hotel } from './../src/hotels/models/hotel.schema';
+import { MAIL_TRANSPORT } from './../src/notifications/email.constants';
+import { EmailService } from './../src/notifications/email.service';
 import { User } from './../src/users/models/user.schema';
 import { deleteAuditLogsOf } from './support/delete-audit-logs';
 import { deleteSessionsOf } from './support/delete-sessions';
+import { FakeMailTransport } from './support/fake-mail-transport';
+import { TEST_MAIL_FROM } from './support/smtp-env';
 
 const PASSWORD = 'Passw0rdOK';
 const TEMPORARY_PASSWORD = 'Temp0rary1';
@@ -52,6 +57,9 @@ describe('POST /api/admin/moderators (e2e, ACC-13)', () => {
   const cookies = new Map<string, string>();
   let airlineId = '';
   let hotelId = '';
+  // GEN-01-B: collects the invitation emails; nothing reaches an SMTP server.
+  const mail = new FakeMailTransport();
+  let frontendUrl = '';
 
   const login = (email: string, password: string) =>
     request(app.getHttpServer())
@@ -90,7 +98,10 @@ describe('POST /api/admin/moderators (e2e, ACC-13)', () => {
   beforeAll(async () => {
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(MAIL_TRANSPORT)
+      .useValue(mail)
+      .compile();
 
     app = moduleFixture.createNestApplication<NestExpressApplication>();
     configureApp(app);
@@ -100,6 +111,7 @@ describe('POST /api/admin/moderators (e2e, ACC-13)', () => {
     users = app.get<Model<User>>(getModelToken(User.name));
     airlines = app.get<Model<Airline>>(getModelToken(Airline.name));
     hotels = app.get<Model<Hotel>>(getModelToken(Hotel.name));
+    frontendUrl = app.get(ConfigService).get<string>('FRONTEND_URL') ?? '';
 
     // One insertMany per collection: single creates in a row have stalled
     // against the Atlas test database (ACC-14, BLG-01).
@@ -171,6 +183,42 @@ describe('POST /api/admin/moderators (e2e, ACC-13)', () => {
   });
 
   describe('a created moderator', () => {
+    it('is invited by one email to its address: the role and the login address, never the password (GEN-01-B)', async () => {
+      const body = hotelModerator();
+
+      const response = await created(body);
+      await app.get(EmailService).whenIdle();
+
+      expect(response.status).toBe(201);
+      const invitations = mail.to(body.email);
+      expect(invitations).toHaveLength(1);
+      expect(invitations[0]).toMatchObject({
+        from: TEST_MAIL_FROM,
+        to: body.email,
+        subject: 'Your moderator account on the Travel Platform',
+      });
+      expect(invitations[0].text).toContain('Hello Mona Hotel,');
+      expect(invitations[0].text).toContain('a hotel moderator account');
+      expect(invitations[0].text).toContain(`Log in at ${frontendUrl}`);
+      expect(JSON.stringify(invitations)).not.toContain(TEMPORARY_PASSWORD);
+    });
+
+    it('invites an airline moderator as an airline moderator (GEN-01-B)', async () => {
+      const body = {
+        ...hotelModerator(),
+        name: 'Adam Air',
+        role: Role.AirlineModerator,
+        providerId: airlineId,
+      };
+
+      expect((await created(body)).status).toBe(201);
+      await app.get(EmailService).whenIdle();
+
+      const [invitation] = mail.to(body.email);
+      expect(invitation.text).toContain('an airline moderator account');
+      expect(invitation.text).not.toContain(TEMPORARY_PASSWORD);
+    });
+
     it('is an active hotel moderator linked to the hotel, who must change the password', async () => {
       const body = hotelModerator();
 
@@ -282,6 +330,9 @@ describe('POST /api/admin/moderators (e2e, ACC-13)', () => {
         { field: 'providerId', messages: [PROVIDER_NOT_FOUND_MESSAGE.hotel] },
       ]);
       expect(await users.exists({ email: body.email })).toBeNull();
+      // GEN-01-B: no account, so no invitation.
+      await app.get(EmailService).whenIdle();
+      expect(mail.to(body.email)).toHaveLength(0);
     });
 
     it.each([
@@ -323,6 +374,9 @@ describe('POST /api/admin/moderators (e2e, ACC-13)', () => {
       });
 
       expect(response.status).toBe(409);
+      // GEN-01-B: the refused creation invites nobody a second time.
+      await app.get(EmailService).whenIdle();
+      expect(mail.to(body.email)).toHaveLength(1);
     });
 
     it.each([

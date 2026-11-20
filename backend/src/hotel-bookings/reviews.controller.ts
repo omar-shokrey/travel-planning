@@ -25,13 +25,16 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
+import { CreateReviewReplyDto } from './dto/create-review-reply.dto';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { ReviewResponseDto } from './dto/review-response.dto';
 import { UpdateReviewDto } from './dto/update-review.dto';
 import {
   REVIEW_EXISTS_MESSAGE,
   REVIEW_NOT_COMPLETED_MESSAGE,
+  REPLY_TEXT_MAX_LENGTH,
   REVIEW_NOT_FOUND_MESSAGE,
+  REVIEW_REPLY_EXISTS_MESSAGE,
   REVIEW_UPDATE_EMPTY_MESSAGE,
 } from './hotel-bookings.constants';
 import { BOOKING_NOT_FOUND_MESSAGE } from './hotel-bookings.service';
@@ -75,7 +78,7 @@ export class HotelReviewsController {
   }
 }
 
-/** HTL-23: edit or delete one's own review. */
+/** HTL-23: edit or delete one's own review. HTL-26: the hotel's reply. */
 @ApiTags('reviews')
 @ApiCookieAuth()
 @Controller('reviews')
@@ -103,6 +106,38 @@ export class ReviewsController {
     @CurrentUser('id') userId: string,
   ): Promise<ReviewResponseDto> {
     return this.reviews.update(id, userId, dto);
+  }
+
+  @Post(':id/reply')
+  @Roles(Role.HotelModerator)
+  @ApiOperation({
+    summary: 'Reply to a review of my hotel (HTL-26)',
+    description: `HTL-26 (optional). The hotel moderator assigned to the review's hotel replies to a visible review: a text of 1 to ${REPLY_TEXT_MAX_LENGTH} characters, outer spaces removed. **One reply per review**; it cannot be edited or deleted. The reply does not change the hotel's rating, and the review's \`updatedAt\` stays the author's last change.`,
+  })
+  @ApiCreatedResponse({
+    type: ReviewResponseDto,
+    description: 'The review with its `reply`',
+  })
+  @ApiBadRequestResponse({
+    description: `The id is not a valid id, \`text\` is missing, not a text, empty or spaces only, or has more than ${REPLY_TEXT_MAX_LENGTH} characters, or another field was sent (\`repliedAt\` and \`moderatorId\` included)`,
+  })
+  @ApiUnauthorizedResponse({ description: 'Not logged in' })
+  @ApiForbiddenResponse({
+    description:
+      "The account is not a hotel moderator, or the moderator is not assigned to the review's hotel",
+  })
+  @ApiNotFoundResponse({
+    description: `"${REVIEW_NOT_FOUND_MESSAGE}": no such review, or it is hidden`,
+  })
+  @ApiConflictResponse({
+    description: `"${REVIEW_REPLY_EXISTS_MESSAGE}"`,
+  })
+  reply(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: CreateReviewReplyDto,
+    @CurrentUser('id') moderatorId: string,
+  ): Promise<ReviewResponseDto> {
+    return this.reviews.reply(id, moderatorId, dto);
   }
 
   @Delete(':id')
