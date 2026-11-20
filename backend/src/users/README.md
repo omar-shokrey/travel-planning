@@ -22,7 +22,7 @@ Owns the `users` collection: the `User` schema, `UsersService`, the public shape
 
 ## My account (ACC-11)
 
-`GET /api/users/me` returns the account of the logged-in user (200). Any role may use it.
+`GET /api/users/me` returns the account of the logged-in user (200). Any role may use it. The rest of ACC-11, owner-only bookings and private itineraries, is described in the auth README and tested in `test/owner-access.e2e-spec.ts` and `test/owner-access-bookings.e2e-spec.ts`.
 
 - **The route has no id.** The id comes from the login cookie (`@CurrentUser('id')`) and from nothing else, so a request cannot name another account, and an `id` in the query is ignored. No route reads another user's account by id. An administrator reads other accounts through the list `GET /api/admin/accounts` (ACC-14).
 - **It returns the same account as `GET /api/auth/me`.** Section 8 of the project description lists both routes. Both build the answer with `toUserResponse`, so the password hash and the login counters can never be returned. The frontend keeps using `/api/auth/me` to learn who is logged in (ACC-04, ACC-19); `/api/users/me` is the read next to the profile edit (ACC-09).
