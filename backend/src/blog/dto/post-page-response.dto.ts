@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PaginationMeta } from '../../common/dto/paginated-response.dto';
+import { PostItineraryResponseDto } from './post-itinerary-response.dto';
 import { PostAuthorResponseDto } from './post-summary-response.dto';
 
 /** One comment on the post page (BLG-02). */
@@ -80,6 +81,14 @@ export class PostPageResponseDto {
     example: 2,
   })
   commentCount: number;
+
+  @ApiProperty({
+    type: PostItineraryResponseDto,
+    nullable: true,
+    description:
+      "BLG-13: a summary of the author's itinerary attached to the post, read when the page is read. `null` when none is attached, or when it is no longer public, was hidden by an admin or deleted, or its owner deactivated their account. The full itinerary is at `GET /api/itineraries/public/{id}`.",
+  })
+  itinerary: PostItineraryResponseDto | null;
 
   @ApiProperty({
     type: PostCommentsPageResponseDto,
