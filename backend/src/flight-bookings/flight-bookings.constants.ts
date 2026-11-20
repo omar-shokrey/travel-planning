@@ -92,3 +92,6 @@ export const REFERENCE_ATTEMPTS = 5;
 /** FLT-23: the e-ticket is only for a booking that is paid and confirmed. */
 export const E_TICKET_NOT_CONFIRMED_MESSAGE =
   'Only a confirmed booking has an e-ticket';
+
+/** GEN-11: how many confirmed bookings one run of the completion job completes, earliest trips first. */
+export const FLIGHT_BOOKING_COMPLETION_BATCH_SIZE = 100;

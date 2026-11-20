@@ -147,3 +147,5 @@ export const HotelBookingSchema = SchemaFactory.createForClass(HotelBooking);
 HotelBookingSchema.index({ reference: 1 }, { unique: true, sparse: true });
 // HTL-18: the hold-expiry job finds the due pending_payment reservations.
 HotelBookingSchema.index({ status: 1, holdExpiresAt: 1 });
+// GEN-11: the completion job finds the confirmed reservations past check-out.
+HotelBookingSchema.index({ status: 1, checkOut: 1 });
