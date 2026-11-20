@@ -562,4 +562,33 @@ export class FlightBookingsService {
       .lean()
       .exec();
   }
+
+  /**
+   * ACC-15: the travellers to tell when the admin deactivates this airline,
+   * for the admin module (never through a controller). The users with a
+   * confirmed booking that is not over yet: at least one segment is on a
+   * flight of this airline that departs after `now`, so a round trip counts
+   * when either flight does. Each user once. Read only: two light reads that
+   * use existing indexes (the airline's flights, then `segments.flightId`);
+   * no second read when the airline has no future flight.
+   */
+  async findTravellerIdsOfAirline(
+    airlineId: Types.ObjectId,
+    now: Date,
+  ): Promise<Types.ObjectId[]> {
+    // `Flight` does not declare `_id`, so Mongoose types the values as
+    // `unknown`; a flight's `_id` is the default ObjectId.
+    const flightIds = (await this.flights
+      .distinct('_id', { airlineId, departureAt: { $gt: now } })
+      .exec()) as Types.ObjectId[];
+    if (flightIds.length === 0) {
+      return [];
+    }
+    return this.bookings
+      .distinct('userId', {
+        status: FlightBookingStatus.Confirmed,
+        'segments.flightId': { $in: flightIds },
+      })
+      .exec();
+  }
 }

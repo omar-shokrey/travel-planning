@@ -171,4 +171,25 @@ export class HotelBookingsService {
       .lean()
       .exec();
   }
+
+  /**
+   * ACC-15: the travellers to tell when the admin deactivates this hotel,
+   * for the admin module (never through a controller). The users with a
+   * confirmed reservation of this hotel that is not over yet: its check-out
+   * is today or later, today being the UTC date of `now` (`YYYY-MM-DD`
+   * strings compare in date order). Each user once. Read only.
+   */
+  findTravellerIdsOfHotel(
+    hotelId: Types.ObjectId,
+    now: Date,
+  ): Promise<Types.ObjectId[]> {
+    const today = now.toISOString().slice(0, 10);
+    return this.bookings
+      .distinct('userId', {
+        hotelId,
+        status: HotelBookingStatus.Confirmed,
+        checkOut: { $gte: today },
+      })
+      .exec();
+  }
 }
