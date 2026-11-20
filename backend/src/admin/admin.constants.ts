@@ -84,3 +84,17 @@ export function providerDeactivatedNotification(
 ): string {
   return `Your ${type} "${name}" was deactivated by an administrator. While it is deactivated, it is hidden from search and cannot be booked. Existing confirmed bookings remain valid.`;
 }
+
+/**
+ * ACC-15: the in-app notification the travellers get when a hotel or airline
+ * they hold a confirmed, not yet over booking with is deactivated. Like the
+ * moderators' notice, it describes the deactivation only, so it stays true
+ * when the provider is reactivated before it is read, and it promises no
+ * later notice. No link: one traveller may hold several bookings.
+ */
+export function providerDeactivatedTravellerNotification(
+  type: ProviderType,
+  name: string,
+): string {
+  return `The ${type} "${name}" was deactivated by an administrator. Your confirmed booking with it remains valid and nothing is cancelled or refunded.`;
+}

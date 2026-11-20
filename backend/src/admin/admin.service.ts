@@ -16,7 +16,9 @@ import { SessionsService } from '../auth/sessions.service';
 import { ProviderType } from '../common/enums/provider-type.enum';
 import { Role } from '../common/enums/role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
+import { FlightBookingsService } from '../flight-bookings/flight-bookings.service';
 import { AirlinesService } from '../flights/airlines.service';
+import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service';
 import { HotelsService } from '../hotels/hotels.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -41,6 +43,7 @@ import {
   PROVIDER_NOT_FOUND_MESSAGE,
   PROVIDER_STATUS_CHANGED_MESSAGE,
   providerDeactivatedNotification,
+  providerDeactivatedTravellerNotification,
 } from './admin.constants';
 import type { CreateModeratorDto } from './dto/create-moderator.dto';
 import type { ListAccountsQueryDto } from './dto/list-accounts-query.dto';
@@ -64,6 +67,9 @@ export class AdminService {
     private readonly hotels: HotelsService,
     private readonly notifications: NotificationsService,
     private readonly audit: AuditService,
+    // ACC-15: the travellers with a booking of a deactivated provider.
+    private readonly flightBookings: FlightBookingsService,
+    private readonly hotelBookings: HotelBookingsService,
   ) {}
 
   /**
@@ -341,10 +347,11 @@ export class AdminService {
 
   /**
    * Deactivates a hotel or airline (ACC-15): it is hidden from search and
-   * cannot be booked, while its existing confirmed bookings remain valid. Its
-   * moderator accounts keep their status (suspending them is separate), and
-   * each of them gets an in-app notification. The deactivation is recorded
-   * in the audit log (GEN-07).
+   * cannot be booked, while its existing confirmed bookings remain valid
+   * (nothing is cancelled or refunded). Its moderator accounts keep their
+   * status (suspending them is separate). Its moderators and the travellers
+   * with a confirmed booking with it that is not over yet each get one in-app
+   * notification. The deactivation is recorded in the audit log (GEN-07).
    */
   async deactivateProvider(
     type: ProviderType,
@@ -353,26 +360,8 @@ export class AdminService {
   ): Promise<ProviderStatusResponseDto> {
     const updated = await this.changeProviderActive(type, id, false);
     // After the update, so a notification never announces a change that
-    // failed. The change has happened, so a failure to tell the moderators is
-    // logged, not answered as a 500. No link, for hotels and airlines alike:
-    // the provider is now hidden, and notification links have no airline
-    // kind (GEN-01), so both kinds get the same notice.
-    try {
-      const moderatorIds = await this.usersService.findModeratorIdsOfProvider(
-        type,
-        updated._id,
-      );
-      await this.notifications.notifyMany(
-        moderatorIds,
-        NotificationType.ProviderDeactivated,
-        providerDeactivatedNotification(type, updated.name),
-      );
-    } catch (error) {
-      this.logger.error(
-        `Telling the moderators of ${type} ${id} about its deactivation failed`,
-        error instanceof Error ? error.stack : String(error),
-      );
-    }
+    // failed.
+    await this.notifyAffectedParties(type, updated);
     await this.recordProviderChange(
       adminId,
       AuditAction.DeactivateProvider,
@@ -380,6 +369,60 @@ export class AdminService {
       updated,
     );
     return toProviderStatusResponse(type, updated);
+  }
+
+  /**
+   * ACC-15: tells the affected parties of a deactivated provider, in two
+   * independent steps: its moderators, then the travellers with a confirmed
+   * booking with it that is not over yet. The change has happened, so a
+   * failure of a step is logged (type and provider id only), never answered
+   * as a 500, and never stops the other step. No link, for hotels and
+   * airlines alike: notification links have no airline kind (GEN-01) and a
+   * traveller may hold several bookings, so both kinds get the same notice.
+   */
+  private async notifyAffectedParties(
+    type: ProviderType,
+    provider: { _id: Types.ObjectId; name: string },
+  ): Promise<void> {
+    const id = provider._id.toString();
+    try {
+      const moderatorIds = await this.usersService.findModeratorIdsOfProvider(
+        type,
+        provider._id,
+      );
+      await this.notifications.notifyMany(
+        moderatorIds,
+        NotificationType.ProviderDeactivated,
+        providerDeactivatedNotification(type, provider.name),
+      );
+    } catch (error) {
+      this.logger.error(
+        `Telling the moderators of ${type} ${id} about its deactivation failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+    try {
+      const now = new Date();
+      const travellerIds =
+        type === ProviderType.Airline
+          ? await this.flightBookings.findTravellerIdsOfAirline(
+              provider._id,
+              now,
+            )
+          : await this.hotelBookings.findTravellerIdsOfHotel(provider._id, now);
+      if (travellerIds.length > 0) {
+        await this.notifications.notifyMany(
+          travellerIds,
+          NotificationType.ProviderDeactivated,
+          providerDeactivatedTravellerNotification(type, provider.name),
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Telling the travellers of ${type} ${id} about its deactivation failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   /**

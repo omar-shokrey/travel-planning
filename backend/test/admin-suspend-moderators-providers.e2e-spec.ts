@@ -2,8 +2,9 @@ import { getModelToken } from '@nestjs/mongoose';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { hash } from 'bcrypt';
+import { DateTime } from 'luxon';
 import { Types, type Model } from 'mongoose';
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import request from 'supertest';
 import './support/auth-env';
 import {
@@ -19,12 +20,22 @@ import {
   LOGIN_REQUIRED_MESSAGE,
 } from './../src/auth/auth.constants';
 import { ACCESS_TOKEN_COOKIE } from './../src/common/constants/cookies';
+import { PLATFORM_CURRENCY } from './../src/common/constants/currency';
 import { ProviderType } from './../src/common/enums/provider-type.enum';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
+import { FlightBookingStatus } from './../src/flight-bookings/enums/flight-booking-status.enum';
+import { PassengerType } from './../src/flight-bookings/enums/passenger-type.enum';
+import { FlightBooking } from './../src/flight-bookings/models/flight-booking.schema';
 import { Airline } from './../src/flights/models/airline.schema';
+import { CabinClass } from './../src/flights/models/cabin-class.enum';
+import { FlightStatus } from './../src/flights/models/flight-status.enum';
+import { Flight } from './../src/flights/models/flight.schema';
+import { HotelBookingStatus } from './../src/hotel-bookings/enums/hotel-booking-status.enum';
+import { HotelBooking } from './../src/hotel-bookings/models/hotel-booking.schema';
 import { Hotel } from './../src/hotels/models/hotel.schema';
 import { Notification } from './../src/notifications/models/notification.schema';
+import { Airport } from './../src/reference/models/airport.schema';
 import { User } from './../src/users/models/user.schema';
 import { deleteAuditLogsOf } from './support/delete-audit-logs';
 import { deleteSessionsOf } from './support/delete-sessions';
@@ -49,6 +60,17 @@ describe('Suspend moderators and deactivate providers (e2e, ACC-15)', () => {
   let hotels: Model<Hotel>;
   let airlines: Model<Airline>;
   let notifications: Model<Notification>;
+  // ACC-15: the travellers' bookings, inserted straight in the "-test"
+  // database and deleted one by one by id in afterAll.
+  let hotelBookings: Model<HotelBooking>;
+  let flightBookings: Model<FlightBooking>;
+  let flights: Model<Flight>;
+  let airports: Model<Airport>;
+  const createdHotelBookingIds: Types.ObjectId[] = [];
+  const createdFlightBookingIds: Types.ObjectId[] = [];
+  const createdFlightIds: Types.ObjectId[] = [];
+  const createdAirportCodes: string[] = [];
+  const createdAirlineIds: Types.ObjectId[] = [];
   const createdUserIds: string[] = [];
   const accounts = new Map<string, { id: string; email: string }>();
   const hotelId = new Types.ObjectId();
@@ -108,6 +130,14 @@ describe('Suspend moderators and deactivate providers (e2e, ACC-15)', () => {
     notifications = app.get<Model<Notification>>(
       getModelToken(Notification.name),
     );
+    hotelBookings = app.get<Model<HotelBooking>>(
+      getModelToken(HotelBooking.name),
+    );
+    flightBookings = app.get<Model<FlightBooking>>(
+      getModelToken(FlightBooking.name),
+    );
+    flights = app.get<Model<Flight>>(getModelToken(Flight.name));
+    airports = app.get<Model<Airport>>(getModelToken(Airport.name));
 
     // One insertMany per collection: single creates in a row have stalled
     // against the Atlas test database.
@@ -194,6 +224,22 @@ describe('Suspend moderators and deactivate providers (e2e, ACC-15)', () => {
   });
 
   afterAll(async () => {
+    // ACC-15: the travellers' bookings, flights, airports and second airline.
+    for (const id of createdHotelBookingIds) {
+      await hotelBookings.findByIdAndDelete(id);
+    }
+    for (const id of createdFlightBookingIds) {
+      await flightBookings.findByIdAndDelete(id);
+    }
+    for (const id of createdFlightIds) {
+      await flights.findByIdAndDelete(id);
+    }
+    for (const code of createdAirportCodes) {
+      await airports.findByIdAndDelete(code);
+    }
+    for (const id of createdAirlineIds) {
+      await airlines.findByIdAndDelete(id);
+    }
     for (const id of createdUserIds) {
       await deleteSessionsOf(app, id);
       const found = await notifications
@@ -397,6 +443,398 @@ describe('Suspend moderators and deactivate providers (e2e, ACC-15)', () => {
       );
       expect(response.status).toBe(200);
       expect(response.body.active).toBe(true);
+    });
+  });
+
+  describe('the travellers of a deactivated provider', () => {
+    const DAY_MS = 24 * 3_600_000;
+    /** A `YYYY-MM-DD` date this many days from today (UTC). */
+    const dayFromToday = (days: number): string =>
+      DateTime.utc().plus({ days }).toISODate() ?? '';
+    /**
+     * Six random upper-case letters (26^6 values): never a 3-letter official
+     * airport code, and not one another run uses.
+     */
+    const airportCode = () =>
+      Array.from({ length: 6 }, () =>
+        String.fromCharCode(65 + randomInt(26)),
+      ).join('');
+    const otherHotelId = new Types.ObjectId();
+    const otherAirlineId = new Types.ObjectId();
+    const futureFlightId = new Types.ObjectId();
+    const pastFlightId = new Types.ObjectId();
+    const otherAirlineFlightId = new Types.ObjectId();
+    const confirmedHotelBookingIds: Types.ObjectId[] = [];
+    let travellerEBookingId = new Types.ObjectId();
+    const travellers = [
+      'travellerA',
+      'travellerB',
+      'travellerC',
+      'travellerD',
+      'travellerE',
+      'travellerF',
+      'travellerG',
+      'travellerH',
+    ];
+
+    const providerNoticesOf = async (label: string) =>
+      (await notificationsOf(label)).filter(
+        (notification) => notification.type === 'provider_deactivated',
+      );
+
+    /** A reservation of one room for one adult, as stored. */
+    const hotelBooking = (
+      label: string,
+      status: HotelBookingStatus,
+      checkIn: string,
+      checkOut: string,
+      hotel: Types.ObjectId = hotelId,
+    ) => {
+      const id = new Types.ObjectId();
+      createdHotelBookingIds.push(id);
+      if (status === HotelBookingStatus.Confirmed && hotel === hotelId) {
+        confirmedHotelBookingIds.push(id);
+      }
+      return {
+        _id: id,
+        userId: new Types.ObjectId(idOf(label)),
+        hotelId: hotel,
+        checkIn,
+        checkOut,
+        nights: 2,
+        status,
+        ...(status === HotelBookingStatus.PendingPayment && {
+          holdExpiresAt: new Date(Date.now() + 3_600_000),
+        }),
+        currency: PLATFORM_CURRENCY,
+        total: 20000,
+        rooms: [
+          {
+            roomId: new Types.ObjectId(),
+            roomLabel: '101 (Double)',
+            pricePerNight: 10000,
+            adults: 1,
+            childAges: [],
+          },
+        ],
+      };
+    };
+
+    /** A booking of one adult, one segment per flight, as stored. */
+    const flightBooking = (
+      label: string,
+      status: FlightBookingStatus,
+      legs: { flightId: Types.ObjectId; airlineId: Types.ObjectId }[],
+    ) => {
+      const id = new Types.ObjectId();
+      createdFlightBookingIds.push(id);
+      return {
+        _id: id,
+        userId: new Types.ObjectId(idOf(label)),
+        status,
+        ...(status === FlightBookingStatus.Confirmed && {
+          reference: `FB-${randomUUID()
+            .replaceAll('-', '')
+            .slice(0, 6)
+            .toUpperCase()
+            .replace(/[01ILO]/g, 'Z')}`,
+        }),
+        ...(status === FlightBookingStatus.PendingPayment && {
+          holdExpiresAt: new Date(Date.now() + 3_600_000),
+        }),
+        currency: PLATFORM_CURRENCY,
+        fareTotal: 10000 * legs.length,
+        baggageTotal: 0,
+        total: 10000 * legs.length,
+        segments: legs.map((leg) => ({
+          ...leg,
+          cabin: CabinClass.Economy,
+          fare: 10000,
+          seatsReserved: 1,
+        })),
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        passengers: [
+          {
+            fullName: `ACC-15 ${label}`,
+            dateOfBirth: '1990-05-14',
+            passportNumber: 'ACC15PASS1',
+            type: PassengerType.Adult,
+          },
+        ],
+      };
+    };
+
+    beforeAll(async () => {
+      const passwordHash = await hash(PASSWORD, 4);
+      const inserted = await users.insertMany(
+        travellers.map((label) => ({
+          name: `ACC-15 ${label}`,
+          email: `acc15-${label.toLowerCase()}-${randomUUID()}@example.com`,
+          passwordHash,
+          role: Role.User,
+          status: UserStatus.Active,
+          consentAcceptedAt: new Date(),
+        })),
+      );
+      for (const [index, user] of inserted.entries()) {
+        createdUserIds.push(user._id.toString());
+        accounts.set(travellers[index], {
+          id: user._id.toString(),
+          email: user.email,
+        });
+      }
+
+      // Hotel side.
+      await hotelBookings.insertMany([
+        // A: two confirmed, upcoming reservations: one notice.
+        hotelBooking(
+          'travellerA',
+          HotelBookingStatus.Confirmed,
+          dayFromToday(3),
+          dayFromToday(5),
+        ),
+        hotelBooking(
+          'travellerA',
+          HotelBookingStatus.Confirmed,
+          dayFromToday(10),
+          dayFromToday(12),
+        ),
+        // B: confirmed, but over.
+        hotelBooking(
+          'travellerB',
+          HotelBookingStatus.Confirmed,
+          dayFromToday(-5),
+          dayFromToday(-3),
+        ),
+        // C: upcoming, but never confirmed or already completed.
+        hotelBooking(
+          'travellerC',
+          HotelBookingStatus.PendingPayment,
+          dayFromToday(3),
+          dayFromToday(5),
+        ),
+        hotelBooking(
+          'travellerC',
+          HotelBookingStatus.Expired,
+          dayFromToday(3),
+          dayFromToday(5),
+        ),
+        hotelBooking(
+          'travellerC',
+          HotelBookingStatus.Cancelled,
+          dayFromToday(3),
+          dayFromToday(5),
+        ),
+        hotelBooking(
+          'travellerC',
+          HotelBookingStatus.Completed,
+          dayFromToday(3),
+          dayFromToday(5),
+        ),
+        // D: confirmed and upcoming, at another hotel.
+        hotelBooking(
+          'travellerD',
+          HotelBookingStatus.Confirmed,
+          dayFromToday(3),
+          dayFromToday(5),
+          otherHotelId,
+        ),
+      ]);
+
+      // Airline side: two airports in UTC (for the e-ticket's local times),
+      // a second airline, a future and a past flight of this airline, and a
+      // future flight of the other one.
+      const from = airportCode();
+      let to = airportCode();
+      while (to === from) {
+        to = airportCode();
+      }
+      // Recorded before the insert, so cleanup finds whatever was saved.
+      createdAirportCodes.push(from, to);
+      await airports.insertMany(
+        [from, to].map((code) => ({
+          _id: code,
+          name: `ACC-15 airport ${code}`,
+          cityId: 'acc15-city',
+          countryCode: 'EG',
+          timeZone: 'UTC',
+        })),
+      );
+      createdAirlineIds.push(otherAirlineId);
+      await airlines.insertMany([
+        {
+          _id: otherAirlineId,
+          name: `ACC-15 Other airline ${randomUUID()}`,
+          code: `Q${randomUUID().slice(0, 6).toUpperCase()}`,
+          logo: 'acc15-other-logo.png',
+          active: true,
+        },
+      ]);
+      const flight = (
+        _id: Types.ObjectId,
+        owner: Types.ObjectId,
+        departureAt: Date,
+      ) => ({
+        _id,
+        airlineId: owner,
+        flightNumber: `ZZ${String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0')}`,
+        departureAirport: from,
+        arrivalAirport: to,
+        departureAt,
+        arrivalAt: new Date(departureAt.getTime() + 3 * 3_600_000),
+        departureDateLocal:
+          DateTime.fromJSDate(departureAt, { zone: 'UTC' }).toISODate() ?? '',
+        status: FlightStatus.Scheduled,
+        cabins: [],
+      });
+      createdFlightIds.push(futureFlightId, pastFlightId, otherAirlineFlightId);
+      await flights.insertMany([
+        flight(futureFlightId, airlineId, new Date(Date.now() + 20 * DAY_MS)),
+        flight(pastFlightId, airlineId, new Date(Date.now() - 20 * DAY_MS)),
+        flight(
+          otherAirlineFlightId,
+          otherAirlineId,
+          new Date(Date.now() + 10 * DAY_MS),
+        ),
+      ]);
+
+      const onFuture = { flightId: futureFlightId, airlineId };
+      const travellerEBooking = flightBooking(
+        'travellerE',
+        FlightBookingStatus.Confirmed,
+        [onFuture],
+      );
+      travellerEBookingId = travellerEBooking._id;
+      await flightBookings.insertMany([
+        // E: confirmed, on the future flight.
+        travellerEBooking,
+        // F: confirmed, only on the past flight.
+        flightBooking('travellerF', FlightBookingStatus.Confirmed, [
+          { flightId: pastFlightId, airlineId },
+        ]),
+        // G: only waiting for payment, on the future flight.
+        flightBooking('travellerG', FlightBookingStatus.PendingPayment, [
+          onFuture,
+        ]),
+        // H: a round trip out on the other airline, back on this one.
+        flightBooking('travellerH', FlightBookingStatus.Confirmed, [
+          { flightId: otherAirlineFlightId, airlineId: otherAirlineId },
+          onFuture,
+        ]),
+      ]);
+    });
+
+    describe('a hotel', () => {
+      it('deactivates the hotel', async () => {
+        const response = await providerAction(
+          'deactivate',
+          'hotel',
+          hotelId.toString(),
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.active).toBe(false);
+      });
+
+      it('tells a traveller with confirmed upcoming reservations once, without a link', async () => {
+        const told = await providerNoticesOf('travellerA');
+
+        expect(told).toHaveLength(1);
+        expect(told[0].message).toContain(hotelName);
+        expect(told[0].message).toContain('remains valid');
+        expect(told[0].linkType).toBeUndefined();
+        expect(told[0].linkId).toBeUndefined();
+      });
+
+      it.each([
+        ['travellerB', 'whose reservation is over'],
+        [
+          'travellerC',
+          'with only pending, expired, cancelled or completed reservations',
+        ],
+        ['travellerD', 'of another hotel'],
+      ])('tells nobody else: not %s (%s)', async (label) => {
+        expect(await providerNoticesOf(label)).toHaveLength(0);
+      });
+
+      it('keeps the confirmed reservations confirmed', async () => {
+        for (const id of confirmedHotelBookingIds) {
+          expect((await hotelBookings.findById(id).lean())?.status).toBe(
+            'confirmed',
+          );
+        }
+      });
+
+      it('sends the travellers nothing more when the hotel is reactivated', async () => {
+        const response = await providerAction(
+          'reactivate',
+          'hotel',
+          hotelId.toString(),
+        );
+
+        expect(response.status).toBe(200);
+        expect(await providerNoticesOf('travellerA')).toHaveLength(1);
+      });
+    });
+
+    describe('an airline', () => {
+      it('deactivates the airline', async () => {
+        const response = await providerAction(
+          'deactivate',
+          'airline',
+          airlineId.toString(),
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.active).toBe(false);
+      });
+
+      it.each([
+        ['travellerE', 'a confirmed booking on a future flight'],
+        ['travellerH', 'a round trip whose return is a future flight of it'],
+      ])('tells %s, with %s, once and without a link', async (label) => {
+        const told = await providerNoticesOf(label);
+
+        expect(told).toHaveLength(1);
+        expect(told[0].message).toContain(airlineName);
+        expect(told[0].message).toContain('remains valid');
+        expect(told[0].linkType).toBeUndefined();
+      });
+
+      it.each([
+        ['travellerF', 'whose flight has departed'],
+        ['travellerG', 'whose booking only waits for payment'],
+      ])('tells nobody else: not %s (%s)', async (label) => {
+        expect(await providerNoticesOf(label)).toHaveLength(0);
+      });
+
+      it('keeps the confirmed booking confirmed, and its e-ticket available', async () => {
+        expect(
+          (await flightBookings.findById(travellerEBookingId).lean())?.status,
+        ).toBe('confirmed');
+        const cookie = await startSession('travellerE');
+
+        const ticket = await server()
+          .get(
+            `/api/flight-bookings/${travellerEBookingId.toString()}/e-ticket`,
+          )
+          .set('Cookie', cookie);
+
+        expect(ticket.status).toBe(200);
+        expect(ticket.headers['content-type']).toContain('application/pdf');
+      });
+
+      it('sends the travellers nothing more when the airline is reactivated', async () => {
+        const response = await providerAction(
+          'reactivate',
+          'airline',
+          airlineId.toString(),
+        );
+
+        expect(response.status).toBe(200);
+        expect(await providerNoticesOf('travellerE')).toHaveLength(1);
+        expect(await providerNoticesOf('travellerH')).toHaveLength(1);
+      });
     });
   });
 

@@ -899,3 +899,86 @@ describe('FlightBookingsService.summarise (FLT-21)', () => {
     expect(bookings.create).not.toHaveBeenCalled();
   });
 });
+
+describe('FlightBookingsService.findTravellerIdsOfAirline (ACC-15)', () => {
+  const AT = new Date('2026-11-19T10:00:00.000Z');
+  const FUTURE_FLIGHT = new Types.ObjectId();
+  const OTHER_FUTURE_FLIGHT = new Types.ObjectId();
+  const TRAVELLER_A = new Types.ObjectId();
+  const TRAVELLER_B = new Types.ObjectId();
+
+  /** Fake models whose `distinct` resolves to the given ids. */
+  const lookupSetup = (
+    flightIds: Types.ObjectId[],
+    userIds: Types.ObjectId[] = [],
+  ) => {
+    const distinctOf = (result: Types.ObjectId[]) =>
+      jest.fn(() => ({ exec: jest.fn().mockResolvedValue(result) }));
+    const flights = { distinct: distinctOf(flightIds) };
+    const bookings = { distinct: distinctOf(userIds) };
+    const service = new FlightBookingsService(
+      bookings as never,
+      flights as never,
+      {} as FlightSeatHoldsService,
+      {} as AirlinesService,
+      {} as FlightResponsesService,
+      {} as FlightBookingConfirmationService,
+    );
+    return { service, flights, bookings };
+  };
+
+  it("reads the airline's flights departing after now, then the confirmed bookings on them", async () => {
+    const { service, flights, bookings } = lookupSetup(
+      [FUTURE_FLIGHT, OTHER_FUTURE_FLIGHT],
+      [TRAVELLER_A, TRAVELLER_B],
+    );
+
+    await expect(
+      service.findTravellerIdsOfAirline(AIRLINE_ID, AT),
+    ).resolves.toEqual([TRAVELLER_A, TRAVELLER_B]);
+
+    expect(flights.distinct).toHaveBeenCalledTimes(1);
+    expect(flights.distinct).toHaveBeenCalledWith('_id', {
+      airlineId: AIRLINE_ID,
+      departureAt: { $gt: AT },
+    });
+    expect(bookings.distinct).toHaveBeenCalledTimes(1);
+    expect(bookings.distinct).toHaveBeenCalledWith('userId', {
+      status: FlightBookingStatus.Confirmed,
+      'segments.flightId': { $in: [FUTURE_FLIGHT, OTHER_FUTURE_FLIGHT] },
+    });
+  });
+
+  it('asks only for confirmed bookings, never pending, expired, cancelled or completed ones', async () => {
+    const { service, bookings } = lookupSetup([FUTURE_FLIGHT]);
+
+    await service.findTravellerIdsOfAirline(AIRLINE_ID, AT);
+
+    const [, filter] = bookings.distinct.mock.calls[0] as unknown as [
+      string,
+      { status: string },
+    ];
+    expect(filter.status).toBe('confirmed');
+  });
+
+  it('returns [] and reads no booking when the airline has no future flight', async () => {
+    const { service, bookings } = lookupSetup([]);
+
+    await expect(
+      service.findTravellerIdsOfAirline(AIRLINE_ID, AT),
+    ).resolves.toEqual([]);
+    expect(bookings.distinct).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing', async () => {
+    const { service, flights, bookings } = lookupSetup(
+      [FUTURE_FLIGHT],
+      [TRAVELLER_A],
+    );
+
+    await service.findTravellerIdsOfAirline(AIRLINE_ID, AT);
+
+    expect(Object.keys(flights)).toEqual(['distinct']);
+    expect(Object.keys(bookings)).toEqual(['distinct']);
+  });
+});
