@@ -4,7 +4,7 @@ import type { IncomingMessage } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import Stripe from 'stripe';
 import type { Response } from 'superagent';
-import type { Model } from 'mongoose';
+import { Types, type Model } from 'mongoose';
 import { Role } from './../src/common/enums/role.enum';
 import { FLIGHT_REFERENCE_PATTERN } from './../src/flight-bookings/booking-reference';
 import { FlightBookingStatus } from './../src/flight-bookings/enums/flight-booking-status.enum';
@@ -14,11 +14,16 @@ import { CabinClass } from './../src/flights/models/cabin-class.enum';
 import { NotificationLinkType } from './../src/notifications/enums/notification-link-type.enum';
 import { NotificationType } from './../src/notifications/enums/notification-type.enum';
 import { Notification } from './../src/notifications/models/notification.schema';
+import { BookingType } from './../src/payments/enums/booking-type.enum';
 import { Payment } from './../src/payments/models/payment.schema';
+import { RefundReason } from './../src/payments/refunds/enums/refund-reason.enum';
+import { RefundStatus } from './../src/payments/refunds/enums/refund-status.enum';
+import { Refund } from './../src/payments/refunds/models/refund.schema';
 import { StripeEvent } from './../src/payments/models/stripe-event.schema';
 import {
   StripeGateway,
   type GatewayIntent,
+  type GatewayRefund,
 } from './../src/payments/stripe.gateway';
 import { User } from './../src/users/models/user.schema';
 import { deleteSessionsOf } from './support/delete-sessions';
@@ -66,6 +71,7 @@ describe('Flight booking confirmation (e2e, FLT-23)', () => {
   let payments: Model<Payment>;
   let stripeEvents: Model<StripeEvent>;
   let notifications: Model<Notification>;
+  let refunds: Model<Refund>;
   let users: Model<User>;
   let stranger: Actor;
   /** The signer of webhook events: the real Stripe SDK, offline. */
@@ -193,6 +199,7 @@ describe('Flight booking confirmation (e2e, FLT-23)', () => {
     notifications = fx.app.get<Model<Notification>>(
       getModelToken(Notification.name),
     );
+    refunds = fx.app.get<Model<Refund>>(getModelToken(Refund.name));
     users = fx.app.get<Model<User>>(getModelToken(User.name));
 
     // Nothing reaches Stripe: only the signature check is real.
@@ -225,6 +232,42 @@ describe('Flight booking confirmation (e2e, FLT-23)', () => {
     };
   });
 
+  /**
+   * PAY-03: a late payment is refunded through Stripe. The refund call is
+   * replaced in every test, so no request reaches Stripe with the fake key.
+   * PaymentsModule and RefundsModule share one StripeGateway, so this one spy
+   * covers the webhook and the refunds service.
+   */
+  let createRefund: jest.SpiedFunction<StripeGateway['createRefund']>;
+
+  beforeEach(() => {
+    createRefund = jest
+      .spyOn(fx.app.get(StripeGateway), 'createRefund')
+      .mockImplementation((refund) =>
+        Promise.resolve<GatewayRefund>({
+          id: `re_test_${fx.run}_${++counter}`,
+          status: 'succeeded',
+          amount: refund.amount,
+          currency: 'usd',
+          paymentIntentId: refund.paymentIntentId,
+        }),
+      );
+  });
+
+  afterEach(() => {
+    createRefund.mockRestore();
+  });
+
+  /** The refunds of one booking (at most one, unique per booking). */
+  const refundsOf = (bookingId: string) =>
+    refunds
+      .find({
+        bookingType: BookingType.Flight,
+        bookingId: new Types.ObjectId(bookingId),
+      })
+      .lean()
+      .exec();
+
   afterAll(async () => {
     if (!fx) return;
     jest.restoreAllMocks();
@@ -237,6 +280,12 @@ describe('Flight booking confirmation (e2e, FLT-23)', () => {
           .exec();
         for (const { _id } of ours) {
           await notifications.findByIdAndDelete(_id).exec();
+        }
+      }
+      // PAY-03: the refunds of the late payments, one by one by id.
+      for (const id of bookingIds) {
+        for (const { _id } of await refundsOf(id)) {
+          await refunds.findByIdAndDelete(_id).exec();
         }
       }
       for (const id of paymentIds) {
@@ -339,7 +388,36 @@ describe('Flight booking confirmation (e2e, FLT-23)', () => {
     expect(stored.status).not.toBe(FlightBookingStatus.Confirmed);
     expect(stored.reference).toBeUndefined();
     expect((await cabinOf(booking.flightId)).bookedSeats).toBe(0);
-    expect(await notificationsOf(booking.id)).toHaveLength(0);
+    // PAY-03: the late payment is refunded in full instead.
+    const sent = await notificationsOf(booking.id);
+    expect(
+      sent.filter((n) => n.type === NotificationType.BookingConfirmed),
+    ).toHaveLength(0);
+    expect(sent.filter((n) => n.type === NotificationType.Refund)).toHaveLength(
+      1,
+    );
+    const [refund, ...others] = await refundsOf(booking.id);
+    expect(others).toHaveLength(0);
+    expect(refund).toMatchObject({
+      refundPercent: 100,
+      reason: RefundReason.LatePayment,
+      amount: payment.amount,
+      // The stub answers `succeeded`, which is a refunded refund.
+      status: RefundStatus.Refunded,
+    });
+    expect(createRefund).toHaveBeenCalledTimes(1);
+    expect(createRefund.mock.calls[0][1]).toBe(`refund-flight-${booking.id}`);
+
+    // The same payment reported again, with a new event id: no second refund.
+    const again = await paid(payment);
+    expect(again.status).toBe(200);
+    expect(await refundsOf(booking.id)).toHaveLength(1);
+    expect(
+      (await notificationsOf(booking.id)).filter(
+        (n) => n.type === NotificationType.Refund,
+      ),
+    ).toHaveLength(1);
+    expect(createRefund).toHaveBeenCalledTimes(1);
   });
 
   describe('GET /api/flight-bookings/:id/e-ticket', () => {

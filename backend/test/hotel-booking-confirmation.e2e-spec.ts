@@ -21,11 +21,16 @@ import { Room } from './../src/hotels/models/room.schema';
 import { NotificationLinkType } from './../src/notifications/enums/notification-link-type.enum';
 import { NotificationType } from './../src/notifications/enums/notification-type.enum';
 import { Notification } from './../src/notifications/models/notification.schema';
+import { BookingType } from './../src/payments/enums/booking-type.enum';
 import { Payment } from './../src/payments/models/payment.schema';
+import { RefundReason } from './../src/payments/refunds/enums/refund-reason.enum';
+import { RefundStatus } from './../src/payments/refunds/enums/refund-status.enum';
+import { Refund } from './../src/payments/refunds/models/refund.schema';
 import { StripeEvent } from './../src/payments/models/stripe-event.schema';
 import {
   StripeGateway,
   type GatewayIntent,
+  type GatewayRefund,
 } from './../src/payments/stripe.gateway';
 import { User } from './../src/users/models/user.schema';
 import { deleteSessionsOf } from './support/delete-sessions';
@@ -68,6 +73,7 @@ describe('Hotel reservation confirmation (e2e, HTL-17)', () => {
   let payments: Model<Payment>;
   let stripeEvents: Model<StripeEvent>;
   let notifications: Model<Notification>;
+  let refunds: Model<Refund>;
   let user: Actor;
   let otherUser: Actor;
   let hotelId: string;
@@ -231,6 +237,7 @@ describe('Hotel reservation confirmation (e2e, HTL-17)', () => {
     notifications = app.get<Model<Notification>>(
       getModelToken(Notification.name),
     );
+    refunds = app.get<Model<Refund>>(getModelToken(Refund.name));
     // The unique (roomId, date) and reference indexes must exist.
     await roomNights.init();
     await bookings.init();
@@ -272,6 +279,42 @@ describe('Hotel reservation confirmation (e2e, HTL-17)', () => {
     hotelIds.push(hotelId);
   });
 
+  /**
+   * PAY-03: a late payment is refunded through Stripe. The refund call is
+   * replaced in every test, so no request reaches Stripe with the fake key.
+   * PaymentsModule and RefundsModule share one StripeGateway, so this one spy
+   * covers the webhook and the refunds service.
+   */
+  let createRefund: jest.SpiedFunction<StripeGateway['createRefund']>;
+
+  beforeEach(() => {
+    createRefund = jest
+      .spyOn(app.get(StripeGateway), 'createRefund')
+      .mockImplementation((refund) =>
+        Promise.resolve<GatewayRefund>({
+          id: `re_test_${RUN}_${++counter}`,
+          status: 'succeeded',
+          amount: refund.amount,
+          currency: 'usd',
+          paymentIntentId: refund.paymentIntentId,
+        }),
+      );
+  });
+
+  afterEach(() => {
+    createRefund.mockRestore();
+  });
+
+  /** The refunds of one booking (at most one, unique per booking). */
+  const refundsOf = (bookingId: string) =>
+    refunds
+      .find({
+        bookingType: BookingType.Hotel,
+        bookingId: new Types.ObjectId(bookingId),
+      })
+      .lean()
+      .exec();
+
   afterAll(async () => {
     if (!app) return;
     jest.restoreAllMocks();
@@ -284,6 +327,12 @@ describe('Hotel reservation confirmation (e2e, HTL-17)', () => {
           .exec();
         for (const { _id } of ours) {
           await notifications.findByIdAndDelete(_id).exec();
+        }
+      }
+      // PAY-03: the refunds of the late payments, one by one by id.
+      for (const id of bookingIds) {
+        for (const { _id } of await refundsOf(id)) {
+          await refunds.findByIdAndDelete(_id).exec();
         }
       }
       for (const id of paymentIds) {
@@ -397,7 +446,36 @@ describe('Hotel reservation confirmation (e2e, HTL-17)', () => {
     expect(
       (await nightsOf(id)).some((n) => n.state === RoomNightState.Booked),
     ).toBe(false);
-    expect(await notificationsOf(id)).toHaveLength(0);
+    // PAY-03: the late payment is refunded in full instead.
+    const sent = await notificationsOf(id);
+    expect(
+      sent.filter((n) => n.type === NotificationType.BookingConfirmed),
+    ).toHaveLength(0);
+    expect(sent.filter((n) => n.type === NotificationType.Refund)).toHaveLength(
+      1,
+    );
+    const [refund, ...others] = await refundsOf(id);
+    expect(others).toHaveLength(0);
+    expect(refund).toMatchObject({
+      refundPercent: 100,
+      reason: RefundReason.LatePayment,
+      amount: payment.amount,
+      // The stub answers `succeeded`, which is a refunded refund.
+      status: RefundStatus.Refunded,
+    });
+    expect(createRefund).toHaveBeenCalledTimes(1);
+    expect(createRefund.mock.calls[0][1]).toBe(`refund-hotel-${id}`);
+
+    // The same payment reported again, with a new event id: no second refund.
+    const again = await paid(payment);
+    expect(again.status).toBe(200);
+    expect(await refundsOf(id)).toHaveLength(1);
+    expect(
+      (await notificationsOf(id)).filter(
+        (n) => n.type === NotificationType.Refund,
+      ),
+    ).toHaveLength(1);
+    expect(createRefund).toHaveBeenCalledTimes(1);
   });
 
   it('the expiry job never releases a confirmed reservation, even once its old hold end has passed', async () => {
