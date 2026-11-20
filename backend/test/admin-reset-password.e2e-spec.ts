@@ -17,6 +17,7 @@ import { configureApp, setupSwagger } from './../src/app.setup';
 import {
   INVALID_CREDENTIALS_MESSAGE,
   LOGIN_REQUIRED_MESSAGE,
+  PASSWORD_CHANGE_REQUIRED_MESSAGE,
 } from './../src/auth/auth.constants';
 import {
   ACCESS_TOKEN_COOKIE,
@@ -239,6 +240,48 @@ describe('POST /api/admin/users/:id/reset-password (e2e, ACC-07a)', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.status).toBe('suspended');
+    });
+  });
+
+  describe('the temporary password must be changed first (ACC-07a, GEN-13)', () => {
+    /** Resets the account, logs in with the temporary password, and proves the rule on `route`. */
+    const provesTheRule = async (role: Role, route: string) => {
+      const account = await createUser(role);
+      await reset(account.id).expect(200);
+      const { access } = await startSession(account.email, TEMPORARY_PASSWORD);
+      const call = () =>
+        request(app.getHttpServer()).get(route).set('Cookie', access);
+
+      const refused = await call();
+      expect(refused.status).toBe(403);
+      expect(refused.body.message).toBe(PASSWORD_CHANGE_REQUIRED_MESSAGE);
+
+      const me = await request(app.getHttpServer())
+        .get('/api/auth/me')
+        .set('Cookie', access);
+      expect(me.status).toBe(200);
+      expect(me.body.mustChangePassword).toBe(true);
+
+      const change = await request(app.getHttpServer())
+        .patch('/api/auth/change-password')
+        .set('Cookie', access)
+        .send({
+          currentPassword: TEMPORARY_PASSWORD,
+          newPassword: 'N3wPassword',
+        });
+      expect(change.status).toBe(200);
+      expect(change.body.mustChangePassword).toBe(false);
+
+      // The same session, without logging in again.
+      expect((await call()).status).toBe(200);
+    };
+
+    it('refuses a reset user every other route until the new password is set, then lets the same session in', async () => {
+      await provesTheRule(Role.User, '/api/notifications');
+    });
+
+    it('does the same for a reset moderator', async () => {
+      await provesTheRule(Role.HotelModerator, '/api/users/me');
     });
   });
 

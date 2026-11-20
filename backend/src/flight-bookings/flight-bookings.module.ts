@@ -7,6 +7,7 @@ import { RefundsModule } from '../payments/refunds/refunds.module';
 import { FlightBookingCancellationService } from './flight-booking-cancellation.service';
 import { FlightBookingConfirmationService } from './flight-booking-confirmation.service';
 import { FlightBookingETicketService } from './flight-booking-e-ticket.service';
+import { FlightBookingCompletionService } from './flight-booking-completion.service';
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
 import { FlightBookingsController } from './flight-bookings.controller';
 import { FlightBookingsService } from './flight-bookings.service';
@@ -43,6 +44,8 @@ import {
     FlightBookingConfirmationService,
     FlightBookingETicketService,
     FlightBookingCancellationService,
+    // GEN-11: the completion job (Confirmed -> Completed).
+    FlightBookingCompletionService,
   ],
   // FlightBookingsService: the owner lookup and the policy acceptance for the
   // payments module (PAY-02). The payments module imports this one, never the

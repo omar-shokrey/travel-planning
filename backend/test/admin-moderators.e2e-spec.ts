@@ -9,7 +9,10 @@ import './support/auth-env';
 import { AppModule } from './../src/app.module';
 import { PROVIDER_NOT_FOUND_MESSAGE } from './../src/admin/admin.constants';
 import { configureApp, setupSwagger } from './../src/app.setup';
-import { LOGIN_REQUIRED_MESSAGE } from './../src/auth/auth.constants';
+import {
+  LOGIN_REQUIRED_MESSAGE,
+  PASSWORD_CHANGE_REQUIRED_MESSAGE,
+} from './../src/auth/auth.constants';
 import { ACCESS_TOKEN_COOKIE } from './../src/common/constants/cookies';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
@@ -201,20 +204,29 @@ describe('POST /api/admin/moderators (e2e, ACC-13)', () => {
       expect(await compare(TEMPORARY_PASSWORD, stored.passwordHash)).toBe(true);
     });
 
-    it('logs in with the temporary password, edits its own hotel, then sets a new password', async () => {
+    it('logs in with the temporary password, is refused its own hotel until it sets a new password, then edits it with the same session (ACC-13)', async () => {
       const body = hotelModerator();
       await created(body);
+      const editHotel = (cookie: string) =>
+        request(app.getHttpServer())
+          .patch(`/api/hotels/${hotelId}`)
+          .set('Cookie', cookie)
+          .send({ description: 'Edited by its new moderator' });
 
       const first = await login(body.email, TEMPORARY_PASSWORD);
       expect(first.status).toBe(200);
       expect(first.body.mustChangePassword).toBe(true);
       const cookie = accessCookie(first);
 
-      const edit = await request(app.getHttpServer())
-        .patch(`/api/hotels/${hotelId}`)
-        .set('Cookie', cookie)
-        .send({ description: 'Edited by its new moderator' });
-      expect(edit.status).toBe(200);
+      const refused = await editHotel(cookie);
+      expect(refused.status).toBe(403);
+      expect(refused.body.message).toBe(PASSWORD_CHANGE_REQUIRED_MESSAGE);
+
+      const me = await request(app.getHttpServer())
+        .get('/api/auth/me')
+        .set('Cookie', cookie);
+      expect(me.status).toBe(200);
+      expect(me.body.mustChangePassword).toBe(true);
 
       const change = await request(app.getHttpServer())
         .patch('/api/auth/change-password')
@@ -225,6 +237,10 @@ describe('POST /api/admin/moderators (e2e, ACC-13)', () => {
         });
       expect(change.status).toBe(200);
       expect(change.body.mustChangePassword).toBe(false);
+
+      // The same session, without logging in again.
+      const edit = await editHotel(cookie);
+      expect(edit.status).toBe(200);
     });
 
     it('creates an airline moderator linked to the airline', async () => {

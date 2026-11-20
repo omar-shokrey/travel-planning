@@ -310,3 +310,63 @@ describe('HotelBookingsService owner lookup and policy acceptance (PAY-02)', () 
     ).resolves.toBeNull();
   });
 });
+
+describe('HotelBookingsService.findTravellerIdsOfHotel (ACC-15)', () => {
+  const TRAVELLER_A = new Types.ObjectId();
+  const TRAVELLER_B = new Types.ObjectId();
+
+  /** A fake model whose `distinct` resolves to the given user ids. */
+  const lookupSetup = (userIds: Types.ObjectId[] = []) => {
+    const bookings = {
+      distinct: jest.fn(() => ({
+        exec: jest.fn().mockResolvedValue(userIds),
+      })),
+    };
+    const service = new HotelBookingsService(
+      bookings as never,
+      {} as HotelRoomHoldsService,
+      {} as HotelBookingConfirmationService,
+    );
+    return { service, bookings };
+  };
+
+  it('reads the users with a confirmed reservation of the hotel whose check-out is today or later', async () => {
+    const { service, bookings } = lookupSetup([TRAVELLER_A, TRAVELLER_B]);
+
+    await expect(
+      service.findTravellerIdsOfHotel(
+        HOTEL_ID,
+        new Date('2026-11-19T10:00:00.000Z'),
+      ),
+    ).resolves.toEqual([TRAVELLER_A, TRAVELLER_B]);
+
+    expect(bookings.distinct).toHaveBeenCalledTimes(1);
+    expect(bookings.distinct).toHaveBeenCalledWith('userId', {
+      hotelId: HOTEL_ID,
+      status: HotelBookingStatus.Confirmed,
+      checkOut: { $gte: '2026-11-19' },
+    });
+  });
+
+  it.each([
+    ['2026-11-19T23:59:59.999Z', '2026-11-19'],
+    ['2026-11-20T00:00:00.000Z', '2026-11-20'],
+  ])('uses the UTC date of now (%s -> %s)', async (now, today) => {
+    const { service, bookings } = lookupSetup();
+
+    await service.findTravellerIdsOfHotel(HOTEL_ID, new Date(now));
+
+    expect(bookings.distinct).toHaveBeenCalledWith(
+      'userId',
+      expect.objectContaining({ checkOut: { $gte: today } }),
+    );
+  });
+
+  it('returns [] when nobody has such a reservation', async () => {
+    const { service } = lookupSetup([]);
+
+    await expect(
+      service.findTravellerIdsOfHotel(HOTEL_ID, new Date()),
+    ).resolves.toEqual([]);
+  });
+});

@@ -100,3 +100,5 @@ export const DEPARTED_MESSAGE =
   'The flight has departed: the booking can no longer be cancelled';
 export const REFUND_CHANGED_MESSAGE =
   'The refund changed since you viewed it. View the cancellation again and confirm the new refund';
+/** GEN-11: how many confirmed bookings one run of the completion job completes, earliest trips first. */
+export const FLIGHT_BOOKING_COMPLETION_BATCH_SIZE = 100;

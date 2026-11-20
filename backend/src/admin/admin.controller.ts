@@ -101,7 +101,7 @@ export class AdminController {
   @ApiOperation({
     summary: 'Create a hotel or airline moderator account (ACC-13)',
     description:
-      'Admin only. Creates an active `airline_moderator` or `hotel_moderator` account linked to exactly one airline or hotel (`providerId`), with the temporary password the admin chose; the admin gives it to the moderator. The account answers with `mustChangePassword: true`: at the first login the moderator must set a new password with PATCH /api/auth/change-password (ACC-08). An airline or hotel may have several moderators.',
+      'Admin only. Creates an active `airline_moderator` or `hotel_moderator` account linked to exactly one airline or hotel (`providerId`), with the temporary password the admin chose; the admin gives it to the moderator. The account answers with `mustChangePassword: true`: at the first login the moderator must set a new password with PATCH /api/auth/change-password (ACC-08), and the backend enforces it: until the password is changed, every route except GET /api/auth/me and PATCH /api/auth/change-password answers 403 "You must change your temporary password first". An airline or hotel may have several moderators.',
   })
   @ApiCreatedResponse({
     description: 'The moderator account was created',
@@ -191,7 +191,7 @@ export class AdminController {
   @ApiOperation({
     summary: "Reset a user's or moderator's password (ACC-07a)",
     description:
-      'Admin only. Sets the temporary password the admin chose; the admin gives it to the account owner. The account keeps its role and status, any login lockout (ACC-05) is cleared, every session of the account ends at once (its access and refresh cookies get 401), and `mustChangePassword` becomes true: at the next login the owner must set a new password with PATCH /api/auth/change-password (ACC-08). The password of an administrator cannot be reset here.',
+      'Admin only. Sets the temporary password the admin chose; the admin gives it to the account owner. The account keeps its role and status, any login lockout (ACC-05) is cleared, every session of the account ends at once (its access and refresh cookies get 401), and `mustChangePassword` becomes true: at the next login the owner must set a new password with PATCH /api/auth/change-password (ACC-08), and the backend enforces it: until the password is changed, every route except GET /api/auth/me and PATCH /api/auth/change-password answers 403 "You must change your temporary password first". The password of an administrator cannot be reset here.',
   })
   @ApiParam({
     name: 'id',
@@ -225,7 +225,7 @@ export class AdminController {
   @ApiOperation({
     summary: 'Deactivate a hotel or airline (ACC-15)',
     description:
-      'Admin only. Sets `active: false` on the hotel or airline: it is hidden from search and cannot be booked, while its existing confirmed bookings remain valid. Its moderator accounts are not suspended (that is PATCH /api/admin/accounts/:id/suspend); each of them gets an in-app notification.',
+      'Admin only. Sets `active: false` on the hotel or airline: it is hidden from search and cannot be booked, while its existing confirmed bookings remain valid. Its moderator accounts are not suspended (that is PATCH /api/admin/accounts/:id/suspend). Its moderators and the travellers who have a confirmed booking with it that is not over yet each get one in-app notification, with no link. Nothing is cancelled or refunded: a hold taken before the deactivation can still be paid, while new holds and reservations are refused.',
   })
   @ApiParam({ name: 'type', enum: ProviderType, example: ProviderType.Hotel })
   @ApiParam({

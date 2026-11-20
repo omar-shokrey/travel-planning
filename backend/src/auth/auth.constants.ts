@@ -25,6 +25,15 @@ export const CURRENT_PASSWORD_INCORRECT_MESSAGE =
 export const SAME_PASSWORD_MESSAGE =
   'The new password must be different from the current password';
 
+/**
+ * The answer of every route but `GET /api/auth/me` and
+ * `PATCH /api/auth/change-password` while the account still has a temporary
+ * password set by an admin (ACC-13, ACC-07a). It is a 403, not a 401: the
+ * caller is logged in. The suspended account's 403 has its own message.
+ */
+export const PASSWORD_CHANGE_REQUIRED_MESSAGE =
+  'You must change your temporary password first';
+
 /** The answer of any route that needs a logged-in user. It matches the one of RolesGuard. */
 export const LOGIN_REQUIRED_MESSAGE = 'You must log in to do this';
 

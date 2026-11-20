@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { HotelsModule } from '../hotels/hotels.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { HotelBookingConfirmationService } from './hotel-booking-confirmation.service';
+import { HotelBookingCompletionService } from './hotel-booking-completion.service';
 import { HotelBookingExpiryService } from './hotel-booking-expiry.service';
 import { HotelBookingsController } from './hotel-bookings.controller';
 import { HotelBookingsService } from './hotel-bookings.service';
@@ -29,6 +30,8 @@ import {
     HotelBookingsService,
     HotelBookingExpiryService,
     HotelBookingConfirmationService,
+    // GEN-11: the completion job (Confirmed -> Completed).
+    HotelBookingCompletionService,
   ],
   // HotelBookingsService: the owner lookup and the policy acceptance for the
   // payments module (PAY-02). The payments module imports this one, never the

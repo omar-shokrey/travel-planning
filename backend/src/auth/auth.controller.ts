@@ -28,6 +28,7 @@ import { Public } from '../common/decorators/public.decorator';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { AuthCookiesService } from './auth-cookies.service';
 import { AuthService } from './auth.service';
+import { AllowTemporaryPassword } from './decorators/allow-temporary-password.decorator';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -66,7 +67,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Log in with email and password (ACC-04)',
     description:
-      'Open to guests. On success the response sets two httpOnly cookies, `access_token` and `refresh_token`, and returns the account; the `role` tells the frontend which home page to open. The browser sends the cookies on every later request, so Swagger UI needs no further step. An unknown email, a wrong password and a deactivated account all get the same 401 message. After 5 wrong passwords in a row the account is locked for 15 minutes (ACC-05): the 5th wrong password and every login during the lock get 429 with the time left, even with the right password. When the lock ends the count starts again, and a successful login resets it.',
+      'Open to guests. On success the response sets two httpOnly cookies, `access_token` and `refresh_token`, and returns the account; the `role` tells the frontend which home page to open. The browser sends the cookies on every later request, so Swagger UI needs no further step. An unknown email, a wrong password and a deactivated account all get the same 401 message. After 5 wrong passwords in a row the account is locked for 15 minutes (ACC-05): the 5th wrong password and every login during the lock get 429 with the time left, even with the right password. When the lock ends the count starts again, and a successful login resets it. An account with a temporary password set by an admin (ACC-13, ACC-07a) logs in normally and gets `mustChangePassword: true`: until the password is changed, every route except GET /api/auth/me and PATCH /api/auth/change-password answers 403 "You must change your temporary password first".',
   })
   @ApiOkResponse({
     description: 'Logged in. The authentication cookies are set.',
@@ -161,11 +162,14 @@ export class AuthController {
   }
 
   @Get('me')
+  // ACC-13, ACC-07a: the frontend must learn who is logged in, also before
+  // a temporary password is changed.
+  @AllowTemporaryPassword()
   @ApiCookieAuth()
   @ApiOperation({
     summary: 'The logged-in user (ACC-04)',
     description:
-      'Returns the account the access cookie belongs to. The frontend calls it to learn who is logged in, because it cannot read the httpOnly cookie.',
+      'Returns the account the access cookie belongs to. The frontend calls it to learn who is logged in, because it cannot read the httpOnly cookie. It also works for an account with a temporary password (`mustChangePassword: true`, ACC-13, ACC-07a): until the password is changed, every route except GET /api/auth/me and PATCH /api/auth/change-password answers 403 "You must change your temporary password first".',
   })
   @ApiOkResponse({ type: UserResponseDto })
   @ApiUnauthorizedResponse({
@@ -178,11 +182,13 @@ export class AuthController {
   }
 
   @Patch('change-password')
+  // ACC-13, ACC-07a: the way out of a temporary password.
+  @AllowTemporaryPassword()
   @ApiCookieAuth()
   @ApiOperation({
     summary: 'Change my password (ACC-08)',
     description:
-      'Any logged-in user. Send the current password and a new one that meets the password rule (8 or more characters with a letter and a digit) and differs from the current one. It also ends a temporary password set by an admin: the account is returned with `mustChangePassword: false`. This session stays logged in; every other session of the account (another browser or device) ends at once, so its access and refresh cookies get 401.',
+      'Any logged-in user. Send the current password and a new one that meets the password rule (8 or more characters with a letter and a digit) and differs from the current one. It also ends a temporary password set by an admin (ACC-13, ACC-07a): the account is returned with `mustChangePassword: false`, and the same session can use every route at once. Until then, every route except GET /api/auth/me and PATCH /api/auth/change-password answers 403 "You must change your temporary password first". This session stays logged in; every other session of the account (another browser or device) ends at once, so its access and refresh cookies get 401.',
   })
   @ApiOkResponse({
     description: 'The password was changed',
