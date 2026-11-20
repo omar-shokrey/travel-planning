@@ -92,3 +92,11 @@ export const REFERENCE_ATTEMPTS = 5;
 /** FLT-23: the e-ticket is only for a booking that is paid and confirmed. */
 export const E_TICKET_NOT_CONFIRMED_MESSAGE =
   'Only a confirmed booking has an e-ticket';
+
+/** FLT-26: the answers of a cancellation. */
+export const NOT_CANCELLABLE_MESSAGE =
+  'Only a confirmed booking can be cancelled';
+export const DEPARTED_MESSAGE =
+  'The flight has departed: the booking can no longer be cancelled';
+export const REFUND_CHANGED_MESSAGE =
+  'The refund changed since you viewed it. View the cancellation again and confirm the new refund';
