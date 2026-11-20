@@ -28,3 +28,19 @@ export const CHECK_IN_REACHED_MESSAGE =
   'The check-in date has been reached: the reservation can no longer be cancelled';
 export const REFUND_CHANGED_MESSAGE =
   'The refund changed since you viewed it. View the cancellation again and confirm the new refund';
+
+/** HTL-23: a review's rating is a whole number from 1 to 5, its text at most 1000 characters. */
+export const REVIEW_RATING_MIN = 1;
+export const REVIEW_RATING_MAX = 5;
+export const REVIEW_TEXT_MAX_LENGTH = 1000;
+
+/** HTL-23: the answers of the review routes. */
+export const REVIEW_NOT_COMPLETED_MESSAGE =
+  'Only a completed stay can be reviewed: wait until the reservation is completed (the day after check-out)';
+export const REVIEW_EXISTS_MESSAGE =
+  'This reservation already has a review: edit or delete it instead';
+export const REVIEW_NOT_FOUND_MESSAGE = 'Review not found';
+export const REVIEW_UPDATE_EMPTY_MESSAGE = 'Send a rating or a text to change';
+
+/** HTL-23: how many times the hotel's rating is recomputed when it changed in between. */
+export const RATING_RECOMPUTE_ATTEMPTS = 3;
