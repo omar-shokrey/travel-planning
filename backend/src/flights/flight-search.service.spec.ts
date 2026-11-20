@@ -5,7 +5,11 @@ import type { FlightSearchResultResponseDto } from './dto/flight-search-result-r
 import type { SearchFlightsQueryDto } from './dto/search-flights-query.dto';
 import { PRICE_RANGE_MESSAGE } from './flights.constants';
 import type { FlightResponsesService } from './flight-responses.service';
-import { FlightSearchService, outboundLeg } from './flight-search.service';
+import {
+  crossFieldErrors,
+  FlightSearchService,
+  outboundLeg,
+} from './flight-search.service';
 import type { FlightSearchSource } from './mappers/flight-search.mapper';
 import type { Airline } from './models/airline.schema';
 import { CabinClass } from './models/cabin-class.enum';
@@ -727,9 +731,18 @@ describe('FlightSearchService: round trip (FLT-12(a))', () => {
 
   it('gives each leg the local times of its own airports: the return leaves in New York', async () => {
     const { service, exec } = setup();
-    exec
-      .mockResolvedValueOnce(page(['MS1'], 1))
-      .mockResolvedValueOnce(page(['MS9'], 1));
+    exec.mockResolvedValueOnce(page(['MS1'], 1)).mockResolvedValueOnce([
+      {
+        items: [
+          {
+            ...found('MS9'),
+            departureAirport: 'JFK',
+            arrivalAirport: 'CAI',
+          },
+        ],
+        total: [{ count: 1 }],
+      },
+    ]);
 
     const result = (await service.search(
       query({ returnDate: '2027-06-22' }),
@@ -910,9 +923,183 @@ describe('FlightSearchService: round trip (FLT-12(a))', () => {
       }),
     );
     expect(outboundLeg(query({ returnDate: '2027-06-22' }))).toEqual({
-      from: 'CAI',
-      to: 'JFK',
+      from: ['CAI'],
+      to: ['JFK'],
       date: '2027-06-15',
     });
+  });
+});
+
+describe('FlightSearchService.searchBetween (ITN-26)', () => {
+  const ZONES3 = new Map([
+    ['CAI', 'Africa/Cairo'],
+    ['JFK', 'America/New_York'],
+    ['EWR', 'America/New_York'],
+  ]);
+  const filters = (change: Partial<SearchFlightsQueryDto> = {}) =>
+    ({
+      passengers: 2,
+      page: 1,
+      limit: 10,
+      skip: 0,
+      sortBy: 'departureTime',
+      sortOrder: 'asc',
+      ...change,
+    }) as SearchFlightsQueryDto;
+  const route = {
+    from: ['CAI'],
+    to: ['JFK', 'EWR'],
+    departureDate: '2027-06-15',
+  };
+  const matchOf = (flights: ReturnType<typeof setup>['flights'], call = 0) =>
+    (
+      flights.aggregate.mock.calls[call] as unknown as [
+        { $match: Record<string, unknown> }[],
+      ]
+    )[0][0].$match;
+
+  it('searches every destination airport in one aggregation, with the filters of the search', async () => {
+    const { service, flights, responses } = setup(undefined, ZONES3);
+
+    const result = await service.searchBetween(
+      filters({ cabin: CabinClass.Business, maxPrice: 50000 }),
+      route,
+      NOW,
+    );
+
+    expect(responses.timeZonesOf).toHaveBeenCalledWith(['CAI', 'JFK', 'EWR']);
+    expect(flights.aggregate).toHaveBeenCalledTimes(1);
+    expect(matchOf(flights)).toEqual(
+      expect.objectContaining({
+        departureAirport: 'CAI',
+        arrivalAirport: { $in: ['JFK', 'EWR'] },
+        departureDateLocal: '2027-06-15',
+        'cabins.cabin': CabinClass.Business,
+      }),
+    );
+    expect(result).toEqual({
+      outbound: {
+        items: [],
+        meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
+      },
+      return: null,
+    });
+  });
+
+  it('maps each flight with the time zones of its own airports', async () => {
+    const { service } = setup(
+      [
+        {
+          items: [{ ...found('UA1'), arrivalAirport: 'EWR' }],
+          total: [{ count: 1 }],
+        },
+      ],
+      new Map([
+        ['CAI', 'Africa/Cairo'],
+        ['JFK', 'America/New_York'],
+        ['EWR', 'America/Toronto'],
+      ]),
+    );
+
+    const result = await service.searchBetween(filters(), route, NOW);
+
+    expect(result.outbound.items[0]).toMatchObject({
+      departureTimeZone: 'Africa/Cairo',
+      arrivalTimeZone: 'America/Toronto',
+    });
+  });
+
+  it('with a return date also searches back from every destination airport to the origin', async () => {
+    const { service, flights } = setup(undefined, ZONES3);
+
+    const result = await service.searchBetween(
+      filters(),
+      { ...route, returnDate: '2027-06-22' },
+      NOW,
+    );
+
+    expect(flights.aggregate).toHaveBeenCalledTimes(2);
+    expect(matchOf(flights, 1)).toEqual(
+      expect.objectContaining({
+        departureAirport: { $in: ['JFK', 'EWR'] },
+        arrivalAirport: 'CAI',
+        departureDateLocal: '2027-06-22',
+      }),
+    );
+    expect(result.return).toEqual({
+      items: [],
+      meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
+    });
+  });
+
+  it('asks each time zone once, even when an airport is on both sides', async () => {
+    const { service, responses } = setup(undefined, ZONES3);
+
+    await service.searchBetween(
+      filters(),
+      { from: ['CAI', 'JFK'], to: ['JFK'], departureDate: '2027-06-15' },
+      NOW,
+    );
+
+    expect(responses.timeZonesOf).toHaveBeenCalledWith(['CAI', 'JFK']);
+  });
+
+  it('answers the 400s of the search before any query: a wrong price range and a return before the departure', async () => {
+    const { service, flights, responses } = setup();
+
+    await expect(
+      service.searchBetween(
+        filters({ minPrice: 9, maxPrice: 1 }),
+        { ...route, returnDate: '2027-06-14' },
+        NOW,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        message: 'Validation failed',
+        errors: [
+          {
+            field: 'minPrice',
+            messages: ['minPrice must not be greater than maxPrice'],
+          },
+          {
+            field: 'returnDate',
+            messages: ['returnDate cannot be before departureDate'],
+          },
+        ],
+      },
+    });
+    expect(responses.timeZonesOf).not.toHaveBeenCalled();
+    expect(flights.aggregate).not.toHaveBeenCalled();
+  });
+
+  it('searches at the current time when no `now` is given', async () => {
+    jest.useFakeTimers({ now: NOW });
+    try {
+      const { service, flights } = setup(undefined, ZONES3);
+
+      await service.searchBetween(filters(), route);
+
+      expect(matchOf(flights).departureAt).toEqual({ $gt: NOW });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe('crossFieldErrors (FLT-12, FLT-15)', () => {
+  it('finds nothing for equal bounds, a missing bound, a same-day return or no return', () => {
+    expect(
+      crossFieldErrors(
+        { minPrice: 5, maxPrice: 5 },
+        '2027-06-15',
+        '2027-06-15',
+      ),
+    ).toEqual([]);
+    expect(crossFieldErrors({ minPrice: 5 }, '2027-06-15', undefined)).toEqual(
+      [],
+    );
+    expect(
+      crossFieldErrors({ maxPrice: 5 }, '2027-06-15', '2027-06-16'),
+    ).toEqual([]);
   });
 });

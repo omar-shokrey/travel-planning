@@ -55,6 +55,12 @@ import { FlightsService } from './flights.service';
   // FlightResponsesService: flight responses with local times (GEN-06) for
   // the flight-bookings module (FLT-23, FLT-25, FLT-29). FlightSeatHoldsService:
   // the only way a booking holds and releases a cabin's seats (FLT-22).
-  exports: [AirlinesService, FlightResponsesService, FlightSeatHoldsService],
+  // FlightSearchService: flights from an itinerary (ITN-26).
+  exports: [
+    AirlinesService,
+    FlightResponsesService,
+    FlightSeatHoldsService,
+    FlightSearchService,
+  ],
 })
 export class FlightsModule {}

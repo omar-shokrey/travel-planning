@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common/constants';
 import { FlightDetailsController } from './flight-details.controller';
 import { FlightSearchController } from './flight-search.controller';
+import { FlightSearchService } from './flight-search.service';
 import { FlightsModule } from './flights.module';
 
 /** The GET routes of a controller, as `<controller path>/<route path>`. */
@@ -79,5 +80,11 @@ describe('FlightsModule', () => {
     );
 
     expect(getRoutesOf(Example)).toEqual(['flights/:id']);
+  });
+
+  it('exports FlightSearchService, for the flights of an itinerary (ITN-26)', () => {
+    expect(
+      Reflect.getMetadata(MODULE_METADATA.EXPORTS, FlightsModule),
+    ).toContain(FlightSearchService);
   });
 });
