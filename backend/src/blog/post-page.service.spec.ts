@@ -8,6 +8,10 @@ import type { PostPageSource } from './mappers/post-page.mapper';
 import type { BlogPost } from './models/blog-post.schema';
 import type { CommentDocument } from './models/comment.schema';
 import { PostPageService } from './post-page.service';
+import type {
+  PublicItinerariesService,
+  PublicItinerarySummary,
+} from '../itineraries/public-itineraries.service';
 import type { PublishedPostsService } from './published-posts.service';
 import { visiblePublishedPost } from './visible-post.filter';
 
@@ -52,6 +56,7 @@ interface Options {
   comments?: CommentDocument[];
   total?: number;
   names?: Map<string, string>;
+  itinerary?: PublicItinerarySummary | null;
 }
 
 function setup(options: Options = {}) {
@@ -79,12 +84,16 @@ function setup(options: Options = {}) {
         ]),
     ),
   };
+  const publicItineraries = {
+    findPublicSummary: jest.fn().mockResolvedValue(options.itinerary ?? null),
+  };
   const service = new PostPageService(
     posts as unknown as Model<BlogPost>,
     comments as unknown as CommentsService,
     publishedPosts as unknown as PublishedPostsService,
+    publicItineraries as unknown as PublicItinerariesService,
   );
-  return { service, posts, chain, comments, publishedPosts };
+  return { service, posts, chain, comments, publishedPosts, publicItineraries };
 }
 
 const queryOf = (overrides: Partial<PostPageQueryDto> = {}): PostPageQueryDto =>
@@ -98,7 +107,7 @@ describe('PostPageService (BLG-02)', () => {
 
     expect(posts.findOne).toHaveBeenCalledWith(visiblePublishedPost(POST_ID));
     expect(chain.select).toHaveBeenCalledWith(
-      'authorId title body tags images publishedAt likeCount commentCount',
+      'authorId title body tags images publishedAt likeCount commentCount itineraryId',
     );
   });
 
@@ -251,5 +260,51 @@ describe('PostPageService (BLG-02)', () => {
     expect(posts.findOne).toHaveBeenCalledTimes(1);
     expect(comments.findVisibleComments).toHaveBeenCalledTimes(1);
     await pending;
+  });
+
+  describe('the attached itinerary (BLG-13)', () => {
+    const ITINERARY_ID = new Types.ObjectId('6741c0ffee0ddba11ad0b0b0');
+    const summary = {
+      id: ITINERARY_ID.toString(),
+      title: 'Ten days in Egypt',
+      countries: ['EG'],
+      startDate: '2026-12-20',
+      dayCount: 10,
+    };
+
+    it('reads its summary as the public sees it now, and shows it', async () => {
+      const { service, publicItineraries } = setup({
+        post: storedPost({ itineraryId: ITINERARY_ID }),
+        itinerary: summary,
+      });
+
+      const page = await service.findPage(POST_ID, queryOf());
+
+      expect(publicItineraries.findPublicSummary).toHaveBeenCalledWith(
+        ITINERARY_ID.toString(),
+      );
+      expect(page.itinerary).toEqual(summary);
+    });
+
+    it('shows null, and still the post, when the itinerary is not public any more', async () => {
+      const { service } = setup({
+        post: storedPost({ itineraryId: ITINERARY_ID }),
+        itinerary: null,
+      });
+
+      const page = await service.findPage(POST_ID, queryOf());
+
+      expect(page.itinerary).toBeNull();
+      expect(page.title).toBe('Three days in Cairo');
+    });
+
+    it('reads no itinerary for a post without one', async () => {
+      const { service, publicItineraries } = setup();
+
+      const page = await service.findPage(POST_ID, queryOf());
+
+      expect(publicItineraries.findPublicSummary).not.toHaveBeenCalled();
+      expect(page.itinerary).toBeNull();
+    });
   });
 });

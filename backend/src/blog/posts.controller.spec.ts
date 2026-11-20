@@ -6,6 +6,9 @@ import { ROLES_KEY } from '../common/decorators/roles.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Role } from '../common/enums/role.enum';
 
+/** The metadata key of @ApiResponse and its shortcuts, as the other controller specs read it. */
+const API_RESPONSE = 'swagger/apiResponse';
+
 describe('PostsController', () => {
   it('passes the post data and authenticated user id to the service', async () => {
     const post = {
@@ -143,6 +146,57 @@ describe('PostsController', () => {
           PostsController.prototype.remove,
         ),
       ).toEqual([Role.User]);
+    });
+  });
+
+  describe('attachItinerary (BLG-13)', () => {
+    it('passes the post id, the body and the logged-in user to the service', async () => {
+      const post = { id: 'post-1', itineraryId: '6741c0ffee0ddba11ad0b0b0' };
+      const postsService = {
+        attachItinerary: jest.fn().mockResolvedValue(post),
+      };
+      const controller = new PostsController(
+        postsService as unknown as PostsService,
+      );
+      const dto = { itineraryId: '6741c0ffee0ddba11ad0b0b0' };
+
+      expect(
+        await controller.attachItinerary(
+          'post-1',
+          dto,
+          '507f1f77bcf86cd799439011',
+        ),
+      ).toBe(post);
+      expect(postsService.attachItinerary).toHaveBeenCalledWith(
+        'post-1',
+        dto,
+        '507f1f77bcf86cd799439011',
+      );
+    });
+
+    it('is for registered users only', () => {
+      expect(
+        new Reflector().get<Role[] | undefined>(
+          ROLES_KEY,
+          PostsController.prototype.attachItinerary,
+        ),
+      ).toEqual([Role.User]);
+    });
+
+    it('documents 200 and every error status in Swagger', () => {
+      const responses = Reflect.getMetadata(
+        API_RESPONSE,
+        PostsController.prototype.attachItinerary,
+      ) as Record<string, unknown>;
+
+      expect(Object.keys(responses).sort()).toEqual([
+        '200',
+        '400',
+        '401',
+        '403',
+        '404',
+        '409',
+      ]);
     });
   });
 });

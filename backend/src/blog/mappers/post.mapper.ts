@@ -13,6 +13,7 @@ export type PostSource = Pick<
   | 'publishedAt'
   | 'tags'
   | 'images'
+  | 'itineraryId'
   | 'createdAt'
   | 'updatedAt'
 > & { _id: Types.ObjectId };
@@ -30,6 +31,8 @@ export function toPostResponse(post: PostSource): PostResponseDto {
     publishedAt: post.publishedAt?.toISOString(),
     tags: post.tags,
     images: post.images,
+    // BLG-13: a post stored before the field existed has none.
+    itineraryId: post.itineraryId?.toString() ?? null,
     createdAt: post.createdAt.toISOString(),
     updatedAt: post.updatedAt.toISOString(),
   };
@@ -42,6 +45,7 @@ export type MyPostSource = Pick<
   | 'status'
   | 'moderation'
   | 'publishedAt'
+  | 'itineraryId'
   | 'likeCount'
   | 'commentCount'
   | 'createdAt'
@@ -57,6 +61,7 @@ export function toMyPostResponse(post: MyPostSource): MyPostResponseDto {
     // GEN-10: the author still sees a hidden post, and is told it is hidden.
     moderation: post.moderation,
     ...(post.publishedAt && { publishedAt: post.publishedAt.toISOString() }),
+    itineraryId: post.itineraryId?.toString() ?? null,
     createdAt: post.createdAt.toISOString(),
     updatedAt: post.updatedAt.toISOString(),
     likeCount: post.likeCount,

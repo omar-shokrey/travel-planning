@@ -1,6 +1,17 @@
-import { Logger } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { ItineraryModeration } from '../itineraries/enums/itinerary-moderation.enum';
+import { ItineraryVisibility } from '../itineraries/enums/itinerary-visibility.enum';
+import {
+  ONLY_PUBLIC_ITINERARY_MESSAGE,
+  OWN_ITINERARY_ONLY_MESSAGE,
+} from './blog.constants';
 import { PostModeration } from './models/post-moderation.enum';
 import { PostStatus } from './models/post-status.enum';
 import { PostsService } from './posts.service';
@@ -24,6 +35,7 @@ const createService = (posts: unknown, uploads: unknown = uploadsStub()) =>
     engagement() as never,
     engagement() as never,
     uploads as never,
+    {} as never,
   );
 
 describe('PostsService', () => {
@@ -41,6 +53,7 @@ describe('PostsService', () => {
           engagement() as never,
           engagement() as never,
           uploadsStub() as never,
+          {} as never,
         ),
         posts,
         query,
@@ -162,6 +175,7 @@ describe('PostsService', () => {
           comments as never,
           likes as never,
           uploadsStub() as never,
+          {} as never,
         ),
         posts,
         query,
@@ -365,6 +379,7 @@ describe('PostsService', () => {
       engagement() as never,
       engagement() as never,
       uploadsStub() as never,
+      {} as never,
     );
 
     const result = await service.create(
@@ -391,6 +406,7 @@ describe('PostsService', () => {
       publishedAt: undefined,
       tags: [],
       images: [],
+      itineraryId: null,
       createdAt: '2026-11-15T10:00:00.000Z',
       updatedAt: '2026-11-15T10:00:00.000Z',
     });
@@ -425,6 +441,7 @@ describe('PostsService', () => {
       engagement() as never,
       engagement() as never,
       uploadsStub() as never,
+      {} as never,
     );
 
     const result = await service.create(
@@ -455,6 +472,7 @@ describe('PostsService', () => {
       publishedAt: '2026-11-15T10:00:00.000Z',
       tags: ['cairo', 'egypt'],
       images: [],
+      itineraryId: null,
       createdAt: '2026-11-15T10:00:00.000Z',
       updatedAt: '2026-11-15T10:00:00.000Z',
     });
@@ -492,6 +510,7 @@ describe('PostsService', () => {
         engagement() as never,
         engagement() as never,
         uploadsStub() as never,
+        {} as never,
       );
       return { posts, sort, skip, limit, service };
     }
@@ -539,6 +558,7 @@ describe('PostsService', () => {
           title: 'Draft trip ideas',
           status: PostStatus.Draft,
           moderation: PostModeration.Visible,
+          itineraryId: null,
           createdAt: '2026-11-15T10:00:00.000Z',
           updatedAt: '2026-11-15T10:00:00.000Z',
           likeCount: 0,
@@ -614,6 +634,7 @@ describe('PostsService', () => {
         publishedAt: undefined,
         tags: [],
         images: [],
+        itineraryId: null,
         createdAt: '2026-11-15T10:00:00.000Z',
         updatedAt: '2026-11-15T10:00:00.000Z',
       });
@@ -825,6 +846,7 @@ describe('PostsService', () => {
         comments as never,
         likes as never,
         uploadsStub() as never,
+        {} as never,
       );
 
       await service.remove(postId, userId);
@@ -897,6 +919,7 @@ describe('PostsService', () => {
         comments as never,
         likes as never,
         uploads as never,
+        {} as never,
       );
 
       await expect(service.remove(postId, userId)).resolves.toBeUndefined();
@@ -925,6 +948,7 @@ describe('PostsService', () => {
         comments as never,
         likes as never,
         uploads as never,
+        {} as never,
       );
 
       await expect(service.remove(postId, userId)).resolves.toBeUndefined();
@@ -963,6 +987,263 @@ describe('PostsService', () => {
 
       expect(posts.findByIdAndDelete).not.toHaveBeenCalled();
       expect(uploads.deleteImage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('attachItinerary (BLG-13)', () => {
+    const AUTHOR = '507f1f77bcf86cd799439011';
+    const POST_ID = '6740f1c2a4b5c6d7e8f90abc';
+    const ITINERARY_ID = '6741c0ffee0ddba11ad0b0b0';
+    const OTHER_ITINERARY_ID = '6741c0ffee0ddba11ad0b0b1';
+
+    /** A post of AUTHOR, with `attached` as its itinerary (or none). */
+    const storedPost = (attached?: string) => ({
+      _id: new Types.ObjectId(POST_ID),
+      authorId: new Types.ObjectId(AUTHOR),
+      title: 'Three days in Cairo',
+      body: 'Body',
+      status: PostStatus.Draft,
+      tags: [],
+      images: [],
+      ...(attached && { itineraryId: new Types.ObjectId(attached) }),
+      createdAt: new Date('2026-11-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-11-15T10:00:00.000Z'),
+    });
+
+    const setup = (
+      options: {
+        post?: ReturnType<typeof storedPost> | null;
+        itinerary?: { visibility: string; moderation: string };
+        itineraryError?: Error;
+        updated?: unknown;
+      } = {},
+    ) => {
+      const post = options.post === undefined ? storedPost() : options.post;
+      const findOneAndUpdate = jest.fn(
+        (
+          _filter: unknown,
+          update: Record<string, Record<string, unknown>>,
+        ) => ({
+          exec: () =>
+            Promise.resolve(
+              options.updated !== undefined
+                ? options.updated
+                : {
+                    ...post,
+                    itineraryId: update.$set?.itineraryId,
+                    updatedAt: new Date('2026-11-16T10:00:00.000Z'),
+                  },
+            ),
+        }),
+      );
+      const posts = {
+        findById: jest.fn().mockResolvedValue(post),
+        findOneAndUpdate,
+      };
+      const itineraries = {
+        findOwnedOrThrow: options.itineraryError
+          ? jest.fn().mockRejectedValue(options.itineraryError)
+          : jest.fn().mockResolvedValue(
+              options.itinerary ?? {
+                visibility: ItineraryVisibility.Public,
+                moderation: ItineraryModeration.Visible,
+              },
+            ),
+      };
+      const service = new PostsService(
+        posts as never,
+        engagement() as never,
+        engagement() as never,
+        uploadsStub() as never,
+        itineraries as never,
+      );
+      return { service, posts, itineraries, findOneAndUpdate };
+    };
+
+    it("attaches the author's own public itinerary in one update by id and author", async () => {
+      const { service, itineraries, findOneAndUpdate } = setup();
+
+      const response = await service.attachItinerary(
+        POST_ID,
+        { itineraryId: ITINERARY_ID },
+        AUTHOR,
+      );
+
+      expect(itineraries.findOwnedOrThrow).toHaveBeenCalledWith(
+        ITINERARY_ID,
+        AUTHOR,
+        OWN_ITINERARY_ONLY_MESSAGE,
+      );
+      expect(findOneAndUpdate).toHaveBeenCalledWith(
+        {
+          _id: new Types.ObjectId(POST_ID),
+          authorId: new Types.ObjectId(AUTHOR),
+        },
+        { $set: { itineraryId: new Types.ObjectId(ITINERARY_ID) } },
+        { returnDocument: 'after' },
+      );
+      expect(response.itineraryId).toBe(ITINERARY_ID);
+    });
+
+    it('replaces an itinerary attached before', async () => {
+      const { service, findOneAndUpdate } = setup({
+        post: storedPost(OTHER_ITINERARY_ID),
+      });
+
+      const response = await service.attachItinerary(
+        POST_ID,
+        { itineraryId: ITINERARY_ID },
+        AUTHOR,
+      );
+
+      expect(findOneAndUpdate).toHaveBeenCalledTimes(1);
+      expect(response.itineraryId).toBe(ITINERARY_ID);
+    });
+
+    it('removes the itinerary with null, without reading it: it may be gone or private', async () => {
+      const { service, itineraries, findOneAndUpdate } = setup({
+        post: storedPost(ITINERARY_ID),
+      });
+
+      const response = await service.attachItinerary(
+        POST_ID,
+        { itineraryId: null },
+        AUTHOR,
+      );
+
+      expect(itineraries.findOwnedOrThrow).not.toHaveBeenCalled();
+      expect(findOneAndUpdate).toHaveBeenCalledWith(
+        expect.anything(),
+        { $unset: { itineraryId: 1 } },
+        { returnDocument: 'after' },
+      );
+      expect(response.itineraryId).toBeNull();
+    });
+
+    it('changes nothing when the same itinerary is attached again', async () => {
+      const { service, findOneAndUpdate } = setup({
+        post: storedPost(ITINERARY_ID),
+      });
+
+      const response = await service.attachItinerary(
+        POST_ID,
+        { itineraryId: ITINERARY_ID },
+        AUTHOR,
+      );
+
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+      expect(response.itineraryId).toBe(ITINERARY_ID);
+      expect(response.updatedAt).toBe('2026-11-15T10:00:00.000Z');
+    });
+
+    it('changes nothing when removing from a post that has none', async () => {
+      const { service, findOneAndUpdate } = setup();
+
+      const response = await service.attachItinerary(
+        POST_ID,
+        { itineraryId: null },
+        AUTHOR,
+      );
+
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+      expect(response.itineraryId).toBeNull();
+    });
+
+    it('answers 404 for a missing post and reads no itinerary', async () => {
+      const { service, itineraries } = setup({ post: null });
+
+      await expect(
+        service.attachItinerary(POST_ID, { itineraryId: ITINERARY_ID }, AUTHOR),
+      ).rejects.toThrow(new NotFoundException('Post not found'));
+      expect(itineraries.findOwnedOrThrow).not.toHaveBeenCalled();
+    });
+
+    it("answers 403 for another user's post and reads no itinerary", async () => {
+      const { service, itineraries } = setup();
+
+      await expect(
+        service.attachItinerary(
+          POST_ID,
+          { itineraryId: ITINERARY_ID },
+          new Types.ObjectId().toString(),
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(itineraries.findOwnedOrThrow).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['missing', new NotFoundException('Itinerary not found')],
+      ["another user's", new ForbiddenException(OWN_ITINERARY_ONLY_MESSAGE)],
+    ])(
+      'passes on the answer for a %s itinerary and writes nothing',
+      async (_name, error) => {
+        const { service, findOneAndUpdate } = setup({ itineraryError: error });
+
+        await expect(
+          service.attachItinerary(
+            POST_ID,
+            { itineraryId: ITINERARY_ID },
+            AUTHOR,
+          ),
+        ).rejects.toBe(error);
+        expect(findOneAndUpdate).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      [
+        'a private itinerary',
+        ItineraryVisibility.Private,
+        ItineraryModeration.Visible,
+      ],
+      [
+        'a public itinerary an admin hid',
+        ItineraryVisibility.Public,
+        ItineraryModeration.Hidden,
+      ],
+      [
+        'a private itinerary an admin hid',
+        ItineraryVisibility.Private,
+        ItineraryModeration.Hidden,
+      ],
+    ])(
+      'answers 409 for %s and writes nothing',
+      async (_name, visibility, moderation) => {
+        const { service, findOneAndUpdate } = setup({
+          itinerary: { visibility, moderation },
+        });
+
+        const error: unknown = await service
+          .attachItinerary(POST_ID, { itineraryId: ITINERARY_ID }, AUTHOR)
+          .catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(ConflictException);
+        expect((error as Error).message).toBe(ONLY_PUBLIC_ITINERARY_MESSAGE);
+        expect(findOneAndUpdate).not.toHaveBeenCalled();
+      },
+    );
+
+    it('answers 409, and keeps the link, when the attached itinerary is sent again after it became private', async () => {
+      const { service, findOneAndUpdate } = setup({
+        post: storedPost(ITINERARY_ID),
+        itinerary: {
+          visibility: ItineraryVisibility.Private,
+          moderation: ItineraryModeration.Visible,
+        },
+      });
+
+      await expect(
+        service.attachItinerary(POST_ID, { itineraryId: ITINERARY_ID }, AUTHOR),
+      ).rejects.toThrow(new ConflictException(ONLY_PUBLIC_ITINERARY_MESSAGE));
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the post was deleted between the check and the update', async () => {
+      const { service } = setup({ updated: null });
+
+      await expect(
+        service.attachItinerary(POST_ID, { itineraryId: ITINERARY_ID }, AUTHOR),
+      ).rejects.toThrow(new NotFoundException('Post not found'));
     });
   });
 });

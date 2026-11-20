@@ -12,11 +12,13 @@ import {
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
+  ApiConflictResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -29,6 +31,7 @@ import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Role } from '../common/enums/role.enum';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
+import { AttachItineraryDto } from './dto/attach-itinerary.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import { MyPostResponseDto } from './dto/my-post-response.dto';
 import { PostResponseDto } from './dto/post-response.dto';
@@ -131,6 +134,43 @@ export class PostsController {
     @CurrentUser('id') userId: string,
   ): Promise<PostResponseDto> {
     return this.posts.update(id, dto, userId);
+  }
+
+  @Patch(':id/itinerary')
+  @Roles(Role.User)
+  @ApiOperation({
+    summary: 'Attach an itinerary to your own post (BLG-13)',
+    description:
+      'Bonus. Registered users only, on their own post, draft or published. Send `{ "itineraryId": "<id>" }` to attach one of your own itineraries (it replaces any itinerary attached before) or `{ "itineraryId": null }` to remove it; the key is required. Only a public itinerary that an admin has not hidden can be attached, because other people read the post. Attaching the itinerary already attached changes nothing. The post page (`GET /api/posts/{id}`) then shows a summary of it (`itinerary`), and only while it is still public, not hidden and its owner is active; otherwise `itinerary` is `null`. Returns the post with `itineraryId`.',
+  })
+  @ApiOkResponse({
+    description: 'The itinerary was attached or removed',
+    type: PostResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'The post id is malformed, `itineraryId` is missing or neither an id nor `null`, or the body has another field',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Not logged in, or the access token is invalid or expired',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The caller is not a registered user, the post belongs to another user, or the itinerary belongs to another user',
+  })
+  @ApiNotFoundResponse({
+    description: 'The post or the itinerary does not exist',
+  })
+  @ApiConflictResponse({
+    description:
+      'The itinerary is private or hidden by an admin: only a public itinerary can be attached',
+  })
+  attachItinerary(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: AttachItineraryDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<PostResponseDto> {
+    return this.posts.attachItinerary(id, dto, userId);
   }
 
   @Delete(':id')
