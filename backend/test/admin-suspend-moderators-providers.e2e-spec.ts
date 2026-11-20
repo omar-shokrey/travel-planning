@@ -4,7 +4,7 @@ import { Test } from '@nestjs/testing';
 import { hash } from 'bcrypt';
 import { DateTime } from 'luxon';
 import { Types, type Model } from 'mongoose';
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import request from 'supertest';
 import './support/auth-env';
 import {
@@ -451,9 +451,14 @@ describe('Suspend moderators and deactivate providers (e2e, ACC-15)', () => {
     /** A `YYYY-MM-DD` date this many days from today (UTC). */
     const dayFromToday = (days: number): string =>
       DateTime.utc().plus({ days }).toISODate() ?? '';
-    /** Upper-case letters only: never a 3-letter official airport code. */
+    /**
+     * Six random upper-case letters (26^6 values): never a 3-letter official
+     * airport code, and not one another run uses.
+     */
     const airportCode = () =>
-      `Z${randomUUID().replaceAll('-', '').slice(0, 5).toUpperCase().replace(/[0-9]/g, 'Q')}`;
+      Array.from({ length: 6 }, () =>
+        String.fromCharCode(65 + randomInt(26)),
+      ).join('');
     const otherHotelId = new Types.ObjectId();
     const otherAirlineId = new Types.ObjectId();
     const futureFlightId = new Types.ObjectId();
@@ -640,7 +645,12 @@ describe('Suspend moderators and deactivate providers (e2e, ACC-15)', () => {
       // a second airline, a future and a past flight of this airline, and a
       // future flight of the other one.
       const from = airportCode();
-      const to = airportCode();
+      let to = airportCode();
+      while (to === from) {
+        to = airportCode();
+      }
+      // Recorded before the insert, so cleanup finds whatever was saved.
+      createdAirportCodes.push(from, to);
       await airports.insertMany(
         [from, to].map((code) => ({
           _id: code,
@@ -650,7 +660,7 @@ describe('Suspend moderators and deactivate providers (e2e, ACC-15)', () => {
           timeZone: 'UTC',
         })),
       );
-      createdAirportCodes.push(from, to);
+      createdAirlineIds.push(otherAirlineId);
       await airlines.insertMany([
         {
           _id: otherAirlineId,
@@ -660,7 +670,6 @@ describe('Suspend moderators and deactivate providers (e2e, ACC-15)', () => {
           active: true,
         },
       ]);
-      createdAirlineIds.push(otherAirlineId);
       const flight = (
         _id: Types.ObjectId,
         owner: Types.ObjectId,
@@ -678,6 +687,7 @@ describe('Suspend moderators and deactivate providers (e2e, ACC-15)', () => {
         status: FlightStatus.Scheduled,
         cabins: [],
       });
+      createdFlightIds.push(futureFlightId, pastFlightId, otherAirlineFlightId);
       await flights.insertMany([
         flight(futureFlightId, airlineId, new Date(Date.now() + 20 * DAY_MS)),
         flight(pastFlightId, airlineId, new Date(Date.now() - 20 * DAY_MS)),
@@ -687,7 +697,6 @@ describe('Suspend moderators and deactivate providers (e2e, ACC-15)', () => {
           new Date(Date.now() + 10 * DAY_MS),
         ),
       ]);
-      createdFlightIds.push(futureFlightId, pastFlightId, otherAirlineFlightId);
 
       const onFuture = { flightId: futureFlightId, airlineId };
       const travellerEBooking = flightBooking(
