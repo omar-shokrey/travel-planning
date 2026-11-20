@@ -49,3 +49,6 @@ export const MODERATOR_ROLE_NAMES: Readonly<
 
 /** ACC-02: the subject of the email with the verification link. */
 export const EMAIL_VERIFICATION_SUBJECT = 'Verify your email address';
+
+/** ACC-07: the subject of the email with the password reset link. */
+export const PASSWORD_RESET_SUBJECT = 'Reset your password';

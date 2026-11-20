@@ -4,6 +4,7 @@ import {
   MODERATOR_INVITATION_SUBJECT,
   MODERATOR_ROLE_NAMES,
   NOTIFICATION_EMAIL_SUBJECTS,
+  PASSWORD_RESET_SUBJECT,
 } from './email.constants';
 import type { NotificationType } from './enums/notification-type.enum';
 
@@ -113,6 +114,43 @@ export function emailVerificationEmail(
       '',
       `The link expires in ${request.expiresInHours} hours. You can book once your email address is verified.`,
       'If you did not register, ignore this email.',
+      '',
+      'Travel Platform',
+    ].join('\n'),
+  };
+}
+
+/** ACC-07: who a password reset email is for, and the token of its link. */
+export interface PasswordResetRequest {
+  name: string;
+  email: string;
+  /** The one-time token. It goes into the link and nowhere else. */
+  token: string;
+  /** How long the link works, in minutes, as the auth module set it. */
+  expiresInMinutes: number;
+}
+
+/**
+ * ACC-07, GEN-01-B: the email with the password reset link. Fixed subject,
+ * plain text: the link to the frontend page `/reset-password`, how long it
+ * works, that it works once, and that nothing changed if the reader did not
+ * ask for it. It never holds a password.
+ */
+export function passwordResetEmail(
+  request: Pick<PasswordResetRequest, 'name' | 'token' | 'expiresInMinutes'>,
+  frontendUrl: string,
+): EmailContent {
+  return {
+    subject: PASSWORD_RESET_SUBJECT,
+    text: [
+      `Hello ${request.name},`,
+      '',
+      'Someone asked to reset the password of your Travel Platform account. Open this link to choose a new password:',
+      '',
+      frontendLink(frontendUrl, 'reset-password', request.token),
+      '',
+      `This link expires in ${request.expiresInMinutes} minutes and works once.`,
+      'If you did not ask for this, ignore this email: your password has not changed.',
       '',
       'Travel Platform',
     ].join('\n'),

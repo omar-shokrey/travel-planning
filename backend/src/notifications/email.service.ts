@@ -13,6 +13,8 @@ import {
   type InvitedModerator,
   moderatorInvitationEmail,
   notificationEmail,
+  type PasswordResetRequest,
+  passwordResetEmail,
 } from './email-templates';
 import { MAIL_TRANSPORT, MAX_EMAILS_IN_FLIGHT } from './email.constants';
 import type { NotificationType } from './enums/notification-type.enum';
@@ -45,8 +47,9 @@ function errorCode(error: unknown): string {
 }
 
 /**
- * GEN-01-B: sends the email notifications, the moderator invitations and the
- * verification links (ACC-02) through the SMTP transport. When SMTP_HOST is empty there is no transport:
+ * GEN-01-B: sends the email notifications, the moderator invitations, the
+ * verification links (ACC-02) and the password reset links (ACC-07) through
+ * the SMTP transport. When SMTP_HOST is empty there is no transport:
  * `enabled` is false and every method returns at once, sending nothing.
  *
  * Sending never throws and is bounded: at most MAX_EMAILS_IN_FLIGHT emails at
@@ -118,6 +121,17 @@ export class EmailService implements OnApplicationShutdown {
         },
       ],
       'email verification',
+    );
+  }
+
+  /**
+   * ACC-07: the email with the password reset link. The token is in the link
+   * only; it is never logged.
+   */
+  async sendPasswordReset(request: PasswordResetRequest): Promise<void> {
+    await this.sendAll(
+      [{ to: request.email, ...passwordResetEmail(request, this.loginUrl()) }],
+      'password reset',
     );
   }
 
