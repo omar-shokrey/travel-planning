@@ -756,6 +756,82 @@ describe('HotelsService.findNamesByIds (HTL-20)', () => {
   });
 });
 
+describe('HotelsService.findPublicSummaries (BON-02)', () => {
+  const build = (found: unknown[]) => {
+    const exec = jest.fn().mockResolvedValue(found);
+    const chain = {
+      select: jest.fn(),
+      slice: jest.fn(),
+      lean: jest.fn(),
+      exec,
+    };
+    chain.select.mockReturnValue(chain);
+    chain.slice.mockReturnValue(chain);
+    chain.lean.mockReturnValue(chain);
+    const hotelsModel = { find: jest.fn(() => chain) };
+    const service = new HotelsService(
+      hotelsModel as unknown as Model<Hotel>,
+      {} as Model<Room>,
+      {} as Model<City>,
+      {} as UsersService,
+      {} as UploadsService,
+    );
+    return { service, hotelsModel, chain };
+  };
+
+  it('reads the active hotels among the ids in one query, each id once, with only the first photo', async () => {
+    const a = new Types.ObjectId();
+    const b = new Types.ObjectId();
+    const { service, hotelsModel, chain } = build([]);
+
+    await service.findPublicSummaries([a, b.toString(), a]);
+
+    expect(hotelsModel.find).toHaveBeenCalledTimes(1);
+    expect(hotelsModel.find).toHaveBeenCalledWith({
+      _id: { $in: [a.toString(), b.toString()] },
+      active: true,
+    });
+    expect(chain.select).toHaveBeenCalledWith(
+      'name cityId countryCode starClass averageRating ratingCount photos',
+    );
+    expect(chain.slice).toHaveBeenCalledWith('photos', 1);
+  });
+
+  it('maps each hotel by id to its public card, with the first photo or null', async () => {
+    const a = new Types.ObjectId();
+    const b = new Types.ObjectId();
+    const card = {
+      name: 'Nile Hotel',
+      cityId: 'EG-CAI',
+      countryCode: 'EG',
+      starClass: 4,
+      averageRating: 4.5,
+      ratingCount: 12,
+    };
+    const { service } = build([
+      { _id: a, ...card, photos: ['nile.jpg'] },
+      { _id: b, ...card, photos: [] },
+    ]);
+
+    const cards = await service.findPublicSummaries([a, b]);
+
+    expect(cards.get(a.toString())).toEqual({
+      id: a.toString(),
+      ...card,
+      firstPhoto: 'nile.jpg',
+    });
+    expect(cards.get(b.toString())?.firstPhoto).toBeNull();
+  });
+
+  it('reads nothing for no ids or ids that are not valid', async () => {
+    const { service, hotelsModel } = build([]);
+
+    expect((await service.findPublicSummaries([])).size).toBe(0);
+    expect((await service.findPublicSummaries(['not-an-id'])).size).toBe(0);
+    expect(hotelsModel.find).not.toHaveBeenCalled();
+  });
+});
+
 describe('HotelsService.setRating (HTL-23)', () => {
   it('overwrites the count and the average of the hotel, never adds to them', async () => {
     const exec = jest.fn().mockResolvedValue({ matchedCount: 1 });

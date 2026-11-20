@@ -34,6 +34,23 @@ const ROOM_NOT_FOUND_MESSAGE = 'Room not found';
 const ROOM_AVAILABILITY_CONFLICT_MESSAGE =
   'The room availability range overlaps an existing range';
 
+/**
+ * BON-02: what a favourites list shows of a hotel: the fields of its public
+ * card, and only its first photo. Never whether it is active (only active
+ * hotels have one) or who moderates it.
+ */
+export interface HotelPublicSummary {
+  id: string;
+  name: string;
+  cityId: string;
+  countryCode: string;
+  starClass: number;
+  averageRating: number;
+  ratingCount: number;
+  /** The file name of the first photo, or `null` when it has none. */
+  firstPhoto: string | null;
+}
+
 @Injectable()
 export class HotelsService {
   constructor(
@@ -322,6 +339,46 @@ export class HotelsService {
       .lean()
       .exec();
     return new Map(found.map((hotel) => [hotel._id.toString(), hotel.name]));
+  }
+
+  /**
+   * BON-02: the public card of each of these hotels that is active now, read
+   * in one query and keyed by hotel id. A missing or deactivated hotel
+   * (ACC-15) is simply not in the map. Read only; never exposed by a
+   * controller.
+   */
+  async findPublicSummaries(
+    ids: readonly (string | Types.ObjectId)[],
+  ): Promise<Map<string, HotelPublicSummary>> {
+    const unique = [...new Set(ids.map((id) => id.toString()))].filter((id) =>
+      isValidObjectId(id),
+    );
+    if (unique.length === 0) {
+      return new Map();
+    }
+    const found = await this.hotels
+      .find({ _id: { $in: unique }, active: true })
+      .select(
+        'name cityId countryCode starClass averageRating ratingCount photos',
+      )
+      .slice('photos', 1)
+      .lean()
+      .exec();
+    return new Map(
+      found.map((hotel) => [
+        hotel._id.toString(),
+        {
+          id: hotel._id.toString(),
+          name: hotel.name,
+          cityId: hotel.cityId,
+          countryCode: hotel.countryCode,
+          starClass: hotel.starClass,
+          averageRating: hotel.averageRating,
+          ratingCount: hotel.ratingCount,
+          firstPhoto: hotel.photos[0] ?? null,
+        },
+      ]),
+    );
   }
 
   /**
