@@ -21,6 +21,7 @@ import { AirlinesService } from '../flights/airlines.service';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service';
 import { HotelsService } from '../hotels/hotels.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
+import { EmailService } from '../notifications/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
   paginate,
@@ -66,6 +67,8 @@ export class AdminService {
     private readonly airlines: AirlinesService,
     private readonly hotels: HotelsService,
     private readonly notifications: NotificationsService,
+    // GEN-01-B: the invitation email of a new moderator.
+    private readonly email: EmailService,
     private readonly audit: AuditService,
     // ACC-15: the travellers with a booking of a deactivated provider.
     private readonly flightBookings: FlightBookingsService,
@@ -77,6 +80,8 @@ export class AdminService {
    * provider, with a temporary password chosen by the admin (ACC-13). The
    * provider type follows the role, and the provider must exist; otherwise
    * 400 on `providerId`. An email that is already registered answers 409.
+   * Once the account is saved, the moderator is invited by email (GEN-01-B):
+   * their role and where to log in, never the password.
    * The moderator must change the password at the first login (ACC-08).
    * The creation is recorded in the audit log (GEN-07).
    */
@@ -105,6 +110,18 @@ export class AdminService {
       targetId: moderator._id,
       details: `${dto.role} of ${providerType} ${dto.providerId}`,
     });
+    // GEN-01-B: the invitation, without the password, once the account is
+    // saved. It runs in the background: a slow or failed email never delays
+    // or fails the creation (it is logged by EmailService).
+    this.email.runInBackground(
+      () =>
+        this.email.sendModeratorInvitation({
+          name: moderator.name,
+          email: moderator.email,
+          role: dto.role,
+        }),
+      'moderator invitation',
+    );
     return toUserResponse(moderator);
   }
 

@@ -1,9 +1,15 @@
 import { Logger, NotFoundException } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
+import type { EnvironmentVariables } from '../config/env.validation';
 import { plainToInstance } from 'class-transformer';
 import { Types, type Model } from 'mongoose';
+import { UserStatus } from '../common/enums/user-status.enum';
+import type { User } from '../users/models/user.schema';
 import { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
+import { EmailService } from './email.service';
 import { NotificationLinkType } from './enums/notification-link-type.enum';
 import { NotificationType } from './enums/notification-type.enum';
+import type { MailTransport, OutgoingMail } from './mail-transport';
 import type { Notification } from './models/notification.schema';
 import { NOTIFICATION_NOT_FOUND_MESSAGE } from './notifications.constants';
 import { NotificationsService } from './notifications.service';
@@ -45,7 +51,32 @@ const query = (value: unknown): QueryChain => {
   return chain;
 };
 
-function setup() {
+const config = {
+  get: (name: string) =>
+    ({
+      FRONTEND_URL: 'http://localhost:3000',
+      MAIL_FROM: 'Travel Platform <no-reply@example.com>',
+    })[name],
+} as unknown as ConfigService<EnvironmentVariables, true>;
+
+/**
+ * The service with a fake notifications model, a fake users model whose
+ * `find` answers `recipients`, and a real EmailService on `transport` (null:
+ * email switched off).
+ */
+function setup(
+  transport: MailTransport | null = null,
+  recipients: unknown[] = [],
+) {
+  const select = jest.fn().mockReturnThis();
+  const users = {
+    find: jest.fn((..._args: unknown[]) => ({
+      select,
+      lean: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue(recipients),
+    })),
+  };
+  const email = new EmailService(transport, config);
   const model = {
     insertMany: jest.fn().mockResolvedValue([]),
     find: jest.fn(() => query([])),
@@ -56,8 +87,20 @@ function setup() {
   };
   const service = new NotificationsService(
     model as unknown as Model<Notification>,
+    users as unknown as Model<User>,
+    email,
   );
-  return { model, service };
+  return { model, service, users, select, email };
+}
+
+/** A transport that records every email. */
+function fakeTransport() {
+  const sent: OutgoingMail[] = [];
+  const sendMail = jest.fn((mail: OutgoingMail) => {
+    sent.push(mail);
+    return Promise.resolve({});
+  });
+  return { sent, sendMail };
 }
 
 const listQuery = (fields: Record<string, unknown> = {}) =>
@@ -288,6 +331,188 @@ describe('NotificationsService', () => {
         { userId: new Types.ObjectId(USER_ID), readAt: null },
         { $set: { readAt: expect.any(Date) } },
       );
+    });
+  });
+
+  describe('email (GEN-01-B)', () => {
+    let error: jest.SpyInstance;
+    let warn: jest.SpyInstance;
+    beforeEach(() => {
+      error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    });
+    afterEach(() => {
+      error.mockRestore();
+      warn.mockRestore();
+    });
+
+    const people = [
+      { _id: new Types.ObjectId(USER_ID), email: 'a@example.com', name: 'Ann' },
+      {
+        _id: new Types.ObjectId(OTHER_USER_ID),
+        email: 'b@example.com',
+        name: 'Ben',
+      },
+    ];
+
+    it('still stores the in-app notification, and emails each looked-up user once', async () => {
+      const { sent, sendMail } = fakeTransport();
+      const { model, service, email } = setup({ sendMail }, people);
+
+      await service.notifyMany(
+        [USER_ID, OTHER_USER_ID, USER_ID],
+        NotificationType.FlightChanged,
+        'Flight MS777 now leaves at 10:00.',
+      );
+      await email.whenIdle();
+
+      expect(model.insertMany).toHaveBeenCalledTimes(1);
+      expect(sent.map((mail) => mail.to)).toEqual([
+        'a@example.com',
+        'b@example.com',
+      ]);
+      expect(sent[0]).toMatchObject({
+        subject: 'Your flight has changed',
+        text: expect.stringContaining(
+          'Flight MS777 now leaves at 10:00.',
+        ) as string,
+      });
+    });
+
+    it('looks the recipients up with ONE query: their ids, not deactivated, address and name only', async () => {
+      const { sendMail } = fakeTransport();
+      const { service, users, select, email } = setup({ sendMail }, people);
+
+      await service.notifyMany(
+        [USER_ID, OTHER_USER_ID],
+        NotificationType.Refund,
+        'Refund.',
+      );
+      await email.whenIdle();
+
+      expect(users.find).toHaveBeenCalledTimes(1);
+      expect(users.find).toHaveBeenCalledWith({
+        _id: {
+          $in: [new Types.ObjectId(USER_ID), new Types.ObjectId(OTHER_USER_ID)],
+        },
+        status: { $ne: UserStatus.Deactivated },
+      });
+      expect(select).toHaveBeenCalledWith('email name');
+    });
+
+    it('skips a deactivated account (ACC-12): the query leaves it out, so it gets no email', async () => {
+      const { sent, sendMail } = fakeTransport();
+      // The deactivated user is not among the accounts the query returns.
+      const { service, email } = setup({ sendMail }, [people[0]]);
+
+      await service.notifyMany(
+        [USER_ID, OTHER_USER_ID],
+        NotificationType.Refund,
+        'Refund.',
+      );
+      await email.whenIdle();
+
+      expect(sent.map((mail) => mail.to)).toEqual(['a@example.com']);
+    });
+
+    it('still emails a suspended account, which is told about its suspension', async () => {
+      const { sent, sendMail } = fakeTransport();
+      const { service, users, email } = setup({ sendMail }, [people[0]]);
+
+      await service.notify(
+        USER_ID,
+        NotificationType.AccountSuspended,
+        'Your account is suspended.',
+      );
+      await email.whenIdle();
+
+      const filter = users.find.mock.calls[0][0] as { status: unknown };
+      expect(filter.status).toEqual({ $ne: UserStatus.Deactivated });
+      expect(filter.status).not.toEqual({ $ne: UserStatus.Suspended });
+      expect(sent).toHaveLength(1);
+    });
+
+    it('never throws when the email fails, and the in-app notification stays', async () => {
+      const sendMail = jest.fn().mockRejectedValue(new Error('down'));
+      const { model, service, email } = setup({ sendMail }, people);
+
+      await expect(
+        service.notify(USER_ID, NotificationType.Refund, 'Refund.'),
+      ).resolves.toBeUndefined();
+      await email.whenIdle();
+
+      expect(model.insertMany).toHaveBeenCalledTimes(1);
+      expect(sendMail).toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('never throws when the user lookup fails, and logs it', async () => {
+      const { sendMail } = fakeTransport();
+      const { service, users, email } = setup({ sendMail }, people);
+      users.find.mockImplementationOnce(() => {
+        throw new Error('db down');
+      });
+
+      await expect(
+        service.notify(USER_ID, NotificationType.Refund, 'Refund.'),
+      ).resolves.toBeUndefined();
+      await email.whenIdle();
+
+      expect(sendMail).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(
+        'Could not email the "refund" notification (unknown error)',
+      );
+    });
+
+    it('still tries the email when the in-app insert fails', async () => {
+      const { sent, sendMail } = fakeTransport();
+      const { model, service, email } = setup({ sendMail }, people);
+      model.insertMany.mockRejectedValueOnce(new Error('insert failed'));
+
+      await service.notify(USER_ID, NotificationType.Refund, 'Refund.');
+      await email.whenIdle();
+
+      expect(sent).toHaveLength(2);
+      expect(error).toHaveBeenCalledWith(
+        'Could not send a "refund" notification to 1 user(s)',
+        expect.any(String),
+      );
+    });
+
+    it('does not make the caller wait for the mail server', async () => {
+      let release: () => void = () => undefined;
+      const sendMail = jest.fn(
+        () => new Promise<void>((resolve) => (release = resolve)),
+      );
+      const { service, email } = setup({ sendMail }, [people[0]]);
+
+      await service.notify(USER_ID, NotificationType.Refund, 'Refund.');
+
+      // notify has returned while the email is still being sent.
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(sendMail).toHaveBeenCalledTimes(1);
+      release();
+      await email.whenIdle();
+    });
+
+    it('looks nobody up and sends nothing when email is switched off', async () => {
+      const { model, service, users } = setup(null, people);
+
+      await service.notify(USER_ID, NotificationType.Refund, 'Refund.');
+
+      expect(model.insertMany).toHaveBeenCalledTimes(1);
+      expect(users.find).not.toHaveBeenCalled();
+    });
+
+    it('sends no email for an empty list', async () => {
+      const { sendMail } = fakeTransport();
+      const { service, users, email } = setup({ sendMail }, people);
+
+      await service.notifyMany([], NotificationType.Refund, 'Refund.');
+      await email.whenIdle();
+
+      expect(users.find).not.toHaveBeenCalled();
+      expect(sendMail).not.toHaveBeenCalled();
     });
   });
 });
