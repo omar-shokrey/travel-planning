@@ -1375,6 +1375,31 @@ describe('ItinerariesService', () => {
     });
   });
 
+  describe('markOwnerDeactivated (ACC-12)', () => {
+    it('flags every itinerary of the owner only, in one update that keeps updatedAt', async () => {
+      const exec = jest.fn().mockResolvedValue({ modifiedCount: 2 });
+      const spy = jest
+        .spyOn(ItineraryModel, 'updateMany')
+        .mockReturnValue({ exec } as never);
+
+      await expect(
+        service.markOwnerDeactivated(ownerId),
+      ).resolves.toBeUndefined();
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith(
+        { ownerId: new Types.ObjectId(ownerId) },
+        { $set: { authorDeactivated: true } },
+        { timestamps: false },
+      );
+      const [filter] = spy.mock.calls[0] as unknown as [
+        Record<string, unknown>,
+      ];
+      expect(Object.keys(filter)).toEqual(['ownerId']);
+      expect(exec).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('findEntityOrThrow', () => {
     it('returns the stored itinerary for other services', async () => {
       const itinerary = stored();
