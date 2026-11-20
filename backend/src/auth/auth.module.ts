@@ -7,14 +7,17 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { FlightBookingsModule } from '../flight-bookings/flight-bookings.module';
 import { HotelBookingsModule } from '../hotel-bookings/hotel-bookings.module';
 import { ItinerariesModule } from '../itineraries/itineraries.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { UsersModule } from '../users/users.module';
 import { AccountDeactivationController } from './account-deactivation.controller';
 import { AccountDeactivationService } from './account-deactivation.service';
 import { AuthCookiesService } from './auth-cookies.service';
+import { AuthTokenStoreService } from './auth-token-store.service';
 import { AuthTokensService } from './auth-tokens.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { AuthToken, AuthTokenSchema } from './models/auth-token.schema';
 import { Session, SessionSchema } from './models/session.schema';
 import { SessionsService } from './sessions.service';
 
@@ -23,7 +26,11 @@ import { SessionsService } from './sessions.service';
   // uses its own.
   imports: [
     JwtModule.register({}),
-    MongooseModule.forFeature([{ name: Session.name, schema: SessionSchema }]),
+    MongooseModule.forFeature([
+      { name: Session.name, schema: SessionSchema },
+      // ACC-02, ACC-07: the one-time tokens sent by email.
+      { name: AuthToken.name, schema: AuthTokenSchema },
+    ]),
     UsersModule,
     // ACC-12: deactivating your own account. None of these four modules
     // imports AuthModule (only AppModule and AdminModule do), so no cycle.
@@ -35,12 +42,17 @@ import { SessionsService } from './sessions.service';
     FlightBookingsModule,
     // HotelBookingsService tells whether a hotel reservation blocks it.
     HotelBookingsModule,
+    // ACC-02: EmailService sends the verification link. NotificationsModule
+    // imports only UsersModule, so no cycle.
+    NotificationsModule,
   ],
   controllers: [AuthController, AccountDeactivationController],
   providers: [
     AccountDeactivationService,
     AuthCookiesService,
     AuthService,
+    // ACC-02, ACC-07: the one-time tokens (auth_tokens).
+    AuthTokenStoreService,
     AuthTokensService,
     SessionsService,
     // Global guards run in the order they are listed: first who is calling
