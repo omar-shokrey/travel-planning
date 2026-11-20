@@ -16,11 +16,19 @@ import {
   HotelBooking,
   HotelBookingSchema,
 } from './models/hotel-booking.schema';
+import { Review, ReviewSchema } from './models/review.schema';
+import {
+  HotelReviewsController,
+  ReviewsController,
+} from './reviews.controller';
+import { ReviewsService } from './reviews.service';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: HotelBooking.name, schema: HotelBookingSchema },
+      // HTL-23: the reviews of completed stays (module table: hotel-bookings).
+      { name: Review.name, schema: ReviewSchema },
     ]),
     // HotelRoomHoldsService: the hotels module owns the rooms' nights.
     HotelsModule,
@@ -39,6 +47,9 @@ import {
     HotelBookingCancellationController,
     // HTL-20: my hotel reservations.
     HotelReservationsController,
+    // HTL-23: rate a completed stay; edit or delete the review.
+    HotelReviewsController,
+    ReviewsController,
   ],
   // HotelBookingExpiryService: the hold-expiry job (HTL-18).
   // HotelBookingConfirmationService: the confirmation after payment (HTL-17).
@@ -52,6 +63,8 @@ import {
     HotelBookingCancellationService,
     // HTL-20: my hotel reservations.
     HotelReservationsService,
+    // HTL-23: the reviews and the hotel's rating.
+    ReviewsService,
   ],
   // HotelBookingsService: the owner lookup and the policy acceptance for the
   // payments module (PAY-02). The payments module imports this one, never the

@@ -755,3 +755,24 @@ describe('HotelsService.findNamesByIds (HTL-20)', () => {
     expect(hotelsModel.find).not.toHaveBeenCalled();
   });
 });
+
+describe('HotelsService.setRating (HTL-23)', () => {
+  it('overwrites the count and the average of the hotel, never adds to them', async () => {
+    const exec = jest.fn().mockResolvedValue({ matchedCount: 1 });
+    const hotelsModel = { updateOne: jest.fn(() => ({ exec })) };
+    const service = new HotelsService(
+      hotelsModel as unknown as Model<Hotel>,
+      {} as Model<Room>,
+      {} as Model<City>,
+      {} as UsersService,
+      {} as UploadsService,
+    );
+
+    await service.setRating('hotel-1', { ratingCount: 3, averageRating: 4.33 });
+
+    expect(hotelsModel.updateOne).toHaveBeenCalledWith(
+      { _id: 'hotel-1' },
+      { $set: { ratingCount: 3, averageRating: 4.33 } },
+    );
+  });
+});

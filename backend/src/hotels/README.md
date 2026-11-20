@@ -63,6 +63,7 @@ the order and which route answers each GET path.
 ## Deactivated hotels (ACC-15)
 
 - An admin deactivates or reactivates a hotel through `PATCH /api/admin/providers/hotel/:id/deactivate` and `/reactivate`. `HotelsService.setActive(id, active)` writes the flag for the admin module, with one conditional update. No hotels route exposes it.
+- `HotelsService.setRating(id, { ratingCount, averageRating })` stores the rating the hotel-bookings module computed from all the visible reviews of the hotel (HTL-23). It only overwrites, never adds, so the numbers cannot drift. No hotels route exposes it.
 - **Every feature that shows or books hotels must respect `active`:** hotel search (HTL-11) leaves out hotels with `active: false` (the `(cityId, active)` index is there for it), and the hotel page (HTL-02) and the free rooms of a hotel (HTL-15) answer 404 for them. Hotel booking (HTL-16) refuses them with 404 (`HotelRoomHoldsService`, and again after the nights are held). Confirmed bookings of a deactivated hotel stay valid.
 
 ## Hotel details (HTL-02)

@@ -55,8 +55,7 @@ GEN-11: "Flight bookings and hotel reservations shall follow the lifecycle Pendi
 ## Not in this module yet
 
 - **Policy acceptance (PAY-02)** is done in the payments module (`GET /api/bookings/hotel/:id/policies` and `POST .../accept-policies`): it shows the copied times and tiers and stores `policyAcceptedAt` through `HotelBookingsService.findOwnedEntityOrThrow` and `acceptPolicies`, which this module exports.
-- **Cancelling reservations and the moderator's view (HTL-21, HTL-22).** They add their own indexes and the ownership checks (ACC-11).
-- **Refund of a late payment (PAY-03).**
+- **Around reviews (HTL-23):** the public list of a hotel's reviews, newest first, with "Deleted user" as the author of a deactivated account (HTL-24, ACC-12); the moderator's reply to a review (HTL-26, optional); and reporting a review (GEN-09: the `review` report target belongs to the reports module).
 
 ## Tests (HTL-17)
 
@@ -102,3 +101,22 @@ HTL-20: "The system shall allow a registered user to view their hotel reservatio
 - **Index:** (`userId`, `status`, `checkIn`) for the list.
 - **Where it lives:** `HotelReservationsController` and `HotelReservationsService`, new files next to the booking routes, so HTL-21 to HTL-23 can add their own without touching these.
 - **Tests:** `hotel-reservation-groups.spec.ts` (every status on both sides of today, and the list filter agrees with the label for every case), `dto/hotel-reservations-query.dto.spec.ts`, `mappers/hotel-reservation.mapper.spec.ts`, `hotel-reservations.service.spec.ts`, `hotel-reservations.controller.spec.ts`, the schema index test, `HotelsService.findNamesByIds` in the hotels module, and `test/hotel-reservations.e2e-spec.ts` (on the `-test` database, reservations inserted in every status: each group, the whole list and its order, pages with no repeat, nothing internal, the details with a refund, a pending reservation, 404 for another user, 400, 401, 403, Swagger).
+
+## Hotel ratings and reviews (HTL-23)
+
+HTL-23: "A Confirmed reservation becomes Completed once its check-out date has passed. The system shall allow the user to submit one rating (1-5) and an optional review (max 1000 characters) per Completed reservation, regardless of the number of rooms, and later edit or delete it. The hotel's average rating is recalculated accordingly."
+
+| Route                                 | Access                                              |
+| ------------------------------------- | --------------------------------------------------- |
+| `POST /api/hotel-bookings/:id/review` | Registered user (role `user`), own reservation only |
+| `PATCH /api/reviews/:id`              | The review's author only (404 for others)           |
+| `DELETE /api/reviews/:id`             | The review's author only (404 for others)           |
+
+- **Reviews belong to this module** (the module table: hotel-bookings owns "hotel reviews" and `/api/reviews`). `Review` follows `REVIEW` of the data model: collection `reviews`, `hotelId`, `userId`, `bookingId` (unique), `rating` (a whole number 1 to 5), an optional `text` (trimmed, at most 1000 characters), `moderation` (`visible` or `hidden`, `visible` by default) and the timestamps. Indexes: unique `bookingId`; (`hotelId`, `createdAt` descending) for the hotel's reviews.
+- **Only a completed stay** (`status: completed`, which the completion job sets the day after check-out, GEN-11) of the user's own reservation: another user's or a missing reservation is the same 404 "Booking not found" (ACC-11); any other status is 409 "Only a completed stay can be reviewed…".
+- **One per reservation, whatever the number of rooms.** A second review is 409 "This reservation already has a review…": checked first, and the unique `bookingId` index decides two reviews at the same moment. After a delete, the stay can be reviewed again.
+- **Edit and delete.** `PATCH /api/reviews/:id` changes the rating, the text, or both (at least one, 400 otherwise); an empty text removes it; a sent `null` is 400 (`UpdateReviewDto` uses `whenSent` instead of `PartialType`, as `UpdateCabinDto` does, because `PartialType` adds `@IsOptional()`, which lets `null` through). `DELETE` answers 204. Both look the review up by id **and** author, so another user's review is a 404, never a 403.
+- **The hotel's rating is recomputed, never added to.** After every create, edit and delete, one aggregation over the hotel's **visible** reviews gives the count and the average (rounded to two decimals, 0 and 0 when there is none), and `HotelsService.setRating` stores both (a small method added to the hotels module). Two changes at the same moment could each store what they read before the other's write, so after storing, the rating is read again and stored again if it moved (at most 3 times): the last writer always stores what every change left. If storing fails (or the process stops before it), it is logged and the review stays saved; the rating is then stale until the next change to that hotel's reviews, which recomputes everything from scratch. If the rating keeps moving for 3 tries, the newest value read is stored once more.
+- **The response** has the id, the hotel and reservation ids, the rating, the text (`null` when there is none) and the times. Never the author's id or the moderation flag.
+- **Not here** (see "Not in this module yet"): the public list of a hotel's reviews with the "Deleted user" author display (HTL-24, `GET /api/hotels/:id/reviews`, ACC-12), the moderator's reply (HTL-26) and reporting a review (GEN-09).
+- **Tests:** `models/review.schema.spec.ts`, `dto/review.dto.spec.ts` (both DTOs through the global pipe: the rating bounds and whole numbers, the text limit and trimming, `null`, server fields), `mappers/review.mapper.spec.ts`, `reviews.service.spec.ts` (owner and status checks, the existing review and the unique-index race, a database error, the edit with `$set` or `$unset`, an empty edit, 404s, the aggregation of visible reviews and the rounding, no review left, a rating moved in between and stored again, the limit, a failed store), `reviews.controller.spec.ts`, `HotelsService.setRating` in the hotels module, and `test/hotel-reviews.e2e-spec.ts` (on the `-test` database, completed reservations inserted with the model: create, the hotel's count and average after create, edit and delete, a new review after a delete, a duplicate, a confirmed and a cancelled reservation, another user's reservation, every 400, another user's edit and delete, 401, 403, Swagger).
