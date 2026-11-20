@@ -524,6 +524,7 @@ describe('Browse posts by tag and open a post (e2e, BLG-02)', () => {
         images: [`first-${RUN}.jpg`, `second-${RUN}.png`],
         likeCount: 1,
         commentCount: 2,
+        itinerary: null,
         comments: {
           items: [
             {
@@ -556,6 +557,7 @@ describe('Browse posts by tag and open a post (e2e, BLG-02)', () => {
         'comments',
         'id',
         'images',
+        'itinerary',
         'likeCount',
         'publishedAt',
         'tags',
@@ -963,6 +965,7 @@ describe('Browse posts by tag and open a post (e2e, BLG-02)', () => {
         'comments',
         'id',
         'images',
+        'itinerary',
         'likeCount',
         'publishedAt',
         'tags',
