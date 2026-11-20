@@ -6,6 +6,7 @@ import {
   CancellationTierSchema,
   TIME_OF_DAY_PATTERN,
 } from '../../hotels/models/hotel-policy.schema';
+import { CancelledBy } from '../../flight-bookings/enums/cancelled-by.enum';
 import { HotelBookingStatus } from '../enums/hotel-booking-status.enum';
 import { CHILD_AGE_MAX, CHILD_AGE_MIN } from '../hotel-bookings.constants';
 
@@ -65,8 +66,8 @@ export const BookedRoomSchema = SchemaFactory.createForClass(BookedRoom);
  * (HTL-16). It follows the `HOTEL_BOOKING` entity of the data model in
  * `specs/travel-platform.md`. The price, the times and the cancellation tiers
  * are copies, so a later change by the hotel does not change the reservation.
- * `policyAcceptedAt` is set by PAY-02. The fields of later issues
- * (`cancelledAt`, `cancelledBy`, `refundPercent`) are added by them.
+ * `policyAcceptedAt` is set by PAY-02. `cancelledAt`, `cancelledBy` and
+ * `refundPercent` are set when it is cancelled (HTL-21).
  */
 @Schema({ collection: 'hotel_bookings', timestamps: true })
 export class HotelBooking {
@@ -135,6 +136,26 @@ export class HotelBooking {
   /** Copy of the hotel's cancellation tiers (HTL-10), for HTL-21. */
   @Prop({ type: [CancellationTierSchema], default: [] })
   cancellationTiers: CancellationTier[];
+
+  /** HTL-21: when it was cancelled. Set once, with the status. */
+  @Prop({ type: Date })
+  cancelledAt?: Date;
+
+  /** HTL-21: who cancelled it (data model: "user or provider"). */
+  @Prop({ type: String, enum: Object.values(CancelledBy) })
+  cancelledBy?: CancelledBy;
+
+  /** HTL-21: the refund in percent, from the copied tiers, when it was cancelled. */
+  @Prop({
+    type: Number,
+    min: 0,
+    max: 100,
+    validate: {
+      validator: isWholeNumber,
+      message: 'refundPercent must be whole',
+    },
+  })
+  refundPercent?: number;
 
   createdAt: Date;
   updatedAt: Date;

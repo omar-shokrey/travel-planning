@@ -20,3 +20,11 @@ export const REFERENCE_ATTEMPTS = 5;
  * the event again after a crash, the nights are still held and are booked then.
  */
 export const CONFIRM_NIGHTS_GRACE_MINUTES = 30;
+
+/** HTL-21: the answers of a cancellation that is refused. */
+export const NOT_CANCELLABLE_MESSAGE =
+  'Only a confirmed reservation can be cancelled';
+export const CHECK_IN_REACHED_MESSAGE =
+  'The check-in date has been reached: the reservation can no longer be cancelled';
+export const REFUND_CHANGED_MESSAGE =
+  'The refund changed since you viewed it. View the cancellation again and confirm the new refund';
