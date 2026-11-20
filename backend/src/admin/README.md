@@ -9,6 +9,7 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 | `POST /api/admin/users/:id/reset-password`        | ACC-07a        | Admin  |
 | `GET /api/admin/audit-logs`                       | GEN-07         | Admin  |
 | `GET /api/admin/accounts`                         | ACC-14         | Admin  |
+| `GET /api/admin/bookings`                         | ACC-17, ACC-11 | Admin  |
 | `POST /api/admin/moderators`                      | ACC-13         | Admin  |
 | `PATCH /api/admin/accounts/:id/suspend`           | ACC-15, ACC-16 | Admin  |
 | `PATCH /api/admin/accounts/:id/reactivate`        | ACC-15, ACC-16 | Admin  |
@@ -60,6 +61,30 @@ The admin console (`/api/admin/*`): account management, moderator accounts, prov
 - **Pagination follows GEN-05:** 10 per page by default, at most 50, `{ items, meta }`, and an empty page is `items: []`.
 - **The query is in `UsersService.listAccounts`**, which owns the collection and returns entities; `AdminService` maps them with `toUserResponse` and builds the page with `paginate`. Documents are not read with `lean()`, so schema defaults (such as `mustChangePassword: false`) apply to older accounts.
 - **The search uses the `$regex` string form** (`{ $regex, $options: 'i' }`), not a RegExp object. In our e2e runs against Atlas, a count with RegExp objects and the `i` flag inside `$or` never got an answer, while the string form always did. Both mean the same to MongoDB.
+
+## All bookings (ACC-17)
+
+`GET /api/admin/bookings?page=1&limit=10&type=flight&status=confirmed&from=2026-11-01&to=2026-11-30`
+
+- **Every flight booking and hotel reservation, in one list, read only.** It is also the "admins may view all bookings" part of ACC-11. No other role gets a booking from this route (guest 401, user and moderators 403). There is no `POST`, `PATCH` or `DELETE` on it, and the service never writes.
+- **All five statuses are listed** (`pending_payment`, `confirmed`, `completed`, `expired`, `cancelled`, GEN-11), so the admin sees abandoned holds too.
+- **Newest first across both kinds**, by `createdAt` and then `_id`, so two bookings made at the same moment keep a stable order. Pagination follows GEN-05: 10 per page by default, at most 50, `{ items, meta }`, `items: []` when nothing matches.
+- **Filters**, all optional, and all given ones must match:
+  - `type`: `flight` or `hotel` (`BookingType`). Without it, both.
+  - `status`: one of the five values. Flight bookings and hotel reservations have their own enum with the same values; a unit test checks the two sets stay equal, so one filter serves both.
+  - `from` and `to`: `YYYY-MM-DD`, both included, **the day the booking was made** (`createdAt`, in UTC). `from` is 00:00 UTC of that day and `to` covers its whole day: the filter is `createdAt >= from` and `createdAt < to + 1 day`. They use the same validator as the hotel search's `checkIn` (`IsDateOnly`), so `2026-02-30` or a time part answers 400; `from` after `to` answers 400 "from must be on or before to".
+  - **Why the booking day and not the travel dates:** a flight booking stores no travel dates (they live on the flights), so filtering by them would need a lookup on every query. The row still shows the travel dates. This is flagged in the PR for the team leader.
+  - Anything else (an unknown value, a page size over 50, an unknown parameter such as `userId`) answers 400.
+- **The row** (`AdminBookingResponseDto`): `id`, `type`, `reference` (null until the booking is confirmed), `status`, `user` (`id`, `name`, `email` of the account that booked), `providers` (`type`, `id`, `name`: a hotel booking's one hotel; a flight booking's distinct airlines in the order of its flights, so a round trip on two airlines lists both and a round trip on one airline lists it once), `dates` (`start`, `end`: a flight's first departure and last arrival as UTC ISO strings; a hotel's check-in and check-out as `YYYY-MM-DD`), `amount` (the booking `total` in minor units), `currency` and `createdAt` (UTC).
+- **Never in the row:** passengers (names, dates of birth, passport numbers), extra bags, the fare and baggage breakdown (`fareTotal`, `baggageTotal`), rooms, cancellation tiers, `holdExpiresAt`, `policyAcceptedAt`, cancellation details, anything about payments or Stripe, `userId` outside `user`, and every other account field (`passwordHash`, role, status ...). The mapper builds the row key by key, and a unit test and an e2e test compare the exact set of keys.
+- **Records that cannot be found never fail the list.** A missing flight gives `dates: { start: null, end: null }` (half a trip would mislead); a missing airline or hotel keeps its id with the name `(unknown)`; a missing account keeps its id with the name `(unknown)` and `email: null` (`UNKNOWN_PROVIDER_NAME`, `UNKNOWN_USER_NAME` in `admin-bookings.constants.ts`).
+- **Two phases, in `AdminBookingsService`:**
+  1. **One aggregation for the page.** One merged page across two collections cannot be built from two separate paginated lists, so: with `type=flight` it runs on `flight_bookings` only, with `type=hotel` on `hotel_bookings` only, and with no type it starts from `flight_bookings` and adds `hotel_bookings` with `$unionWith` (the collection name comes from the model). Each side keeps only `{ _id, createdAt, kind }` after its `$match`, then `$sort`, then `$facet` gives the page (`$skip`, `$limit`, the server's `skip`) and the total (`$count`).
+  2. **Only the rows of that page** (at most 50) are read in full: the bookings by id with `.select` of only the fields the mapper needs (never the passengers), then the users, airlines, hotels and flights they point to, one `$in` query each (skipped when there is nothing to read). An empty page reads nothing more. The rows keep the order of phase 1 and are built by the pure mapper `toAdminBookingResponse` (`mappers/admin-booking.mapper.ts`).
+- **The models are registered in `AdminModule`** with `MongooseModule.forFeature` (`FlightBooking`, `HotelBooking`, `Flight`, `Airline`, `Hotel`; `User` comes from `UsersModule`). The bookings modules own the writes and have no merged list, and `FlightBookingsModule` already registers the `Flight` schema the same way. This module only reads them; the booking modules are not changed.
+- **No new index.** `flight_bookings` and `hotel_bookings` have no index on `createdAt`. The list is an admin screen used rarely; an index on `createdAt` can be a later change by the bookings owners if it gets slow.
+- **Not this route:** the moderators' own lists of their bookings and passengers (FLT-29 for airlines, HTL-22 for hotels) are separate issues with their own routes, limited to the moderator's provider.
+- **Tests.** `dto/list-admin-bookings-query.dto.spec.ts` (defaults, each filter, date-only rules, `from` after `to`, unknown parameters, the two status sets equal), `mappers/admin-booking.mapper.spec.ts` (one way, round trips with one and two airlines, hotel, pending, missing records, exact keys), `admin-bookings.service.spec.ts` (which collection is aggregated for each `type`, `$unionWith`, the match and the UTC range, page order, empty page with no lookup, one `$in` per collection, nothing private selected) and `test/admin-bookings.e2e-spec.ts` (roles, order across both kinds, pagination, every filter and its 400s, the day boundaries, the row content, privacy, no write routes, Swagger, read only). The e2e backdates `createdAt` to four days of March 2001, inserting through the driver's `collection.insertMany` because the Mongoose timestamps would replace it, so every total is exact.
 
 ## Report handling and moderation (GEN-10)
 

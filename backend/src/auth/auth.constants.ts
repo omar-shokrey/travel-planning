@@ -53,3 +53,26 @@ export function accountLockedMessage(minutesLeft: number): string {
   const unit = minutesLeft === 1 ? 'minute' : 'minutes';
   return `Too many failed login attempts. Your account is locked. Try again in ${minutesLeft} ${unit}.`;
 }
+
+/**
+ * ACC-12: the deactivation of your own account is refused while you have a
+ * confirmed flight booking or hotel reservation. A booking that is still
+ * confirmed is not over yet: GEN-11 completes it once the trip ends.
+ */
+export const ACCOUNT_HAS_CONFIRMED_BOOKINGS_MESSAGE =
+  'You have upcoming confirmed bookings. Cancel them or wait until the trips are over, then deactivate your account';
+
+/**
+ * ACC-12: the deactivation is refused while a booking waits for payment and
+ * its hold has not ended, because a payment inside the hold would confirm a
+ * booking of an account that can no longer log in.
+ */
+export const ACCOUNT_HAS_UNPAID_BOOKING_MESSAGE =
+  'You have a booking waiting for payment. Pay it, or wait until its hold ends, then deactivate your account';
+
+/**
+ * ACC-12: the account was no longer active when the deactivation was saved,
+ * for example an admin suspended it at the same moment.
+ */
+export const ACCOUNT_CHANGED_MESSAGE =
+  'Your account was changed by another request. Please try again';

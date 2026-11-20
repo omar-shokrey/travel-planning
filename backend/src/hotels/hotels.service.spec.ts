@@ -702,3 +702,56 @@ describe('HotelsService (HTL-01)', () => {
     });
   });
 });
+
+describe('HotelsService.findNamesByIds (HTL-20)', () => {
+  const build = (found: { _id: Types.ObjectId; name: string }[]) => {
+    const exec = jest.fn().mockResolvedValue(found);
+    const chain = { select: jest.fn(), lean: jest.fn(), exec };
+    chain.select.mockReturnValue(chain);
+    chain.lean.mockReturnValue(chain);
+    const hotelsModel = { find: jest.fn(() => chain) };
+    const service = new HotelsService(
+      hotelsModel as unknown as Model<Hotel>,
+      {} as Model<Room>,
+      {} as Model<City>,
+      {} as UsersService,
+      {} as UploadsService,
+    );
+    return { service, hotelsModel, chain };
+  };
+
+  it('reads the names of every hotel at once, each id once, and maps them by id', async () => {
+    const a = new Types.ObjectId();
+    const b = new Types.ObjectId();
+    const { service, hotelsModel, chain } = build([
+      { _id: a, name: 'Nile Hotel' },
+      { _id: b, name: 'Sea Hotel' },
+    ]);
+
+    const names = await service.findNamesByIds([a, b.toString(), a]);
+
+    expect(hotelsModel.find).toHaveBeenCalledWith({
+      _id: { $in: [a.toString(), b.toString()] },
+    });
+    expect(chain.select).toHaveBeenCalledWith('name');
+    expect([...names.entries()]).toEqual([
+      [a.toString(), 'Nile Hotel'],
+      [b.toString(), 'Sea Hotel'],
+    ]);
+  });
+
+  it('leaves out a hotel that no longer exists', async () => {
+    const { service } = build([]);
+
+    const names = await service.findNamesByIds([new Types.ObjectId()]);
+
+    expect(names.size).toBe(0);
+  });
+
+  it('reads nothing for no ids', async () => {
+    const { service, hotelsModel } = build([]);
+
+    expect((await service.findNamesByIds([])).size).toBe(0);
+    expect(hotelsModel.find).not.toHaveBeenCalled();
+  });
+});

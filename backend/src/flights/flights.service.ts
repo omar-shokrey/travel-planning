@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { DateTime } from 'luxon';
@@ -23,12 +25,15 @@ import {
 } from './flight-change-message';
 import { assertEditable, type EditableFlight } from './flight-editable';
 import { FlightResponsesService } from './flight-responses.service';
-import { scheduledFlightFilter } from './flight-status';
+import { effectiveStatus, scheduledFlightFilter } from './flight-status';
 import {
   AIRPORTS_LOCKED_MESSAGE,
   DUPLICATE_FLIGHT_MESSAGE,
   EMPTY_FLIGHT_UPDATE_MESSAGE,
   FLIGHT_CHANGED_MESSAGE,
+  FLIGHT_NOT_CANCELLABLE_MESSAGE,
+  FLIGHT_NOT_FOUND_MESSAGE,
+  FOREIGN_FLIGHT_MESSAGE,
   SAME_AIRPORTS_MESSAGE,
   SAME_DEPARTURE_AIRPORT_MESSAGE,
   unknownAirportMessage,
@@ -117,6 +122,9 @@ const formatOf = (value: string): string =>
   value.length > 'YYYY-MM-DDTHH:mm'.length
     ? "yyyy-MM-dd'T'HH:mm:ss"
     : "yyyy-MM-dd'T'HH:mm";
+
+/** FLT-06: the cancelled flight, as the booking module needs it for the cascade and the response. */
+export type CancelledFlight = FlightSource & { _id: Types.ObjectId };
 
 @Injectable()
 export class FlightsService {
@@ -418,6 +426,51 @@ export class FlightsService {
       departure: after.departureZone,
       arrival: after.arrivalZone,
     });
+  }
+
+  /**
+   * FLT-06: the airline moderator cancels a scheduled flight of their
+   * airline. One conditional update sets `cancelled` only if the flight is
+   * the moderator's airline's and still scheduled at `now` (FLT-30), so two
+   * cancellations, or a cancellation and an edit at the same moment, cannot
+   * both succeed. A cancelled flight is no longer found by search (FLT-11),
+   * held or booked (FLT-22). When nothing matched, one read tells why: 404,
+   * 403, 409 for a flight that is cancelled or has departed, or 409 when it
+   * changed in between. Returns the cancelled flight; what it means for the
+   * bookings (FLT-06) is done by the booking module, which calls this.
+   */
+  async cancel(
+    flightId: string,
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<CancelledFlight> {
+    const airline = await this.airlines.findAssignedAirlineOrThrow(userId);
+    const cancelled = await this.flights
+      .findOneAndUpdate(
+        {
+          _id: flightId,
+          airlineId: airline._id,
+          ...scheduledFlightFilter(now),
+        },
+        { $set: { status: FlightStatus.Cancelled } },
+        { returnDocument: 'after' },
+      )
+      .lean<CancelledFlight>()
+      .exec();
+    if (cancelled) {
+      return cancelled;
+    }
+    const current = await this.readEditState(flightId);
+    if (!current) {
+      throw new NotFoundException(FLIGHT_NOT_FOUND_MESSAGE);
+    }
+    if (!current.airlineId.equals(airline._id)) {
+      throw new ForbiddenException(FOREIGN_FLIGHT_MESSAGE);
+    }
+    if (effectiveStatus(current, now) !== FlightStatus.Scheduled) {
+      throw new ConflictException(FLIGHT_NOT_CANCELLABLE_MESSAGE);
+    }
+    throw new ConflictException(FLIGHT_CHANGED_MESSAGE);
   }
 
   /**

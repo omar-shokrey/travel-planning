@@ -93,6 +93,27 @@ describe('HotelBooking schema', () => {
     ]);
   });
 
+  it('stores the cancellation of HTL-21: when, by whom and the refund percent', () => {
+    const doc = booking({
+      status: HotelBookingStatus.Cancelled,
+      cancelledAt: new Date('2027-06-03T10:00:00.000Z'),
+      cancelledBy: 'user',
+      refundPercent: 50,
+    });
+
+    expect(doc.validateSync()).toBeUndefined();
+    expect(booking().cancelledAt).toBeUndefined();
+  });
+
+  it.each([
+    ['cancelledBy', { cancelledBy: 'hotel' }],
+    ['refundPercent', { refundPercent: 101 }],
+    ['refundPercent', { refundPercent: -1 }],
+    ['refundPercent', { refundPercent: 12.5 }],
+  ])('refuses a wrong %s (HTL-21)', (path, fields) => {
+    expect(invalidPaths(booking(fields))).toContain(path);
+  });
+
   it('has a unique, sparse index on the reference', () => {
     expect(HotelBookingSchema.indexes()).toEqual(
       expect.arrayContaining([
@@ -113,6 +134,12 @@ describe('HotelBooking schema', () => {
   it('has the (status, holdExpiresAt) index of the hold-expiry job (HTL-18)', () => {
     expect(HotelBookingSchema.indexes()).toEqual(
       expect.arrayContaining([[{ status: 1, holdExpiresAt: 1 }, {}]]),
+    );
+  });
+
+  it('has the (userId, status, checkIn) index of "My hotel reservations" (HTL-20)', () => {
+    expect(HotelBookingSchema.indexes()).toEqual(
+      expect.arrayContaining([[{ userId: 1, status: 1, checkIn: 1 }, {}]]),
     );
   });
 });

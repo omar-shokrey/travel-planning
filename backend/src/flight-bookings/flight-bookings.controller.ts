@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   StreamableFile,
 } from '@nestjs/common';
 import {
@@ -23,6 +24,8 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { PLATFORM_CURRENCY } from '../common/constants/currency';
+import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
+import type { PaginatedResponse } from '../common/dto/paginated-response.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
@@ -39,7 +42,10 @@ import {
   FlightBookingCancellationPreviewDto,
   FlightBookingCancellationResponseDto,
 } from './dto/flight-booking-cancellation-response.dto';
+import { FlightBookingDetailsResponseDto } from './dto/flight-booking-details-response.dto';
+import { FlightBookingListItemResponseDto } from './dto/flight-booking-list-item-response.dto';
 import { FlightBookingResponseDto } from './dto/flight-booking-response.dto';
+import { ListFlightBookingsQueryDto } from './dto/list-flight-bookings-query.dto';
 import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import {
@@ -47,6 +53,7 @@ import {
   CHILD_MIN_AGE,
   DEPARTED_MESSAGE,
   E_TICKET_NOT_CONFIRMED_MESSAGE,
+  FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE,
   FLIGHT_BOOKING_HOLD_MINUTES,
   FLIGHT_BOOKING_SEATS_MAX,
   FLIGHT_CHANGED_MESSAGE,
@@ -55,6 +62,7 @@ import {
 } from './flight-bookings.constants';
 import { FlightBookingCancellationService } from './flight-booking-cancellation.service';
 import { FlightBookingETicketService } from './flight-booking-e-ticket.service';
+import { FlightBookingListService } from './flight-booking-list.service';
 import {
   BOOKING_NOT_FOUND_MESSAGE,
   FlightBookingsService,
@@ -81,7 +89,7 @@ const ROUND_TRIP_EXAMPLE = {
   ],
 };
 
-/** Flight bookings of registered users (FLT-22, FLT-19, FLT-21, FLT-12, FLT-26). */
+/** Flight bookings of registered users (FLT-22, FLT-19, FLT-21, FLT-12, FLT-23, FLT-25, FLT-26). */
 @ApiTags('Flight bookings')
 @ApiCookieAuth()
 @Controller('flight-bookings')
@@ -90,7 +98,34 @@ export class FlightBookingsController {
     private readonly flightBookings: FlightBookingsService,
     private readonly eTickets: FlightBookingETicketService,
     private readonly cancellations: FlightBookingCancellationService,
+    private readonly lists: FlightBookingListService,
   ) {}
+
+  @Get()
+  @Roles(Role.User)
+  @ApiOperation({
+    summary: 'List my flight bookings: upcoming, past or cancelled (FLT-25)',
+    description: [
+      'Registered users only, their own bookings. `group` picks one list, a page at a time:',
+      '- `upcoming` (the default): confirmed, or waiting for payment while the hold lasts, and a flight of it has not departed yet; soonest departure first.',
+      '- `past`: completed, or confirmed with every flight departed; latest departure first.',
+      '- `cancelled`: cancelled by the user (FLT-26) or the airline (FLT-06); latest cancellation first.',
+      "An expired hold (never paid) is in no list. Each item shows the reference, every flight with its local times (GEN-06), the cabin and seats, the passengers' names and types, the total and the status. Open `GET /api/flight-bookings/{id}` for the full details.",
+    ].join('\n\n'),
+  })
+  @ApiPaginatedResponse(FlightBookingListItemResponseDto)
+  @ApiBadRequestResponse({
+    description:
+      'A bad `group`, `page` or `limit` (`errors` lists each field), or another query parameter',
+  })
+  @ApiUnauthorizedResponse({ description: 'Not logged in' })
+  @ApiForbiddenResponse({ description: 'Not a registered user' })
+  list(
+    @Query() query: ListFlightBookingsQueryDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<PaginatedResponse<FlightBookingListItemResponseDto>> {
+    return this.lists.list(userId, query);
+  }
 
   @Post()
   @HttpCode(HttpStatus.OK)
@@ -220,6 +255,27 @@ export class FlightBookingsController {
     return this.flightBookings.hold(userId, dto);
   }
 
+  @Get(':id')
+  @Roles(Role.User)
+  @ApiOperation({
+    summary: 'Show the full details of one of my flight bookings (FLT-25)',
+    description:
+      'Registered users only, their own booking, in any status. Everything the hold returned (each passenger with the passport number and extra bags, the fares and totals in USD cents), the full flight of each segment with its local times (GEN-06), when the policies were accepted (PAY-02) and, once cancelled, when, by whom (`user` or `provider`), the refund percent and the refund (PAY-03).',
+  })
+  @ApiOkResponse({ type: FlightBookingDetailsResponseDto })
+  @ApiBadRequestResponse({ description: 'The id is not a valid id' })
+  @ApiUnauthorizedResponse({ description: 'Not logged in' })
+  @ApiForbiddenResponse({ description: 'Not a registered user' })
+  @ApiNotFoundResponse({
+    description: `"${BOOKING_NOT_FOUND_MESSAGE}": no such booking, or it belongs to another user`,
+  })
+  details(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<FlightBookingDetailsResponseDto> {
+    return this.lists.details(id, userId);
+  }
+
   @Get(':id/e-ticket')
   @Roles(Role.User)
   @ApiOperation({
@@ -273,7 +329,7 @@ export class FlightBookingsController {
     description: `"${BOOKING_NOT_FOUND_MESSAGE}": no such booking, or it belongs to another user`,
   })
   @ApiConflictResponse({
-    description: `"${NOT_CANCELLABLE_MESSAGE}" (waiting for payment, expired, already cancelled or completed), or "${DEPARTED_MESSAGE}"`,
+    description: `"${NOT_CANCELLABLE_MESSAGE}" (waiting for payment, expired, already cancelled or completed), "${DEPARTED_MESSAGE}", or "${FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE}" (FLT-06 cancels it with a full refund)`,
   })
   cancellationPreview(
     @Param('id', ParseObjectIdPipe) id: string,
@@ -315,7 +371,7 @@ export class FlightBookingsController {
     description: `"${BOOKING_NOT_FOUND_MESSAGE}": no such booking, or it belongs to another user`,
   })
   @ApiConflictResponse({
-    description: `"${NOT_CANCELLABLE_MESSAGE}" (waiting for payment, expired, already cancelled or completed), "${DEPARTED_MESSAGE}", or "${REFUND_CHANGED_MESSAGE}". Nothing changed.`,
+    description: `"${NOT_CANCELLABLE_MESSAGE}" (waiting for payment, expired, already cancelled or completed), "${DEPARTED_MESSAGE}", "${FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE}" (FLT-06 cancels it with a full refund), or "${REFUND_CHANGED_MESSAGE}". Nothing changed.`,
   })
   cancel(
     @Param('id', ParseObjectIdPipe) id: string,

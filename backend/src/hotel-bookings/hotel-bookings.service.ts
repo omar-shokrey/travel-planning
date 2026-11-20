@@ -173,6 +173,51 @@ export class HotelBookingsService {
   }
 
   /**
+   * ACC-12: whether the user has a confirmed reservation, for the
+   * deactivation of their own account (never through a controller). The
+   * completion job (GEN-11) moves a reservation to `completed` once its stay
+   * is over, so a reservation that is still `confirmed` is upcoming. Read
+   * only.
+   */
+  async hasConfirmedBooking(userId: string): Promise<boolean> {
+    // A count with a limit of 1, not exists(): a findOne that matched stalled
+    // in local e2e runs against the Atlas test database (see PostsService).
+    const found = await this.bookings
+      .countDocuments(
+        {
+          userId: new Types.ObjectId(userId),
+          status: HotelBookingStatus.Confirmed,
+        },
+        { limit: 1 },
+      )
+      .exec();
+    return found > 0;
+  }
+
+  /**
+   * ACC-12: whether the user has a reservation waiting for payment whose
+   * hold has not ended at `now`, for the deactivation of their own account
+   * (never through a controller). A payment inside the hold would confirm
+   * it. An ended hold does not count: the payment is late and is refunded
+   * (PAY-03). Read only.
+   */
+  async hasLiveHold(userId: string, now: Date): Promise<boolean> {
+    // A count with a limit of 1, not exists(): a findOne that matched stalled
+    // in local e2e runs against the Atlas test database (see PostsService).
+    const found = await this.bookings
+      .countDocuments(
+        {
+          userId: new Types.ObjectId(userId),
+          status: HotelBookingStatus.PendingPayment,
+          holdExpiresAt: { $gt: now },
+        },
+        { limit: 1 },
+      )
+      .exec();
+    return found > 0;
+  }
+
+  /**
    * ACC-15: the travellers to tell when the admin deactivates this hotel,
    * for the admin module (never through a controller). The users with a
    * confirmed reservation of this hotel that is not over yet: its check-out

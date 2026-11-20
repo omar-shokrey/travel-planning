@@ -56,15 +56,18 @@ describe('PostsService', () => {
       expect(await service.findPublishedSummary('post-1')).toEqual({
         authorId: '507f1f77bcf86cd799439011',
         moderation: PostModeration.Hidden,
+        authorDeactivated: false,
       });
       expect(posts.findOne).toHaveBeenCalledWith({
         _id: 'post-1',
         status: PostStatus.Published,
       });
-      expect(query.select).toHaveBeenCalledWith('authorId moderation');
+      expect(query.select).toHaveBeenCalledWith(
+        'authorId moderation authorDeactivated',
+      );
     });
 
-    it('reads a post stored before moderation existed as visible', async () => {
+    it('reads a post stored before moderation and authorDeactivated existed as visible, author active', async () => {
       const { service } = lookup({
         authorId: { toString: () => '507f1f77bcf86cd799439011' },
       });
@@ -72,13 +75,69 @@ describe('PostsService', () => {
       expect(await service.findPublishedSummary('post-1')).toEqual({
         authorId: '507f1f77bcf86cd799439011',
         moderation: PostModeration.Visible,
+        authorDeactivated: false,
       });
     });
+
+    it.each([
+      [true, true],
+      [false, false],
+    ])(
+      'returns authorDeactivated %p when the post has %p (ACC-12)',
+      async (stored, expected) => {
+        const { service } = lookup({
+          authorId: { toString: () => '507f1f77bcf86cd799439011' },
+          moderation: PostModeration.Visible,
+          authorDeactivated: stored,
+        });
+
+        expect(await service.findPublishedSummary('post-1')).toMatchObject({
+          authorDeactivated: expected,
+        });
+      },
+    );
 
     it('returns null for a missing post or a draft', async () => {
       const { service } = lookup(null);
 
       expect(await service.findPublishedSummary('post-1')).toBeNull();
+    });
+  });
+
+  describe('markAuthorDeactivated (ACC-12)', () => {
+    const AUTHOR_ID = '507f1f77bcf86cd799439011';
+
+    const setupUpdate = () => {
+      const exec = jest.fn().mockResolvedValue({ modifiedCount: 2 });
+      const posts = { updateMany: jest.fn(() => ({ exec })) };
+      return { service: createService(posts), posts, exec };
+    };
+
+    it('flags every post of the author, in one update that keeps updatedAt', async () => {
+      const { service, posts, exec } = setupUpdate();
+
+      await expect(
+        service.markAuthorDeactivated(AUTHOR_ID),
+      ).resolves.toBeUndefined();
+
+      expect(posts.updateMany).toHaveBeenCalledTimes(1);
+      expect(posts.updateMany).toHaveBeenCalledWith(
+        { authorId: new Types.ObjectId(AUTHOR_ID) },
+        { $set: { authorDeactivated: true } },
+        { timestamps: false },
+      );
+      expect(exec).toHaveBeenCalledTimes(1);
+    });
+
+    it('names exactly one field in its filter: the author', async () => {
+      const { service, posts } = setupUpdate();
+
+      await service.markAuthorDeactivated(AUTHOR_ID);
+
+      const [filter] = posts.updateMany.mock.calls[0] as unknown as [
+        Record<string, unknown>,
+      ];
+      expect(Object.keys(filter)).toEqual(['authorId']);
     });
   });
 

@@ -564,6 +564,51 @@ export class FlightBookingsService {
   }
 
   /**
+   * ACC-12: whether the user has a confirmed booking, for the deactivation
+   * of their own account (never through a controller). The completion job
+   * (GEN-11) moves a booking to `completed` once its trip is over, so a
+   * booking that is still `confirmed` is upcoming. Read only, on the
+   * (`userId`, `status`) index.
+   */
+  async hasConfirmedBooking(userId: string): Promise<boolean> {
+    // A count with a limit of 1, not exists(): a findOne that matched stalled
+    // in local e2e runs against the Atlas test database (see PostsService).
+    const found = await this.bookings
+      .countDocuments(
+        {
+          userId: new Types.ObjectId(userId),
+          status: FlightBookingStatus.Confirmed,
+        },
+        { limit: 1 },
+      )
+      .exec();
+    return found > 0;
+  }
+
+  /**
+   * ACC-12: whether the user has a booking waiting for payment whose hold
+   * has not ended at `now`, for the deactivation of their own account (never
+   * through a controller). A payment inside the hold would confirm it. An
+   * ended hold does not count: the payment is late and is refunded (PAY-03).
+   * Read only.
+   */
+  async hasLiveHold(userId: string, now: Date): Promise<boolean> {
+    // A count with a limit of 1, not exists(): a findOne that matched stalled
+    // in local e2e runs against the Atlas test database (see PostsService).
+    const found = await this.bookings
+      .countDocuments(
+        {
+          userId: new Types.ObjectId(userId),
+          status: FlightBookingStatus.PendingPayment,
+          holdExpiresAt: { $gt: now },
+        },
+        { limit: 1 },
+      )
+      .exec();
+    return found > 0;
+  }
+
+  /**
    * ACC-15: the travellers to tell when the admin deactivates this airline,
    * for the admin module (never through a controller). The users with a
    * confirmed booking that is not over yet: at least one segment is on a

@@ -615,3 +615,26 @@ describe('HotelRoomHoldsService: confirming a paid reservation (HTL-17)', () => 
     await expect(service.confirm(bookingId)).resolves.toBe(0);
   });
 });
+
+describe('HotelRoomHoldsService.unbook (HTL-21)', () => {
+  it('deletes the booked and still-held nights of the cancelled reservation only, and says how many', async () => {
+    const bookingId = new Types.ObjectId();
+    const roomNights = {
+      deleteMany: jest.fn().mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ deletedCount: 6 }),
+      }),
+    };
+    const service = new HotelRoomHoldsService(
+      {} as never,
+      {} as never,
+      roomNights as never,
+    );
+
+    await expect(service.unbook(bookingId)).resolves.toBe(6);
+
+    expect(roomNights.deleteMany).toHaveBeenCalledWith({
+      bookingId,
+      state: { $in: [RoomNightState.Held, RoomNightState.Booked] },
+    });
+  });
+});

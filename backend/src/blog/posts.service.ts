@@ -40,22 +40,21 @@ export class PostsService {
   ) {}
 
   /**
-   * For other services (reports, GEN-09): the author id and the moderation of
-   * a published post, or null when the post is missing or a draft, so a draft
-   * is never revealed to anyone but its author. The caller hides a hidden post
-   * from everyone but its author (GEN-10). Not exposed by a controller.
-   *
-   * Posts have no author-deactivated field yet. When ACC-12 (the author
-   * closes the account) adds one, return it too, so the caller leaves those
-   * posts out for everyone but the author, as reports already do for
-   * itineraries; otherwise reporting such a post answers 201 instead of 404.
+   * For other services (reports, GEN-09): the author id, the moderation and
+   * whether the author deactivated their account (ACC-12) of a published
+   * post, or null when the post is missing or a draft, so a draft is never
+   * revealed to anyone but its author. The caller hides a hidden post from
+   * everyone but its author (GEN-10), and a post of a deactivated author the
+   * same way, as it does for itineraries. Not exposed by a controller.
    */
-  async findPublishedSummary(
-    postId: string,
-  ): Promise<{ authorId: string; moderation: PostModeration } | null> {
+  async findPublishedSummary(postId: string): Promise<{
+    authorId: string;
+    moderation: PostModeration;
+    authorDeactivated: boolean;
+  } | null> {
     const post = await this.posts
       .findOne({ _id: postId, status: PostStatus.Published })
-      .select('authorId moderation')
+      .select('authorId moderation authorDeactivated')
       .lean()
       .exec();
     if (!post) {
@@ -65,7 +64,27 @@ export class PostsService {
       authorId: post.authorId.toString(),
       // A lean post stored before `moderation` existed has no value: visible.
       moderation: post.moderation ?? PostModeration.Visible,
+      // Likewise, a post stored before ACC-12 has no `authorDeactivated`.
+      authorDeactivated: post.authorDeactivated === true,
     };
+  }
+
+  /**
+   * ACC-12: hides every post of an author who deactivated their own account,
+   * for the auth module (never through a controller). One `updateMany` whose
+   * filter names only this author; `timestamps: false` keeps `updatedAt` as
+   * it was, since the author did not edit the posts. Idempotent: running it
+   * again changes nothing, so a failed deactivation can simply be retried.
+   * Drafts get the flag too; they were never public and nothing else changes.
+   */
+  async markAuthorDeactivated(authorId: string): Promise<void> {
+    await this.posts
+      .updateMany(
+        { authorId: new Types.ObjectId(authorId) },
+        { $set: { authorDeactivated: true } },
+        { timestamps: false },
+      )
+      .exec();
   }
 
   /**

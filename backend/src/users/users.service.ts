@@ -153,6 +153,27 @@ export class UsersService {
   }
 
   /**
+   * ACC-12: the user closes their own account. One conditional update that
+   * matches only an active account with the `user` role, so an account an
+   * admin suspended in the meantime, or one already deactivated, is left
+   * alone and the caller gets `null`. It sets the status and `deactivatedAt`
+   * together and returns the account after the change. The checks before it
+   * (password, bookings) are made by the auth module.
+   */
+  deactivateOwnAccount(
+    id: Types.ObjectId,
+    now: Date,
+  ): Promise<UserDocument | null> {
+    return this.users
+      .findOneAndUpdate(
+        { _id: id, role: Role.User, status: UserStatus.Active },
+        { $set: { status: UserStatus.Deactivated, deactivatedAt: now } },
+        { returnDocument: 'after' },
+      )
+      .exec();
+  }
+
+  /**
    * Finds an account by email for the login check (ACC-04). It is the only
    * lookup that reads `passwordHash`, which the schema hides by default. The
    * entity is for the auth service: it never leaves the API.

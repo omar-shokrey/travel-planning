@@ -151,16 +151,17 @@ export class PublishedPostsService {
 
   /**
    * Which posts the public may see: published ones that an admin has not
-   * hidden (GEN-10). `$ne` lets a post stored before `moderation` existed
-   * count as visible. A public list does not know who is asking, so a hidden
-   * post is left out for its author too; the author still sees it in "my
-   * posts" (BLG-03). Hiding the posts of a deactivated author (ACC-12) adds
-   * its condition here, and every public list follows.
+   * hidden (GEN-10) and whose author has not deactivated their account
+   * (ACC-12). `$ne` lets a post stored before `moderation` or
+   * `authorDeactivated` existed count as visible. A public list does not
+   * know who is asking, so a hidden post is left out for its author too; the
+   * author still sees it in "my posts" (BLG-03).
    */
   publishedFilter(): QueryFilter<BlogPost> {
     return {
       status: PostStatus.Published,
       moderation: { $ne: PostModeration.Hidden },
+      authorDeactivated: { $ne: true },
     };
   }
 

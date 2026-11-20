@@ -9,10 +9,14 @@ import { PostModeration } from './models/post-moderation.enum';
 import { PostStatus } from './models/post-status.enum';
 import { PublishedPostsService } from './published-posts.service';
 
-/** What every public list starts from: published and not hidden (GEN-10). */
+/**
+ * What every public list starts from: published, not hidden (GEN-10) and the
+ * author not deactivated (ACC-12).
+ */
 const PUBLIC = {
   status: PostStatus.Published,
   moderation: { $ne: PostModeration.Hidden },
+  authorDeactivated: { $ne: true },
 };
 
 const sara = new Types.ObjectId('6740f1c2a4b5c6d7e8f90001');
@@ -76,6 +80,15 @@ describe('PublishedPostsService', () => {
       const { service } = setup();
 
       expect(service.publishedFilter()).toEqual(PUBLIC);
+    });
+
+    it('leaves out the posts of a deactivated author, and keeps a post stored before the flag (ACC-12)', () => {
+      const { service } = setup();
+      const filter = service.publishedFilter();
+
+      expect(filter.authorDeactivated).toEqual({ $ne: true });
+      expect(filter.status).toBe(PostStatus.Published);
+      expect(filter.moderation).toEqual({ $ne: PostModeration.Hidden });
     });
   });
 
@@ -361,6 +374,7 @@ describe('PublishedPostsService', () => {
       ];
       expect(Object.keys(pipeline[0].$match).sort()).toEqual([
         '$or',
+        'authorDeactivated',
         'moderation',
         'status',
       ]);

@@ -60,3 +60,19 @@ describe('BlogPostSchema, moderation (GEN-10)', () => {
     expect(error.errors?.moderation).toBeDefined();
   });
 });
+
+describe('BlogPostSchema, authorDeactivated (ACC-12)', () => {
+  it('is a boolean, false by default, with no index of its own', () => {
+    const { options } = BlogPostSchema.path('authorDeactivated');
+
+    expect(options).toMatchObject({ type: Boolean, default: false });
+    expect(options.index).toBeUndefined();
+  });
+
+  it('gives a new post authorDeactivated false', () => {
+    const mongoose = new Mongoose();
+    const Model = mongoose.model(BlogPost.name, BlogPostSchema);
+
+    expect(new Model({}).authorDeactivated).toBe(false);
+  });
+});

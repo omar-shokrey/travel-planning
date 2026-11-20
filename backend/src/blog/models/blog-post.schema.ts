@@ -45,6 +45,16 @@ export class BlogPost {
   })
   moderation: PostModeration;
 
+  /**
+   * ACC-12: set when the author deactivates their own account, never by a
+   * request body. It hides the post from everyone (`publishedFilter()` and
+   * `visiblePublishedPost`). Every check treats a missing value as false, so
+   * a post stored before this field existed stays visible. Not indexed: the
+   * public filters already narrow on the indexed fields first.
+   */
+  @Prop({ type: Boolean, default: false })
+  authorDeactivated: boolean;
+
   @Prop({ type: Date, index: true })
   publishedAt?: Date;
 
