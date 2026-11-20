@@ -2,7 +2,8 @@ import { BudgetSummaryCategory } from './budget-summary-category.enum';
 
 /**
  * ITN-27: the kind of booking linked to a day. The same values as the payments
- * module's `BookingType`, kept local so this module does not import payments.
+ * module's `BookingKind` (the real bookings of `BookingType`, without
+ * `flight_change`), kept local so this module does not import payments.
  */
 export enum LinkedBookingType {
   Flight = 'flight',

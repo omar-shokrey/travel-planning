@@ -1,12 +1,21 @@
 import type { BookingPaymentHandler } from './booking-payment-handler';
 import type { BookingType } from './enums/booking-type.enum';
 
-/** What may be charged for a flight change (FLT-27): the fare difference. */
+/**
+ * What may be charged for a flight change (FLT-27): the fare difference. The
+ * payments module refuses (500) any other answer: an amount that is not a
+ * whole number of at least 1, a currency other than the platform's (PAY-04),
+ * or a hold that is not live.
+ */
 export interface FlightChangePayable {
-  /** Whole minor units of `currency`, at least 1. */
+  /**
+   * Whole minor units of `currency`, at least 1. It must never change for a
+   * change: a second request or a retry reuses the PaymentIntent made for it.
+   */
   amount: number;
+  /** The platform currency, `USD` (PAY-04). */
   currency: string;
-  /** UTC end of the hold of the new flight's seats. */
+  /** UTC end of the hold of the new flight's seats, after `now`. */
   holdExpiresAt: Date;
 }
 

@@ -60,7 +60,7 @@ export class PaymentsController {
   @ApiOperation({
     summary: 'Start the payment of a booking (PAY-01)',
     description: [
-      'Registered users only, for their own booking. The body names the booking (`bookingType` and `bookingId`) and nothing else: **the amount and the currency are always the booking total**, never sent by the client.',
+      'Registered users only, for their own booking. The body names the booking (`bookingType` and `bookingId`) and nothing else: **the amount and the currency are always the booking total (or the fare difference of a flight change)**, never sent by the client.',
       'The booking must be waiting for payment, its hold must be live and its policies must be accepted (`POST /api/bookings/:type/:id/accept-policies`, PAY-02). Stripe test mode creates a PaymentIntent and the answer carries its `clientSecret`: the frontend confirms the payment with Stripe Elements, so **card details never reach this backend**. Only the Stripe payment id, the amount, the currency and the status are stored.',
       '**The booking is not confirmed by this call.** It is confirmed only after the Stripe webhook (`POST /api/payments/webhook`) reports that the PaymentIntent succeeded. A booking has one payment: calling again while it waits for the card returns the same PaymentIntent; if the last attempt failed, use `POST /api/payments/:id/retry`. When the hold ends, the PaymentIntent is cancelled.',
       '**A flight change (FLT-27)** to a dearer flight is paid the same way with `bookingType: flight_change` and the id of the change as `bookingId`: the amount is the fare difference of the change, and the change is applied only after the webhook reports the payment.',

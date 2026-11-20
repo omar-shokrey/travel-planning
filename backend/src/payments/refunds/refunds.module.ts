@@ -10,7 +10,7 @@ import { RefundsService } from './refunds.service';
 
 /**
  * PAY-03: refunds, as their own small module (development plan, section 15).
- * The bookings will call RefundsService (FLT-26, HTL-21, FLT-06) and payments
+ * The bookings call RefundsService (FLT-26, HTL-21, FLT-06, FLT-27) and payments
  * calls the bookings, so this module imports NO booking module and not
  * PaymentsModule: FlightBookingsModule and HotelBookingsModule can import it
  * without a cycle. It reads payments only through the Payment model.

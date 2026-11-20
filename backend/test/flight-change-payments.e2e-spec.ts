@@ -591,10 +591,10 @@ describe('Payments and refunds of a flight change (e2e, FLT-27 with PAY-01, PAY-
     // The app's own cron job may have cancelled it a moment before this call.
     await app.get(PaymentExpiryService).cancelDuePayments(new Date());
 
+    // Only the stored status is checked: the job and its cron run over the
+    // whole -test database, so another suite's app (with its own Stripe spy)
+    // may be the one that cancelled it.
     expect((await storedPayment(body.id)).status).toBe(PaymentStatus.Cancelled);
-    expect(gateway.cancelPaymentIntent).toHaveBeenCalledWith(
-      body.stripePaymentIntentId,
-    );
     expect(port.confirmPaid.mock.calls.length).toBe(confirmCalls);
     expect(flightConfirm).not.toHaveBeenCalled();
     flightConfirm.mockRestore();
@@ -795,5 +795,83 @@ describe('Payments and refunds of a flight change (e2e, FLT-27 with PAY-01, PAY-
       expect(schemas.BookingKind.enum).toEqual(['flight', 'hotel']);
       expect(schemas.RefundReason.enum).toContain('fare_difference');
     });
+  });
+});
+
+describe('A flight change payment without the flight change port (e2e, FLT-27 PR A as shipped)', () => {
+  let app: NestExpressApplication;
+  let payments: Model<Payment>;
+  let users: Model<User>;
+  let gateway: StripeGateway;
+  let userId: string | undefined;
+  let cookie: string;
+
+  beforeAll(async () => {
+    // The app exactly as this PR ships it: nothing provides the port yet.
+    const moduleFixture = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleFixture.createNestApplication<NestExpressApplication>({
+      rawBody: true,
+    });
+    configureApp(app);
+    await app.init();
+    payments = app.get<Model<Payment>>(getModelToken(Payment.name));
+    users = app.get<Model<User>>(getModelToken(User.name));
+    gateway = app.get(StripeGateway);
+    // Nothing reaches Stripe, not even this app's own cron jobs.
+    jest
+      .spyOn(gateway, 'createPaymentIntent')
+      .mockImplementation(() => Promise.reject(new Error('never called')));
+    jest
+      .spyOn(gateway, 'cancelPaymentIntent')
+      .mockImplementation(() => Promise.reject(new Error('not in this test')));
+    jest
+      .spyOn(gateway, 'retrievePaymentIntent')
+      .mockImplementation(() => Promise.reject(new Error('not in this test')));
+    jest
+      .spyOn(gateway, 'createRefund')
+      .mockImplementation(() => Promise.reject(new Error('not in this test')));
+    const created = await users.create({
+      name: 'flt27 no port user',
+      email: `flt27-noport-${randomUUID()}@example.com`,
+      passwordHash: 'not-a-real-hash',
+      role: Role.User,
+      consentAcceptedAt: new Date(),
+    });
+    userId = created._id.toString();
+    cookie = await sessionCookieFor(app, userId);
+  });
+
+  afterAll(async () => {
+    if (!app) return;
+    jest.restoreAllMocks();
+    try {
+      if (userId) {
+        await deleteSessionsOf(app, userId);
+        await users.findByIdAndDelete(userId).exec();
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('answers 404 "Booking not found", calls Stripe for nothing and stores no payment', async () => {
+    const changeId = new Types.ObjectId().toString();
+
+    const response = await request(app.getHttpServer())
+      .post('/api/payments')
+      .set('Cookie', cookie)
+      .send({ bookingType: 'flight_change', bookingId: changeId });
+
+    expect(response.status).toBe(404);
+    expect(response.body).toMatchObject({ message: BOOKING_NOT_FOUND_MESSAGE });
+    expect(gateway.createPaymentIntent).not.toHaveBeenCalled();
+    expect(
+      await payments.countDocuments({
+        bookingType: BookingType.FlightChange,
+        bookingId: new Types.ObjectId(changeId),
+      }),
+    ).toBe(0);
   });
 });

@@ -5,6 +5,16 @@ export const REFUND_NOT_FOUND_MESSAGE = 'Refund not found';
 export const REFUND_EXCEEDS_PAYMENT_MESSAGE =
   'The refund is larger than what is left of the payment';
 
+/** FLT-27: too many refunds of the same payment at the same moment. */
+export const REFUND_BUSY_MESSAGE =
+  'The payment is being refunded by another request. Try again.';
+
+/**
+ * How many times a refund claims its payment before it gives up (409). A
+ * claim is lost only to another refund of the same payment at that moment.
+ */
+export const REFUND_CLAIM_ATTEMPTS = 5;
+
 /** At most this many refunds are sent again per run of the recovery job. */
 export const REFUND_RECOVERY_BATCH_SIZE = 50;
 

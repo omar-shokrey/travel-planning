@@ -399,6 +399,8 @@ describe('PaymentsService for a flight change (FLT-27)', () => {
     bookingType: BookingType.FlightChange,
     bookingId: CHANGE,
   };
+  // The service checks the port's hold against the real clock.
+  const CHANGE_HOLD_END = new Date(Date.now() + 10 * 60 * 1000);
 
   function setupChange(port?: Partial<FlightChangePaymentPort>) {
     const base = setup();
@@ -420,7 +422,7 @@ describe('PaymentsService for a flight change (FLT-27)', () => {
       Promise.resolve({
         amount: 4200,
         currency: 'USD',
-        holdExpiresAt: HOLD_END,
+        holdExpiresAt: CHANGE_HOLD_END,
         ...payableChange,
       }),
     ),
@@ -465,7 +467,7 @@ describe('PaymentsService for a flight change (FLT-27)', () => {
         bookingId: new Types.ObjectId(CHANGE),
         amount: 4200,
         currency: 'USD',
-        holdExpiresAt: HOLD_END,
+        holdExpiresAt: CHANGE_HOLD_END,
       }),
     );
   });
@@ -495,6 +497,47 @@ describe('PaymentsService for a flight change (FLT-27)', () => {
       expect(gateway.createPaymentIntent).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    ['a currency other than USD', { currency: 'EUR' }, /must be USD/],
+    [
+      'a hold that has ended',
+      { holdExpiresAt: new Date('2020-01-01T00:00:00.000Z') },
+      /hold that is not live/,
+    ],
+  ])(
+    'refuses %s from the port and calls Stripe for nothing',
+    async (_name, fields, message) => {
+      const { service, gateway, model } = setupChange(changePort(fields));
+
+      await expect(service.start(USER, changeDto)).rejects.toThrow(message);
+      expect(gateway.createPaymentIntent).not.toHaveBeenCalled();
+      expect(model.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not retry a change payment once the port says it is no longer payable (409)', async () => {
+    const port = changePort();
+    port.findPayable.mockRejectedValueOnce(
+      new ConflictException(HOLD_EXPIRED_MESSAGE),
+    );
+    const { service, model, gateway } = setupChange(port);
+    model.findOne.mockReturnValueOnce(
+      query(
+        stored({
+          bookingType: BookingType.FlightChange,
+          bookingId: new Types.ObjectId(CHANGE),
+          status: PaymentStatus.Failed,
+        }),
+      ),
+    );
+
+    await expect(service.retry(PAYMENT, USER)).rejects.toThrow(
+      new ConflictException(HOLD_EXPIRED_MESSAGE),
+    );
+    expect(gateway.retrievePaymentIntent).not.toHaveBeenCalled();
+    expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+  });
 
   it('retries a failed change payment only while the port still says it is payable', async () => {
     const port = changePort();

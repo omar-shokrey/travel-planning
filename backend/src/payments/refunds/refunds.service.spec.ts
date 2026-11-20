@@ -16,7 +16,11 @@ import type { StripeGateway } from '../stripe.gateway';
 import { RefundReason } from './enums/refund-reason.enum';
 import { RefundStatus } from './enums/refund-status.enum';
 import { FLIGHT_CHANGE_PAYMENT_PORT } from '../flight-change-payment-port';
-import { REFUND_EXCEEDS_PAYMENT_MESSAGE } from './refunds.constants';
+import {
+  REFUND_BUSY_MESSAGE,
+  REFUND_CLAIM_ATTEMPTS,
+  REFUND_EXCEEDS_PAYMENT_MESSAGE,
+} from './refunds.constants';
 import { percentOf, RefundsService } from './refunds.service';
 
 const BOOKING_ID = '6740f1c2a4b5c6d7e8f90789';
@@ -116,6 +120,8 @@ function setup(storedPayment: unknown = payment()) {
   const payments = {
     findOne: jest.fn(() => query(storedPayment)),
     findById: jest.fn(() => query(storedPayment)),
+    // The claim of the payment before a refund is sent (FLT-27).
+    updateOne: jest.fn(() => query({ matchedCount: 1 })),
   };
   const gateway = {
     createRefund: jest.fn(() =>
@@ -650,18 +656,44 @@ describe('RefundsService with several refunds per payment (FLT-27)', () => {
         if (index >= 0) stored.splice(index, 1);
         return query({ deletedCount: index >= 0 ? 1 : 0 });
       }),
-    };
-    const payments = {
-      findOne: jest.fn((filter: Record<string, unknown>) =>
-        query(
-          paymentList.find(
-            (candidate) =>
-              keyOf(candidate) === keyOf(filter) &&
-              candidate.status === filter.status,
-          ) ?? null,
-        ),
+      updateOne: jest.fn(
+        (
+          filter: { _id: unknown },
+          update: { $set: Record<string, unknown> },
+        ) => {
+          const refund = stored.find(
+            (doc) => String(doc._id) === String(filter._id),
+          );
+          if (refund) Object.assign(refund, update.$set);
+          return query({ matchedCount: refund ? 1 : 0 });
+        },
       ),
+    };
+    /** The version of each payment, as the claim compares it. */
+    const versions = new Map<string, number>();
+    const payments = {
+      findOne: jest.fn((filter: Record<string, unknown>) => {
+        const found = paymentList.find(
+          (candidate) =>
+            keyOf(candidate) === keyOf(filter) &&
+            candidate.status === filter.status,
+        );
+        return query(
+          found
+            ? { ...found, __v: versions.get(String(found._id)) ?? 0 }
+            : null,
+        );
+      }),
       findById: jest.fn(() => query(paymentList[0])),
+      updateOne: jest.fn((filter: { _id: unknown; __v: unknown }) => {
+        const id = String(filter._id);
+        const current = versions.get(id) ?? 0;
+        if (filter.__v !== current) {
+          return query({ matchedCount: 0 });
+        }
+        versions.set(id, current + 1);
+        return query({ matchedCount: 1 });
+      }),
     };
     let sent = 0;
     const gateway = {
@@ -690,7 +722,16 @@ describe('RefundsService with several refunds per payment (FLT-27)', () => {
       notifications as unknown as NotificationsService,
       moduleRef as unknown as ModuleRef,
     );
-    return { service, refunds, gateway, notifications, moduleRef, stored };
+    return {
+      service,
+      refunds,
+      payments,
+      gateway,
+      notifications,
+      moduleRef,
+      stored,
+      versions,
+    };
   }
 
   const fareDifference = (fields: Record<string, unknown> = {}) => ({
@@ -870,11 +911,55 @@ describe('RefundsService with several refunds per payment (FLT-27)', () => {
       ).resolves.toMatchObject({ amount: 12550 });
     });
 
-    it('removes its own refund by id and answers 409 when a refund made at the same moment would exceed the payment', async () => {
-      const { service, refunds, gateway, stored } = many();
-      const create = refunds.create.getMockImplementation();
-      refunds.create.mockImplementationOnce((doc) => {
-        // Another refund of the same payment is recorded in the same instant.
+    it('claims the payment with its version, without touching updatedAt', async () => {
+      const { service, payments } = many();
+
+      await service.refundAmount(fareDifference());
+
+      expect(payments.updateOne).toHaveBeenCalledWith(
+        { _id: PAYMENT_ID, __v: 0 },
+        { $inc: { __v: 1 } },
+        { timestamps: false },
+      );
+    });
+
+    it('tries again after losing the claim and corrects its refund to what is left now', async () => {
+      const { service, refunds, payments, gateway, stored, versions } = many();
+      const claim = payments.updateOne.getMockImplementation()!;
+      payments.updateOne.mockImplementationOnce((filter) => {
+        // Another refund of the same payment was recorded and claimed first.
+        stored.push({
+          _id: new Types.ObjectId(),
+          bookingType: BookingType.FlightChange,
+          bookingId: new Types.ObjectId(),
+          paymentId: PAYMENT_ID,
+          amount: 4000,
+          status: RefundStatus.Pending,
+        });
+        versions.set(String(PAYMENT_ID), 1);
+        return claim(filter);
+      });
+
+      const refund = await service.refund(request({ refundPercent: 100 }));
+
+      // 25100 at first, corrected to 25100 - 4000 before anything was sent.
+      expect(refund).toMatchObject({ amount: 21100, refundPercent: 100 });
+      expect(refunds.create).toHaveBeenCalledTimes(1);
+      expect(refunds.updateOne).toHaveBeenCalledWith(
+        { _id: expect.any(Types.ObjectId) },
+        { $set: { amount: 21100, refundPercent: 100 } },
+      );
+      expect(gateway.createRefund).toHaveBeenCalledTimes(1);
+      expect(gateway.createRefund).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 21100 }),
+        expect.any(String),
+      );
+    });
+
+    it('answers 409 and removes its own refund when, after a lost claim, the amount no longer fits', async () => {
+      const { service, refunds, payments, gateway, stored, versions } = many();
+      const claim = payments.updateOne.getMockImplementation()!;
+      payments.updateOne.mockImplementationOnce((filter) => {
         stored.push({
           _id: new Types.ObjectId(),
           bookingType: BookingType.Flight,
@@ -883,15 +968,85 @@ describe('RefundsService with several refunds per payment (FLT-27)', () => {
           amount: 25000,
           status: RefundStatus.Pending,
         });
-        return create!(doc);
+        versions.set(String(PAYMENT_ID), 1);
+        return claim(filter);
       });
 
       await expect(service.refundAmount(fareDifference())).rejects.toThrow(
-        ConflictException,
+        new ConflictException(REFUND_EXCEEDS_PAYMENT_MESSAGE),
       );
       expect(refunds.deleteOne).toHaveBeenCalledTimes(1);
       expect(stored.map((refund) => refund.amount)).toEqual([25000]);
       expect(gateway.createRefund).not.toHaveBeenCalled();
+    });
+
+    it('gives up with 409 after REFUND_CLAIM_ATTEMPTS lost claims, removing its own refund', async () => {
+      const { service, payments, gateway, stored } = many();
+      payments.updateOne.mockImplementation(() => query({ matchedCount: 0 }));
+
+      await expect(service.refundAmount(fareDifference())).rejects.toThrow(
+        new ConflictException(REFUND_BUSY_MESSAGE),
+      );
+      expect(payments.updateOne).toHaveBeenCalledTimes(REFUND_CLAIM_ATTEMPTS);
+      expect(stored).toEqual([]);
+      expect(gateway.createRefund).not.toHaveBeenCalled();
+    });
+
+    it('never refunds more than the payment when a fare difference and a cancellation run at the same moment, and never loses the cancellation', async () => {
+      const { service, stored, gateway } = many({
+        payments: [payment({ amount: 10000 })],
+      });
+
+      const [fare, cancel] = await Promise.allSettled([
+        service.refundAmount(fareDifference({ amount: 6000 })),
+        service.refund(request({ refundPercent: 100 })),
+      ]);
+
+      // The cancellation fits itself to what is left, so it always succeeds:
+      // 4000 after the fare difference, or all 10000 if it claimed first, and
+      // then the fare difference no longer fits (409, nothing recorded).
+      expect(cancel.status).toBe('fulfilled');
+      const cancelled = (cancel as PromiseFulfilledResult<{ amount: number }>)
+        .value.amount;
+      if (fare.status === 'fulfilled') {
+        expect(fare.value).toMatchObject({ amount: 6000 });
+        expect(cancelled).toBe(4000);
+      } else {
+        expect(fare.reason).toEqual(
+          new ConflictException(REFUND_EXCEEDS_PAYMENT_MESSAGE),
+        );
+        expect(cancelled).toBe(10000);
+      }
+      const amounts = stored.map((refund) => refund.amount as number);
+      expect(amounts.reduce((sum, amount) => sum + amount, 0)).toBe(10000);
+      const sent = gateway.createRefund.mock.calls.map(
+        ([input]) => input.amount,
+      );
+      expect(sent.reduce((sum, amount) => sum + amount, 0)).toBe(10000);
+    });
+
+    it('keeps both of two fare differences made at the same moment when together they fit', async () => {
+      const { service, stored } = many({
+        payments: [payment({ amount: 10000 })],
+      });
+
+      const results = await Promise.all([
+        service.refundAmount(
+          fareDifference({
+            bookingId: new Types.ObjectId().toString(),
+            amount: 3000,
+          }),
+        ),
+        service.refundAmount(
+          fareDifference({
+            bookingId: new Types.ObjectId().toString(),
+            amount: 5000,
+          }),
+        ),
+      ]);
+
+      expect(results.map((refund) => refund?.amount)).toEqual([3000, 5000]);
+      expect(stored).toHaveLength(2);
     });
 
     it('leaves the refund pending when Stripe is down, does not throw, and still notifies', async () => {

@@ -162,7 +162,7 @@ describe('PaymentExpiryService (PAY-01)', () => {
 });
 
 describe('PaymentExpiryService and flight change payments (FLT-27)', () => {
-  it('cancels a flight_change payment whose hold ended like any other: its intent at Stripe, then the payment, and touches no booking', async () => {
+  it('cancels a flight_change payment whose hold ended like any other: its intent at Stripe first, then the payment', async () => {
     const changePayment = {
       _id: new Types.ObjectId(),
       bookingType: 'flight_change',
@@ -182,8 +182,8 @@ describe('PaymentExpiryService and flight change payments (FLT-27)', () => {
       { _id: changePayment._id, status: { $in: OPEN } },
       { $set: { status: PaymentStatus.Cancelled } },
     );
-    // The job is built from the payments and Stripe only: it has no booking
-    // service or payment handler it could call.
-    expect(PaymentExpiryService.length).toBe(2);
+    expect(
+      gateway.cancelPaymentIntent.mock.invocationCallOrder[0],
+    ).toBeLessThan(payments.updateOne.mock.invocationCallOrder[0]);
   });
 });

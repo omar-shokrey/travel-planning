@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
+import { PLATFORM_CURRENCY } from '../common/constants/currency';
 import { BookingPoliciesService } from './booking-policies.service';
 import type { CreatePaymentDto } from './dto/create-payment.dto';
 import type {
@@ -217,10 +218,24 @@ export class PaymentsService {
       throw new NotFoundException(BOOKING_NOT_FOUND_MESSAGE);
     }
     const change = await this.flightChanges.findPayable(id, userId, now);
+    // A wrong answer is a programming error in the port: never store it or
+    // send it to Stripe.
     if (!Number.isInteger(change.amount) || change.amount < 1) {
-      // A programming error in the port: never charge a wrong amount.
       throw new Error(
         `Flight change ${id}: the amount to pay must be a whole number of at least 1, got ${change.amount}`,
+      );
+    }
+    if (change.currency !== PLATFORM_CURRENCY) {
+      throw new Error(
+        `Flight change ${id}: the currency must be ${PLATFORM_CURRENCY} (PAY-04), got ${change.currency}`,
+      );
+    }
+    if (
+      !(change.holdExpiresAt instanceof Date) ||
+      !(change.holdExpiresAt.getTime() > now.getTime())
+    ) {
+      throw new Error(
+        `Flight change ${id}: the port gave a hold that is not live`,
       );
     }
     return {

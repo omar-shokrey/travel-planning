@@ -40,6 +40,8 @@ import { Refund } from './models/refund.schema';
 import { refundMessage } from './refund-messages';
 import { refundStatusOf } from './refund-status';
 import {
+  REFUND_BUSY_MESSAGE,
+  REFUND_CLAIM_ATTEMPTS,
   REFUND_EXCEEDS_PAYMENT_MESSAGE,
   REFUND_NOT_FOUND_MESSAGE,
 } from './refunds.constants';
@@ -86,15 +88,21 @@ const LINK_TYPE: Record<BookingKind, NotificationLinkType> = {
   [BookingType.Hotel]: NotificationLinkType.HotelBooking,
 };
 
-/** The fields of a payment the refunds need. */
-interface RefundablePayment {
+/** The fields of a payment the refunds need, with its version for the claim. */
+interface ClaimablePayment {
   _id: Types.ObjectId;
-  bookingId: Types.ObjectId;
   userId: Types.ObjectId;
   stripePaymentIntentId: string;
   amount: number;
   currency: string;
+  __v?: number;
 }
+
+/** What `record` did: recorded a new refund, found one, or nothing to refund. */
+type RecordResult =
+  | { kind: 'created'; refund: RefundSource; payment: ClaimablePayment }
+  | { kind: 'existing'; refund: RefundSource }
+  | { kind: 'nothing' };
 
 /** The idempotency key of a refund: one per (`bookingType`, `bookingId`), at Stripe too. */
 export const refundIdempotencyKey = (
@@ -134,6 +142,9 @@ export class RefundsService {
    * - The refund is recorded first (`pending`), then sent to Stripe. One
    *   (`bookingType`, `bookingId`) has at most one refund: a second call
    *   returns the first one unchanged, so a retried cancellation is harmless.
+   * - Refunds of the same payment at the same moment never add up to more
+   *   than it (see `record`); after REFUND_CLAIM_ATTEMPTS lost claims the
+   *   answer is 409 and nothing is recorded.
    * - If Stripe is unavailable the refund stays `pending` without a Stripe id
    *   and this method still answers: a cancellation never fails because of
    *   Stripe. The recovery job sends it later.
@@ -154,55 +165,31 @@ export class RefundsService {
       return null;
     }
 
-    const payment = await this.payments
-      .findOne({
-        bookingType,
-        bookingId: new Types.ObjectId(bookingId),
-        status: PaymentStatus.Succeeded,
-      })
-      .lean()
-      .exec();
-    if (!payment) {
-      throw new NotFoundException(PAYMENT_NOT_FOUND_MESSAGE);
-    }
-    const remaining =
-      payment.amount -
-      (await this.refundedFrom(payment._id, bookingType, bookingId));
-    // Whole minor units, never more than what is left of the payment.
-    const amount = Math.round((remaining * refundPercent) / 100);
-    if (amount <= 0) {
+    const recorded = await this.record(
+      () =>
+        this.payments
+          .findOne({
+            bookingType,
+            bookingId: new Types.ObjectId(bookingId),
+            status: PaymentStatus.Succeeded,
+          })
+          .lean()
+          .exec(),
+      { bookingType, bookingId },
+      reason,
+      (_payment, remaining) => {
+        // Whole minor units, never more than what is left of the payment.
+        const amount = Math.round((remaining * refundPercent) / 100);
+        return amount > 0 ? { amount, refundPercent } : null;
+      },
+    );
+    if (recorded.kind === 'nothing') {
       return null;
     }
-
-    let created: RefundSource;
-    try {
-      created = (
-        await this.refunds.create({
-          bookingType,
-          bookingId: payment.bookingId,
-          paymentId: payment._id,
-          userId: payment.userId,
-          amount,
-          currency: payment.currency,
-          refundPercent,
-          reason,
-          status: RefundStatus.Pending,
-        })
-      ).toObject();
-    } catch (error) {
-      if (!isDuplicateKey(error)) {
-        throw error;
-      }
-      // Already refunded (a retried cancellation, or two at the same moment).
-      const existing = await this.refunds
-        .findOne({ bookingType, bookingId: payment.bookingId })
-        .lean()
-        .orFail()
-        .exec();
-      return toRefundResponse(existing);
+    if (recorded.kind === 'existing') {
+      return toRefundResponse(recorded.refund);
     }
-
-    await this.assertWithinPayment(created, payment);
+    const { refund: created, payment } = recorded;
     const sent = await this.submit(created, payment.stripePaymentIntentId);
     await this.notify(sent, true);
     return toRefundResponse(sent);
@@ -216,7 +203,8 @@ export class RefundsService {
    *   unchanged (Stripe and the notification once in total).
    * - 0 creates nothing and returns `null`.
    * - No succeeded payment: 404 "Payment not found". More than what is left
-   *   of the payment: 409, and nothing is recorded.
+   *   of the payment (also when another refund of it is made at the same
+   *   moment), or too many lost claims: 409, and nothing is recorded.
    * - Recorded first (`pending`), then sent to Stripe with an idempotency key
    *   of its own key; Stripe trouble leaves it `pending` for the recovery job
    *   and never throws.
@@ -241,48 +229,32 @@ export class RefundsService {
       return toRefundResponse(already);
     }
 
-    const payment = await this.payments
-      .findOne({
-        bookingType: paymentOf.bookingType,
-        bookingId: new Types.ObjectId(paymentOf.bookingId),
-        status: PaymentStatus.Succeeded,
-      })
-      .lean()
-      .exec();
-    if (!payment) {
-      throw new NotFoundException(PAYMENT_NOT_FOUND_MESSAGE);
+    const recorded = await this.record(
+      () =>
+        this.payments
+          .findOne({
+            bookingType: paymentOf.bookingType,
+            bookingId: new Types.ObjectId(paymentOf.bookingId),
+            status: PaymentStatus.Succeeded,
+          })
+          .lean()
+          .exec(),
+      { bookingType, bookingId },
+      reason,
+      (payment, remaining) => {
+        if (amount > remaining) {
+          throw new ConflictException(REFUND_EXCEEDS_PAYMENT_MESSAGE);
+        }
+        return { amount, refundPercent: percentOf(amount, payment.amount) };
+      },
+    );
+    if (recorded.kind !== 'created') {
+      // Never `nothing`: the amount is positive and checked against the rest.
+      return recorded.kind === 'existing'
+        ? toRefundResponse(recorded.refund)
+        : null;
     }
-    const remaining =
-      payment.amount -
-      (await this.refundedFrom(payment._id, bookingType, bookingId));
-    if (amount > remaining) {
-      throw new ConflictException(REFUND_EXCEEDS_PAYMENT_MESSAGE);
-    }
-
-    let created: RefundSource;
-    try {
-      created = (
-        await this.refunds.create({
-          ...key,
-          paymentId: payment._id,
-          userId: payment.userId,
-          amount,
-          currency: payment.currency,
-          refundPercent: percentOf(amount, payment.amount),
-          reason,
-          status: RefundStatus.Pending,
-        })
-      ).toObject();
-    } catch (error) {
-      if (!isDuplicateKey(error)) {
-        throw error;
-      }
-      // Two calls at the same moment: the other one recorded it first.
-      const existing = await this.refunds.findOne(key).lean().orFail().exec();
-      return toRefundResponse(existing);
-    }
-
-    await this.assertWithinPayment(created, payment);
+    const { refund: created, payment } = recorded;
     const sent = await this.submit(created, payment.stripePaymentIntentId);
     await this.notify(sent, true, link);
     return toRefundResponse(sent);
@@ -313,28 +285,129 @@ export class RefundsService {
   }
 
   /**
-   * Two refunds from the same payment at the same moment could each see the
-   * whole remainder. After recording, the refunds of the payment are summed
-   * again: if they now exceed it, this refund (by its id) is removed before
-   * anything reached Stripe, and the answer is 409.
+   * Records a refund against a payment, never more than what is left of it,
+   * even when several refunds of the same payment are made at the same moment.
+   *
+   * Each attempt reads the payment (with its version, `__v`), then the refunds
+   * already made against it, works out the amount (`plan`), records the refund
+   * (or corrects the one this call recorded before), and finally claims the
+   * payment: one conditional update that bumps `__v` only if it is still the
+   * version read. A refund of the same payment that claimed it in between was
+   * recorded before its claim, so this call sees it on its next attempt; the
+   * loser of two claims at the same moment tries again with the new sum. So a
+   * claimed refund always fits, and no index or field is needed. After
+   * REFUND_CLAIM_ATTEMPTS lost claims the refund this call recorded is removed
+   * (by id, before it reached Stripe) and the answer is 409.
+   *
+   * A refund with the same key already recorded is returned as `existing`;
+   * `plan` returning `null` (nothing to refund) is `nothing`; `plan` may throw
+   * (409 above the rest), and the refund this call recorded is then removed.
    */
-  private async assertWithinPayment(
-    created: RefundSource,
-    payment: RefundablePayment,
-  ): Promise<void> {
-    const refunded = await this.refundedFrom(
-      payment._id,
-      created.bookingType,
-      created.bookingId.toString(),
-    );
-    if (refunded + created.amount <= payment.amount) {
-      return;
+  private async record(
+    findPayment: () => Promise<ClaimablePayment | null>,
+    key: { bookingType: BookingType; bookingId: string },
+    reason: RefundReason,
+    plan: (
+      payment: ClaimablePayment,
+      remaining: number,
+    ) => { amount: number; refundPercent: number } | null,
+  ): Promise<RecordResult> {
+    let own: RefundSource | undefined;
+    for (let attempt = 1; ; attempt += 1) {
+      const payment = await findPayment();
+      if (!payment) {
+        await this.removeOwn(own);
+        throw new NotFoundException(PAYMENT_NOT_FOUND_MESSAGE);
+      }
+      const remaining =
+        payment.amount -
+        (await this.refundedFrom(payment._id, key.bookingType, key.bookingId));
+      let planned: { amount: number; refundPercent: number } | null;
+      try {
+        planned = plan(payment, remaining);
+      } catch (error) {
+        await this.removeOwn(own);
+        throw error;
+      }
+      if (!planned) {
+        await this.removeOwn(own);
+        return { kind: 'nothing' };
+      }
+
+      if (!own) {
+        try {
+          own = (
+            await this.refunds.create({
+              bookingType: key.bookingType,
+              bookingId: new Types.ObjectId(key.bookingId),
+              paymentId: payment._id,
+              userId: payment.userId,
+              amount: planned.amount,
+              currency: payment.currency,
+              refundPercent: planned.refundPercent,
+              reason,
+              status: RefundStatus.Pending,
+            })
+          ).toObject();
+        } catch (error) {
+          if (!isDuplicateKey(error)) {
+            throw error;
+          }
+          // Already refunded (a retried call, or two at the same moment).
+          const existing = await this.refunds
+            .findOne({
+              bookingType: key.bookingType,
+              bookingId: new Types.ObjectId(key.bookingId),
+            })
+            .lean()
+            .orFail()
+            .exec();
+          return { kind: 'existing', refund: existing };
+        }
+      } else if (
+        own.amount !== planned.amount ||
+        own.refundPercent !== planned.refundPercent
+      ) {
+        // Not sent yet: correct it to what is left now.
+        await this.refunds
+          .updateOne({ _id: own._id }, { $set: planned })
+          .exec();
+        own = { ...own, ...planned };
+      }
+
+      if (await this.claim(payment)) {
+        return { kind: 'created', refund: own, payment };
+      }
+      if (attempt >= REFUND_CLAIM_ATTEMPTS) {
+        await this.removeOwn(own);
+        this.logger.warn(
+          `Refund of ${key.bookingType} ${key.bookingId} gave up after ${attempt} claims of payment ${payment._id.toString()} by other refunds.`,
+        );
+        throw new ConflictException(REFUND_BUSY_MESSAGE);
+      }
     }
-    await this.refunds.deleteOne({ _id: created._id }).exec();
-    this.logger.warn(
-      `Refund ${created._id.toString()} was removed: with the refunds made at the same moment it exceeded payment ${payment._id.toString()}.`,
-    );
-    throw new ConflictException(REFUND_EXCEEDS_PAYMENT_MESSAGE);
+  }
+
+  /** One conditional update: the payment is still at the version read. */
+  private async claim(payment: ClaimablePayment): Promise<boolean> {
+    const { matchedCount } = await this.payments
+      .updateOne(
+        {
+          _id: payment._id,
+          __v: payment.__v ?? { $exists: false },
+        },
+        { $inc: { __v: 1 } },
+        { timestamps: false },
+      )
+      .exec();
+    return matchedCount > 0;
+  }
+
+  /** Removes, by id, a refund this call recorded and never sent. */
+  private async removeOwn(own: RefundSource | undefined): Promise<void> {
+    if (own) {
+      await this.refunds.deleteOne({ _id: own._id }).exec();
+    }
   }
 
   /**
