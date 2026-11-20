@@ -12,6 +12,7 @@ Registration, login, logout, the authentication cookies and the current user (`/
 | `POST /api/auth/refresh`          | ACC-06         | Public (the refresh cookie is checked) |
 | `GET /api/auth/me`                | ACC-04, ACC-19 | Any logged-in user                     |
 | `PATCH /api/auth/change-password` | ACC-08         | Any logged-in user                     |
+| `DELETE /api/users/me`            | ACC-12         | Registered users (`user` role)         |
 
 `AuthCookiesService` sets, clears and reads the two authentication cookies (ACC-19). `AuthTokensService` signs and checks the tokens. `SessionsService` owns the `sessions` collection (ACC-06). `JwtAuthGuard` is the guard that protects every route (ACC-04).
 
@@ -62,6 +63,45 @@ The 5th wrong password in a row locks the account for 15 minutes (`MAX_FAILED_LO
 - **This session stays logged in; every other session of the account ends.** Someone who stole a session cookie loses it when the owner changes the password. The session that made the change is read from its access cookie, as logout reads it (`AuthTokensService.readClaims`), and kept; `SessionsService.revokeAllOfUser` sets `revokedAt` on all the others in one `updateMany` whose filter always names the user. Their access and refresh cookies get 401 at once. If the access cookie cannot be read, or names another user, the route answers 401 "You must log in to do this" and changes nothing.
 - **The password is saved first, then the other sessions end.** If the second step fails, the new password is in place but the old sessions stay alive until they log out or run out (30 minutes idle). The other order would be worse: sessions ended but the old password still valid. Neither step is skipped on a normal request; they are not one transaction because they are two collections.
 - **Wrong current passwords are not counted for the lockout** (ACC-05). The lockout protects the login of someone who has no session; this route already needs one.
+
+## Deactivate my own account (ACC-12)
+
+`DELETE /api/users/me` with `{ "currentPassword": "..." }` closes the account of the logged-in user and answers **204** with no body. `AccountDeactivationController` (`@Controller('users')`, `@ApiTags('users')`) and `AccountDeactivationService` in this module.
+
+**Decisions** (each one is listed in the pull request for review):
+
+- **D1. The route lives in the auth module, not in users.** It reads bookings, hides posts and itineraries and ends sessions. The blog and itineraries modules import `UsersModule`, so `UsersModule` cannot import them without a cycle. Only `AppModule` and `AdminModule` import `AuthModule`, so `AuthModule` can import `BlogModule`, `ItinerariesModule`, `FlightBookingsModule` and `HotelBookingsModule`. The controller uses the `users` path and tag, so Swagger shows it with `GET` and `PATCH /api/users/me`.
+- **D2. "After confirmation" means the current password.** The body is only `currentPassword` (the same rules as in ACC-08: a text, not empty, at most 72 characters, the password rule is not checked). A wrong one answers 400 "The current password is incorrect" and changes nothing; it is not counted for the lockout (ACC-05). The user cannot undo a deactivation, so a stolen session alone must not be enough. The frontend's confirmation dialog (Milestone 2) is on top of this. The client never sends a status or a flag: any other property is 400.
+- **D3. "Upcoming confirmed bookings" means any booking with status `confirmed`**, flight or hotel. No date arithmetic: GEN-11's completion jobs move a confirmed booking to `completed` once its trip is over, so one that is still `confirmed` is not over yet. A completed, expired or cancelled booking does not block.
+- **D4. A live hold blocks it too.** A booking `pending_payment` whose `holdExpiresAt` is still in the future: a payment inside the hold would confirm a booking of an account that can no longer log in (money taken, no access to the e-ticket). The requirement names only confirmed bookings; this is an extra rule with its own message. A hold that has ended does not block (a late payment is refunded, PAY-03).
+- **Only registered users.** `@Roles(Role.User)`: an administrator or a moderator gets 403. Admin accounts are seeded and moderator accounts belong to a provider; neither closes itself here.
+
+**Answers.** 204 (cookies cleared); 400 wrong password or invalid body; 401 not logged in; 403 not a registered user, suspended, or a temporary password to change first (`JwtAuthGuard`); 409 with one of these messages (`auth.constants.ts`):
+
+- `ACCOUNT_HAS_CONFIRMED_BOOKINGS_MESSAGE`: "You have upcoming confirmed bookings. Cancel them or wait until the trips are over, then deactivate your account"
+- `ACCOUNT_HAS_UNPAID_BOOKING_MESSAGE`: "You have a booking waiting for payment. Pay it, or wait until its hold ends, then deactivate your account"
+- `ACCOUNT_CHANGED_MESSAGE`: "Your account was changed by another request. Please try again"
+
+**The order of the steps is the design** (`AccountDeactivationService.deactivate`). Everything that can refuse comes first, everything that can be repeated comes before the status change, so a failure never leaves the user stuck:
+
+1. Read the account with its hash. Missing, not a `user` or not `active`: 401 (a backstop; the guards already refuse these).
+2. Compare the current password (bcrypt). Wrong: 400.
+3. Confirmed flight or hotel booking (both read at once): 409.
+4. Live flight or hotel hold (both read at once): 409 with the unpaid message.
+5. Hide the content: `PostsService.markAuthorDeactivated` and `ItinerariesService.markOwnerDeactivated`. Each is one `updateMany` filtered by this user only, with `timestamps: false`, and idempotent, so if a later step fails the user simply tries again. These are the only multi-document writes.
+6. The status change: `UsersService.deactivateOwnAccount`, one conditional update from `active` that also sets `deactivatedAt`. `null` (an admin suspended the account at the same moment): 409 "Your account was changed by another request".
+7. End every session: `SessionsService.revokeAllOfUser(userId, now)`, this one included. If it fails, the error is logged (the user id only, never the password or the hash) and the request still succeeds: `JwtAuthGuard` already refuses a deactivated account on every request, and refresh refuses it too.
+
+The controller then clears both cookies (`AuthCookiesService.clearAuthCookies`, like logout). After that the login with the right password answers the plain 401 "Invalid email or password", the old cookies get 401, and an admin's reactivate answers 409.
+
+**Known limits.**
+
+- Two requests at the same moment can slip through: a hold created in another session between steps 3-4 and step 6. The window is a few milliseconds and the account is refused by the guard right after step 6. Not fixed here (it would need a transaction across three collections).
+- If step 6 answers 409 because an admin suspended the account at that moment, the posts and itineraries are already hidden while the account is only suspended, and a later reactivation (ACC-16) does not show them again. It needs an admin and a user acting in the same moment; it hides content, it never shows hidden content. Not fixed here.
+
+**Not done here.** The email stays taken (the unique index), so it cannot be used to register again. Nothing is notified, cancelled or refunded: confirmed bookings block the deactivation instead. Reviews (HTL-23, not built yet) must show "Deleted user" for a deactivated author, as comments do (see the users README). The user cannot reopen the account and an admin cannot reactivate it.
+
+**Tests:** `account-deactivation.service.spec.ts` (every branch and the order of the calls), `account-deactivation.controller.spec.ts` (route, role, 204, cookies), `dto/deactivate-account.dto.spec.ts`, and `test/users-deactivate-account.e2e-spec.ts`.
 
 ## Temporary password (ACC-13, ACC-07a)
 
