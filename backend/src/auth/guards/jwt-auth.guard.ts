@@ -16,12 +16,20 @@ import type {
 import { UsersService } from '../../users/users.service';
 import {
   ACCOUNT_SUSPENDED_MESSAGE,
+  EMAIL_NOT_VERIFIED_MESSAGE,
   LOGIN_REQUIRED_MESSAGE,
   PASSWORD_CHANGE_REQUIRED_MESSAGE,
 } from '../auth.constants';
 import { AuthTokensService, type TokenClaims } from '../auth-tokens.service';
 import { SessionsService } from '../sessions.service';
 import { ALLOW_TEMPORARY_PASSWORD_KEY } from '../decorators/allow-temporary-password.decorator';
+import { REQUIRE_VERIFIED_EMAIL_KEY } from '../decorators/require-verified-email.decorator';
+
+/** The route flags the guard reads with the account. */
+interface RouteFlags {
+  allowTemporaryPassword: boolean;
+  requireVerifiedEmail: boolean;
+}
 
 /**
  * The authentication guard (ACC-04), registered for the whole app. A route
@@ -43,6 +51,12 @@ import { ALLOW_TEMPORARY_PASSWORD_KEY } from '../decorators/allow-temporary-pass
  * PATCH /api/auth/change-password) answers 403. The backend enforces it
  * (GEN-13), whatever the frontend does. The flag is read with the account on
  * every request, so the change applies at once.
+ *
+ * ACC-02: a route marked @RequireVerifiedEmail() (the routes that book)
+ * answers 403 "Verify your email address before booking" to an account with
+ * `emailVerified: false`. An account without the field (made before ACC-02)
+ * is verified. It is checked last, after the suspension and the temporary
+ * password.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -62,17 +76,17 @@ export class JwtAuthGuard implements CanActivate {
       return true;
     }
 
-    const allowTemporaryPassword =
-      this.reflector.getAllAndOverride<boolean | undefined>(
-        ALLOW_TEMPORARY_PASSWORD_KEY,
-        [context.getHandler(), context.getClass()],
-      ) === true;
+    const flag = (key: string): boolean =>
+      this.reflector.getAllAndOverride<boolean | undefined>(key, [
+        context.getHandler(),
+        context.getClass(),
+      ]) === true;
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    request.user = await this.authenticate(
-      this.readToken(request),
-      allowTemporaryPassword,
-    );
+    request.user = await this.authenticate(this.readToken(request), {
+      allowTemporaryPassword: flag(ALLOW_TEMPORARY_PASSWORD_KEY),
+      requireVerifiedEmail: flag(REQUIRE_VERIFIED_EMAIL_KEY),
+    });
     return true;
   }
 
@@ -87,7 +101,7 @@ export class JwtAuthGuard implements CanActivate {
 
   private async authenticate(
     token: string | undefined,
-    allowTemporaryPassword: boolean,
+    flags: RouteFlags,
   ): Promise<AuthenticatedUser> {
     if (!token) {
       throw new UnauthorizedException(LOGIN_REQUIRED_MESSAGE);
@@ -124,8 +138,12 @@ export class JwtAuthGuard implements CanActivate {
     }
     // After the checks above, so a suspended account still gets its own 403.
     // A document saved before the flag existed has none: it is not restricted.
-    if (user.mustChangePassword === true && !allowTemporaryPassword) {
+    if (user.mustChangePassword === true && !flags.allowTemporaryPassword) {
       throw new ForbiddenException(PASSWORD_CHANGE_REQUIRED_MESSAGE);
+    }
+    // ACC-02, last: only `false` blocks; a document without the field passes.
+    if (flags.requireVerifiedEmail && user.emailVerified === false) {
+      throw new ForbiddenException(EMAIL_NOT_VERIFIED_MESSAGE);
     }
     return { id: user._id.toString(), role: user.role };
   }

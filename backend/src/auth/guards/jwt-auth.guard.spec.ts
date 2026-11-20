@@ -14,10 +14,12 @@ import type { AuthTokensService } from '../auth-tokens.service';
 import type { SessionsService } from '../sessions.service';
 import {
   ACCOUNT_SUSPENDED_MESSAGE,
+  EMAIL_NOT_VERIFIED_MESSAGE,
   LOGIN_REQUIRED_MESSAGE,
   PASSWORD_CHANGE_REQUIRED_MESSAGE,
 } from '../auth.constants';
 import { AllowTemporaryPassword } from '../decorators/allow-temporary-password.decorator';
+import { RequireVerifiedEmail } from '../decorators/require-verified-email.decorator';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 class ProtectedController {
@@ -56,6 +58,24 @@ class AllowedController {
   }
 }
 
+class BookingLikeController {
+  @RequireVerifiedEmail()
+  bookRoute(): string {
+    return 'ok';
+  }
+
+  readRoute(): string {
+    return 'ok';
+  }
+}
+
+@RequireVerifiedEmail()
+class VerifiedOnlyController {
+  anyRoute(): string {
+    return 'ok';
+  }
+}
+
 const USER_ID = '6740f1c2a4b5c6d7e8f90123';
 const SESSION_ID = '6740f1c2a4b5c6d7e8f90abc';
 
@@ -65,6 +85,8 @@ function storedUser(
     status?: UserStatus;
     /** Left out unless given, like a document saved before the field existed. */
     mustChangePassword?: boolean;
+    /** Left out unless given, like an account saved before ACC-02. */
+    emailVerified?: boolean;
   } = {},
 ) {
   return {
@@ -74,6 +96,9 @@ function storedUser(
     ...(fields.mustChangePassword === undefined
       ? {}
       : { mustChangePassword: fields.mustChangePassword }),
+    ...(fields.emailVerified === undefined
+      ? {}
+      : { emailVerified: fields.emailVerified }),
   };
 }
 
@@ -452,6 +477,109 @@ describe('JwtAuthGuard', () => {
 
       await expect(result).resolves.toBe(true);
       expect(usersService.findEntityById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a route that books needs a verified email (ACC-02)', () => {
+    const runBooking = (run: ReturnType<typeof setup>['run']) =>
+      run(BookingLikeController, BookingLikeController.prototype.bookRoute);
+
+    it('answers 403 with its own message to an account with emailVerified false', async () => {
+      const { usersService, run } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({ emailVerified: false }),
+      );
+
+      const { request, result } = runBooking(run);
+
+      await expect(result).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(result).rejects.toThrow(EMAIL_NOT_VERIFIED_MESSAGE);
+      expect(request.user).toBeUndefined();
+    });
+
+    it('also refuses every route of a controller marked as a whole', async () => {
+      const { usersService, run } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({ emailVerified: false }),
+      );
+
+      const { result } = run(
+        VerifiedOnlyController,
+        VerifiedOnlyController.prototype.anyRoute,
+      );
+
+      await expect(result).rejects.toThrow(EMAIL_NOT_VERIFIED_MESSAGE);
+    });
+
+    it('lets the same unverified account through a route that is not marked', async () => {
+      const { usersService, run } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({ emailVerified: false }),
+      );
+
+      const { request, result } = run(
+        BookingLikeController,
+        BookingLikeController.prototype.readRoute,
+      );
+
+      await expect(result).resolves.toBe(true);
+      expect(request.user).toEqual({ id: USER_ID, role: Role.User });
+    });
+
+    it.each([
+      ['true', true],
+      ['missing (an account saved before ACC-02)', undefined],
+    ])(
+      'lets an account whose emailVerified is %s through a marked route',
+      async (_label, emailVerified) => {
+        const { usersService, run } = setup();
+        usersService.findEntityById.mockResolvedValue(
+          storedUser({ emailVerified }),
+        );
+
+        const { request, result } = runBooking(run);
+
+        await expect(result).resolves.toBe(true);
+        expect(request.user).toEqual({ id: USER_ID, role: Role.User });
+      },
+    );
+
+    it('checks it after the suspension: a suspended unverified account is told it is suspended', async () => {
+      const { usersService, run } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({ status: UserStatus.Suspended, emailVerified: false }),
+      );
+
+      await expect(runBooking(run).result).rejects.toThrow(
+        ACCOUNT_SUSPENDED_MESSAGE,
+      );
+    });
+
+    it('checks it after the temporary password: that account is told to change it first', async () => {
+      const { usersService, run } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({ mustChangePassword: true, emailVerified: false }),
+      );
+
+      await expect(runBooking(run).result).rejects.toThrow(
+        PASSWORD_CHANGE_REQUIRED_MESSAGE,
+      );
+    });
+
+    it('answers 401 for a guest and a deactivated account before the flag is looked at', async () => {
+      const { usersService, run } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({ status: UserStatus.Deactivated, emailVerified: false }),
+      );
+
+      await expect(runBooking(run).result).rejects.toThrow(
+        LOGIN_REQUIRED_MESSAGE,
+      );
+      await expect(
+        run(BookingLikeController, BookingLikeController.prototype.bookRoute, {
+          cookies: {},
+        }).result,
+      ).rejects.toBeInstanceOf(UnauthorizedException);
     });
   });
 });

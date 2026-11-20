@@ -10,6 +10,8 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { EMAIL_NOT_VERIFIED_MESSAGE } from '../auth/auth.constants';
+import { RequireVerifiedEmail } from '../auth/decorators/require-verified-email.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
@@ -24,6 +26,8 @@ export class HotelBookingsController {
 
   @Post()
   @Roles(Role.User)
+  // ACC-02: an account whose email is not verified cannot book.
+  @RequireVerifiedEmail()
   @ApiCookieAuth()
   @ApiOperation({
     summary: 'Reserve rooms and hold them for payment (HTL-16, HTL-18)',
@@ -39,7 +43,7 @@ export class HotelBookingsController {
     description: 'Not logged in, or the access token is invalid or expired',
   })
   @ApiForbiddenResponse({
-    description: 'Only a registered user (role `user`) can reserve rooms',
+    description: `Only a registered user (role \`user\`) can reserve rooms. ACC-02: also "${EMAIL_NOT_VERIFIED_MESSAGE}" while the email of the account is not verified.`,
   })
   @ApiNotFoundResponse({
     description:
