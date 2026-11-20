@@ -37,6 +37,7 @@ import type { FlightBookingResponseDto } from './dto/flight-booking-response.dto
 import type { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import type { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
+import { FlightBookingConfirmationService } from './flight-booking-confirmation.service';
 import {
   FLIGHT_BOOKING_HOLD_MINUTES,
   FLIGHT_CHANGED_MESSAGE,
@@ -190,7 +191,20 @@ export class FlightBookingsService {
     private readonly airlines: AirlinesService,
     // FLT-21: the flight of the summary, with its local times (GEN-06).
     private readonly flightResponses: FlightResponsesService,
+    // FLT-23: what happens once the payment succeeded.
+    private readonly confirmation: FlightBookingConfirmationService,
   ) {}
+
+  /**
+   * FLT-23: the `BookingPaymentHandler` of PAY-01. The payments webhook calls
+   * it once Stripe reports the money arrived; `PaymentsModule` finds it on
+   * this service. See `FlightBookingConfirmationService.confirmPaid`: one
+   * conditional update to `confirmed` while the hold is live, idempotent,
+   * `false` for a late payment.
+   */
+  confirmPaid(bookingId: string, now: Date): Promise<boolean> {
+    return this.confirmation.confirmPaid(bookingId, now);
+  }
 
   /**
    * FLT-22 and FLT-19: the user proceeds to payment with the details of every

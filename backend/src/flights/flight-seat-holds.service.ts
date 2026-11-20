@@ -199,6 +199,47 @@ export class FlightSeatHoldsService {
     }
     return true;
   }
+
+  /**
+   * FLT-23: turns `seats` held seats of the `cabin` cabin into booked seats
+   * once the booking is paid and confirmed. One update that matches only if
+   * the cabin holds at least that many seats, and moves them from
+   * `heldSeats` to `bookedSeats`, so the seats left
+   * (`totalSeats - bookedSeats - heldSeats`) stay the same and a counter
+   * never goes below 0. Returns whether it matched. A mismatch is logged, not
+   * thrown, like `release`: the seats then stay counted as held, the safe
+   * direction, until the counters are recomputed from the bookings.
+   */
+  async confirm(
+    flightId: FlightId,
+    cabin: CabinClass,
+    seats: number,
+  ): Promise<boolean> {
+    assertSeatCount(seats);
+
+    const { matchedCount } = await this.flights
+      .updateOne(
+        {
+          _id: flightId,
+          cabins: { $elemMatch: { cabin, heldSeats: { $gte: seats } } },
+        },
+        {
+          $inc: {
+            'cabins.$[c].heldSeats': -seats,
+            'cabins.$[c].bookedSeats': seats,
+          },
+        },
+        { arrayFilters: [{ 'c.cabin': cabin }] },
+      )
+      .exec();
+    if (matchedCount === 0) {
+      this.logger.warn(
+        `Could not book ${seats} held ${cabin} seat(s) of flight ${String(flightId)}: the flight is gone or holds fewer seats. Recompute the seat counters from the bookings.`,
+      );
+      return false;
+    }
+    return true;
+  }
 }
 
 /** A programming error, never user input: the DTO limits the seats. */
