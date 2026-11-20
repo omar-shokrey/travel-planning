@@ -7,7 +7,8 @@
   "setupFiles": [
     "<rootDir>/support/test-database.ts",
     "<rootDir>/support/fxrates-env.ts",
-    "<rootDir>/support/stripe-env.ts"
+    "<rootDir>/support/stripe-env.ts",
+    "<rootDir>/support/smtp-env.ts"
   ],
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"

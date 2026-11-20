@@ -10,6 +10,7 @@ import {
   ACCOUNT_ALREADY_SUSPENDED_MESSAGE,
   ACCOUNT_DEACTIVATED_MESSAGE,
   ACCOUNT_NOT_SUSPENDED_MESSAGE,
+  ACCOUNT_SUSPENDED_NOTIFICATION,
 } from './../src/admin/admin.constants';
 import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
@@ -23,10 +24,14 @@ import {
 } from './../src/common/constants/cookies';
 import { Role } from './../src/common/enums/role.enum';
 import { UserStatus } from './../src/common/enums/user-status.enum';
+import { MAIL_TRANSPORT } from './../src/notifications/email.constants';
+import { EmailService } from './../src/notifications/email.service';
+import { NotificationType } from './../src/notifications/enums/notification-type.enum';
 import { Notification } from './../src/notifications/models/notification.schema';
 import { User } from './../src/users/models/user.schema';
 import { deleteAuditLogsOf } from './support/delete-audit-logs';
 import { deleteSessionsOf } from './support/delete-sessions';
+import { FakeMailTransport } from './support/fake-mail-transport';
 import { sessionCookieFor } from './support/session-cookie';
 
 const PASSWORD = 'Passw0rdOK';
@@ -57,6 +62,8 @@ describe('Suspend and reactivate users (e2e, ACC-16)', () => {
   /** The accounts below, by label: their id and email. */
   const accounts = new Map<string, { id: string; email: string }>();
   let adminCookie = '';
+  // GEN-01-B: collects the emails; nothing reaches an SMTP server.
+  const mail = new FakeMailTransport();
 
   const server = () => request(app.getHttpServer());
 
@@ -88,7 +95,10 @@ describe('Suspend and reactivate users (e2e, ACC-16)', () => {
   beforeAll(async () => {
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(MAIL_TRANSPORT)
+      .useValue(mail)
+      .compile();
 
     app = moduleFixture.createNestApplication<NestExpressApplication>();
     configureApp(app);
@@ -171,6 +181,24 @@ describe('Suspend and reactivate users (e2e, ACC-16)', () => {
         .get('/api/auth/me')
         .set('Cookie', before.access);
       expect(me.status).toBe(401);
+    });
+
+    it('stored one account_suspended notification and sent the user one email with the same text (GEN-01-B)', async () => {
+      await app.get(EmailService).whenIdle();
+
+      const stored = await notifications
+        .find({ userId: new Types.ObjectId(idOf('target')) })
+        .lean();
+      expect(stored.map((item) => item.type)).toEqual([
+        NotificationType.AccountSuspended,
+      ]);
+      const emails = mail.to(accounts.get('target')?.email ?? '');
+      expect(emails).toHaveLength(1);
+      expect(emails[0].subject).toBe('Your account is suspended');
+      expect(emails[0].text).toContain('Hello ACC-16 target,');
+      expect(emails[0].text).toContain(ACCOUNT_SUSPENDED_NOTIFICATION);
+      // Nobody else was emailed by this suspension.
+      expect(mail.sent).toHaveLength(1);
     });
 
     it('refuses the suspended user a login and a refresh', async () => {

@@ -15,6 +15,8 @@ import { NotificationLinkType } from './../src/notifications/enums/notification-
 import { NotificationType } from './../src/notifications/enums/notification-type.enum';
 import { Notification } from './../src/notifications/models/notification.schema';
 import { NOTIFICATION_NOT_FOUND_MESSAGE } from './../src/notifications/notifications.constants';
+import { MAIL_TRANSPORT } from './../src/notifications/email.constants';
+import { EmailService } from './../src/notifications/email.service';
 import { NotificationsService } from './../src/notifications/notifications.service';
 import { User } from './../src/users/models/user.schema';
 
@@ -104,6 +106,21 @@ describe('/api/notifications (e2e, GEN-01)', () => {
       await users.findByIdAndDelete(userId);
     }
     await app.close();
+  });
+
+  it('has email switched off with no SMTP host: notify still stores the notification and sends nothing (GEN-01-B)', async () => {
+    const user = await createLoggedInUser();
+
+    expect(app.get(MAIL_TRANSPORT)).toBeNull();
+    expect(app.get(EmailService).enabled).toBe(false);
+    await service.notify(
+      user.id,
+      NotificationType.Refund,
+      'Refund on its way.',
+    );
+    await app.get(EmailService).whenIdle();
+
+    expect(await notificationIdsOf(user.id)).toHaveLength(1);
   });
 
   it('answers 401 to every route when nobody is logged in', async () => {
