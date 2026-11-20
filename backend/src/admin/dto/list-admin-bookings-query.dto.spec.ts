@@ -133,11 +133,11 @@ describe('ListAdminBookingsQueryDto (ACC-17)', () => {
   );
 
   it('uses one set of statuses for flight and hotel bookings (GEN-11)', () => {
-    expect([...Object.values(HotelBookingStatus)].sort()).toEqual(
-      [...Object.values(FlightBookingStatus)].sort(),
+    expect(Object.values(HotelBookingStatus).sort()).toEqual(
+      Object.values(FlightBookingStatus).sort(),
     );
     expect([...ADMIN_BOOKING_STATUSES].sort()).toEqual(
-      [...Object.values(HotelBookingStatus)].sort(),
+      Object.values(HotelBookingStatus).sort(),
     );
   });
 });
