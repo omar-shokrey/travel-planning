@@ -11,6 +11,7 @@ import { BlogPost } from './../src/blog/models/blog-post.schema';
 import { ProviderType } from './../src/common/enums/provider-type.enum';
 import { Role } from './../src/common/enums/role.enum';
 import { User } from './../src/users/models/user.schema';
+import { deleteAuditLogsOf } from './support/delete-audit-logs';
 import { deleteSessionsOf } from './support/delete-sessions';
 import {
   createItineraryFixture,
@@ -139,6 +140,11 @@ describe('Attach an itinerary to a post (e2e, BLG-13)', () => {
     for (const id of postIds) {
       await posts.findByIdAndDelete(id);
     }
+    // The audit records (GEN-07) of the admin's hides, by the admin's id.
+    await deleteAuditLogsOf(
+      fixture.app,
+      staff.map(({ id }) => id),
+    );
     for (const { id } of staff) {
       await deleteSessionsOf(fixture.app, id);
       await users.findByIdAndDelete(id);
