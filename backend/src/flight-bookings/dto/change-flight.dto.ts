@@ -15,7 +15,7 @@ import {
   POLICIES_REQUIRED_MESSAGE,
 } from '../flight-bookings.constants';
 
-/** A change, as opposed to a dry run: `dryRun` left out, false or null. */
+/** A change, as opposed to a dry run: `dryRun` left out or false (null is refused). */
 const isRealChange = (body: ChangeFlightDto): boolean => body.dryRun !== true;
 
 /**

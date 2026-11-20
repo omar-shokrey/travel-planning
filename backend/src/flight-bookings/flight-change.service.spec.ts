@@ -102,9 +102,12 @@ function setPath(doc: Doc, path: string, value: unknown): void {
   parent[last] = value;
 }
 
-const applyUpdate = (doc: Doc, update: { $set?: Doc }): void => {
+const applyUpdate = (doc: Doc, update: { $set?: Doc; $unset?: Doc }): void => {
   for (const [path, value] of Object.entries(update.$set ?? {})) {
     setPath(doc, path, value);
+  }
+  for (const path of Object.keys(update.$unset ?? {})) {
+    delete doc[path];
   }
   doc.updatedAt = NOW;
 };
@@ -181,7 +184,7 @@ function collection(
       docs.push(saved);
       return Promise.resolve({ toObject: () => clone(saved) });
     }),
-    updateOne: jest.fn((filter: Doc, update: { $set?: Doc }) => {
+    updateOne: jest.fn((filter: Doc, update: { $set?: Doc; $unset?: Doc }) => {
       const found = one(filter);
       if (found) applyUpdate(found, update);
       return { exec: () => Promise.resolve({ matchedCount: found ? 1 : 0 }) };
@@ -727,6 +730,7 @@ describe('FlightChangeService: making the change (FLT-27)', () => {
         _id: BOOKING,
         status: FlightBookingStatus.Confirmed,
         'segments.0.flightId': FROM,
+        total: 15_000,
       },
       {
         $set: expect.objectContaining({
@@ -1291,5 +1295,173 @@ describe('FlightChangeService: a booking cancelled while a paid change completes
 
     expect(s.refunds.refund).not.toHaveBeenCalled();
     expect(t.refunds.refund).not.toHaveBeenCalled();
+  });
+});
+
+describe('FlightChangeService: the review cases (FLT-27)', () => {
+  const later = new Date(NOW.getTime() + FLIGHT_CHANGE_STUCK_AFTER_MS);
+
+  it('never releases or books seats for a change that crashed before its hold', async () => {
+    const pending = new Types.ObjectId();
+    const applying = new Types.ObjectId();
+    const base = {
+      bookingId: BOOKING,
+      userId: USER,
+      segmentIndex: 0,
+      cabin: CabinClass.Economy,
+      seats: 1,
+      fromFlightId: FROM,
+      toFlightId: TO,
+      difference: 0,
+      totalBefore: 15_000,
+      open: true,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const s = setup({
+      changes: [
+        {
+          ...base,
+          _id: pending,
+          status: FlightChangeStatus.PendingPayment,
+          holdExpiresAt: NOW,
+        },
+        {
+          ...base,
+          _id: applying,
+          bookingId: new Types.ObjectId(),
+          status: FlightChangeStatus.Applying,
+        },
+      ],
+    });
+
+    await expect(s.service.expireDueHolds(NOW)).resolves.toBe(1);
+    await expect(s.service.finishStuck(later)).resolves.toBe(1);
+
+    expect(s.changes.docs.map((c) => c.status)).toEqual([
+      FlightChangeStatus.Expired,
+      FlightChangeStatus.Expired,
+    ]);
+    expect(s.seatHolds.release).not.toHaveBeenCalled();
+    expect(s.seatHolds.confirm).not.toHaveBeenCalled();
+    expect(s.seatHolds.unbook).not.toHaveBeenCalled();
+  });
+
+  it('abandons a paid change whose new flight the airline cancelled, giving the held seats back, and the job refunds it', async () => {
+    const s = setup();
+    await s.service.change(
+      BOOKING.toString(),
+      USER.toString(),
+      change(3200),
+      NOW,
+    );
+    const id = String(s.changes.docs[0]._id);
+    s.flights.docs[1].status = FlightStatus.Cancelled;
+
+    await expect(s.service.confirmPaid(id, NOW)).resolves.toBe(false);
+
+    expect(s.changes.docs[0].status).toBe(FlightChangeStatus.Expired);
+    expect(s.seatHolds.confirm).not.toHaveBeenCalled();
+    expect(s.seatHolds.release).toHaveBeenCalledWith(TO, CabinClass.Economy, 1);
+    expect(s.bookings.updateOne).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['booking the new seats', 'confirm'],
+    ['giving the old seats back', 'unbook'],
+  ] as const)(
+    'stays applying when %s fails, and the job does that step again once',
+    async (_name, method) => {
+      const s = setup({
+        flights: [flight(), toFlight(FARE)],
+        airline: airlineWith(4000),
+      });
+      s.seatHolds[method].mockRejectedValueOnce(new Error('database down'));
+
+      const answer = await s.service.change(
+        BOOKING.toString(),
+        USER.toString(),
+        change(0),
+        NOW,
+      );
+      expect(answer.status).toBe('applying');
+
+      await expect(s.service.finishStuck(later)).resolves.toBe(1);
+
+      expect(s.changes.docs[0].status).toBe(FlightChangeStatus.Completed);
+      expect(s.seatHolds[method]).toHaveBeenCalledTimes(2);
+      expect(s.seatHolds.confirm.mock.calls.length).toBeLessThanOrEqual(2);
+      expect(s.seats.releaseSegment).toHaveBeenCalledTimes(1);
+      expect(s.notifications.notify).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('stays applying when freeing the chosen seats fails, and the job frees them without giving the old seats back twice', async () => {
+    const s = setup({
+      flights: [flight(), toFlight(FARE)],
+      airline: airlineWith(4000),
+    });
+    s.seats.releaseSegment.mockRejectedValueOnce(new Error('database down'));
+
+    await s.service.change(BOOKING.toString(), USER.toString(), change(0), NOW);
+    await s.service.finishStuck(later);
+
+    expect(s.changes.docs[0].status).toBe(FlightChangeStatus.Completed);
+    expect(s.seats.releaseSegment).toHaveBeenCalledTimes(2);
+    expect(s.seatHolds.unbook).toHaveBeenCalledTimes(1);
+  });
+
+  it('tries the refund again when another refund of the payment was being made, but gives up on a missing payment', async () => {
+    const busy = setup({
+      flights: [flight(), toFlight(8000)],
+      airline: airlineWith(4000),
+    });
+    busy.refunds.refundAmount.mockRejectedValueOnce(
+      new ConflictException(
+        'The payment is being refunded by another request. Try again.',
+      ),
+    );
+    const missing = setup({
+      flights: [flight(), toFlight(8000)],
+      airline: airlineWith(4000),
+    });
+    missing.refunds.refundAmount.mockRejectedValueOnce(
+      new NotFoundException('Payment not found'),
+    );
+
+    const first = await busy.service.change(
+      BOOKING.toString(),
+      USER.toString(),
+      change(-2200),
+      NOW,
+    );
+    const second = await missing.service.change(
+      BOOKING.toString(),
+      USER.toString(),
+      change(-2200),
+      NOW,
+    );
+
+    expect(first.status).toBe('applying');
+    expect(second.status).toBe('completed');
+  });
+
+  it('abandons a change whose booking total moved since it was planned (another change of the other flight)', async () => {
+    const s = setup({
+      flights: [flight(), toFlight(FARE)],
+      airline: airlineWith(4000),
+    });
+    s.seatHolds.confirm.mockImplementationOnce(() => {
+      s.bookings.docs[0].total = 16_000;
+      return Promise.resolve(true);
+    });
+
+    await expect(
+      s.service.change(BOOKING.toString(), USER.toString(), change(0), NOW),
+    ).rejects.toThrow(new ConflictException(CHANGE_BOOKING_CHANGED_MESSAGE));
+    expect(s.bookings.docs[0].segments).toEqual([
+      expect.objectContaining({ flightId: FROM }),
+    ]);
+    expect(s.seatHolds.unbook).toHaveBeenCalledWith(TO, CabinClass.Economy, 1);
   });
 });

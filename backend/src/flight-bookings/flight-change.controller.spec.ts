@@ -1,5 +1,6 @@
 import { PATH_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
+import { REQUIRE_VERIFIED_EMAIL_KEY } from '../auth/decorators/require-verified-email.decorator';
 import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
 import { ROLES_KEY } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
@@ -31,6 +32,8 @@ describe('FlightChangeController (FLT-27)', () => {
     const reflector = new Reflector();
 
     expect(reflector.get(ROLES_KEY, handler)).toEqual([Role.User]);
+    // ACC-02: a change holds seats, so the email must be verified.
+    expect(reflector.get(REQUIRE_VERIFIED_EMAIL_KEY, handler)).toBe(true);
     expect(
       reflector.getAllAndOverride(IS_PUBLIC_KEY, [
         handler,

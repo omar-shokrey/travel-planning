@@ -16,9 +16,3 @@ export enum FlightChangeStatus {
   Completed = 'completed',
   Expired = 'expired',
 }
-
-/** The statuses of a change that is still open: at most one per booking. */
-export const OPEN_FLIGHT_CHANGE_STATUSES = [
-  FlightChangeStatus.PendingPayment,
-  FlightChangeStatus.Applying,
-] as const;

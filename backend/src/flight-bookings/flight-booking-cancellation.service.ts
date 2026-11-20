@@ -21,6 +21,7 @@ import type {
 import { CancelledBy } from './enums/cancelled-by.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import {
+  CHANGE_BOOKING_CHANGED_MESSAGE,
   DEPARTED_MESSAGE,
   FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE,
   NOT_CANCELLABLE_MESSAGE,
@@ -34,6 +35,17 @@ import type { FlightBookingSource } from './mappers/flight-booking.mapper';
 import { FlightBooking } from './models/flight-booking.schema';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** `segments.0.flightId`, `segments.1.flightId`: the flights the booking was read on. */
+export const segmentFlightsOf = (booking: {
+  segments: readonly { flightId: Types.ObjectId }[];
+}): Record<string, Types.ObjectId> =>
+  Object.fromEntries(
+    booking.segments.map((segment, index) => [
+      `segments.${index}.flightId`,
+      segment.flightId,
+    ]),
+  );
 
 /**
  * FLT-26: a registered user cancels their own confirmed flight booking any
@@ -76,9 +88,12 @@ export class FlightBookingCancellationService {
    * Cancels the booking if the refund is still `expectedRefundPercent` (the
    * one the user confirmed; 409 otherwise). One conditional update moves it
    * from `confirmed` to `cancelled`, so a second cancellation, or the
-   * completion job, at the same moment never cancels it twice. Then the
-   * booked seats of every segment go back, the chosen seats are freed
-   * (FLT-28) and the refund is created. A failure after the cancellation is
+   * completion job, at the same moment never cancels it twice; it also
+   * matches only the flights and total this request read, so a flight change
+   * applied in between (FLT-27) answers 409 instead. Then the booked seats of
+   * every segment go back, a flight change waiting for payment expires, the
+   * chosen seats are freed (FLT-28), and the refunds are created: the
+   * booking's payment and each paid flight change, at the same percent. A failure after the cancellation is
    * saved is logged, never thrown: the booking stays cancelled, the seat counters can be recomputed from the
    * bookings and a refund that was not sent is retried by PAY-03.
    */
@@ -89,7 +104,7 @@ export class FlightBookingCancellationService {
     now: Date = new Date(),
   ): Promise<FlightBookingCancellationResponseDto> {
     const booking = await this.findOwnedOrThrow(id, userId);
-    const { preview: quote, paidChanges } = await this.quote(booking, now);
+    const { preview: quote } = await this.quote(booking, now);
     if (quote.refundPercent !== expectedRefundPercent) {
       throw new ConflictException(REFUND_CHANGED_MESSAGE);
     }
@@ -100,6 +115,10 @@ export class FlightBookingCancellationService {
           _id: booking._id,
           userId: booking.userId,
           status: FlightBookingStatus.Confirmed,
+          // FLT-27: still on the flights and at the total this request read,
+          // so the seats given back below are the ones the booking holds.
+          ...segmentFlightsOf(booking),
+          total: booking.total,
         },
         {
           $set: {
@@ -112,8 +131,17 @@ export class FlightBookingCancellationService {
       )
       .exec();
     if (matchedCount === 0) {
-      // Cancelled or completed in between.
-      throw new ConflictException(NOT_CANCELLABLE_MESSAGE);
+      // Cancelled or completed in between, or (FLT-27) a flight change was
+      // applied in between: then the user views the new refund again.
+      const latest = await this.bookings
+        .findOne({ _id: booking._id, userId: booking.userId })
+        .lean()
+        .exec();
+      throw new ConflictException(
+        latest?.status === FlightBookingStatus.Confirmed
+          ? CHANGE_BOOKING_CHANGED_MESSAGE
+          : NOT_CANCELLABLE_MESSAGE,
+      );
     }
 
     for (const segment of booking.segments) {
@@ -169,6 +197,17 @@ export class FlightBookingCancellationService {
 
     // FLT-27: each dearer flight change was paid by its own payment, refunded
     // at the same percent (PAY-03 takes the percent of what it still holds).
+    // Read after the cancellation: no change can complete a swap any more, and
+    // one that completes after it refunds itself (refundIfCancelledMeanwhile).
+    const paidChanges = await this.changes
+      .paidDifferencesOf(booking._id)
+      .catch((error: unknown) => {
+        this.logger.error(
+          `Booking ${quote.bookingId} is cancelled, but its paid flight changes could not be read`,
+          error instanceof Error ? error.stack : error,
+        );
+        return [];
+      });
     const changeRefunds: FlightBookingCancellationResponseDto['changeRefunds'] =
       [];
     for (const paid of paidChanges) {

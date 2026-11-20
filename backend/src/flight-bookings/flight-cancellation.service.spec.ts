@@ -228,7 +228,13 @@ describe('FlightCancellationService.cascade (FLT-06)', () => {
     });
 
     expect(bookings.updateOne).toHaveBeenCalledWith(
-      { _id: roundTrip._id, status: FlightBookingStatus.Confirmed },
+      {
+        _id: roundTrip._id,
+        status: FlightBookingStatus.Confirmed,
+        // FLT-27: still on the flights the cascade read.
+        'segments.0.flightId': FLIGHT_ID,
+        'segments.1.flightId': RETURN_ID,
+      },
       {
         $set: {
           status: FlightBookingStatus.Cancelled,

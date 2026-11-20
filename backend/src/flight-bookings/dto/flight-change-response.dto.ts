@@ -48,7 +48,7 @@ export class FlightChangeResponseDto {
     enum: FLIGHT_CHANGE_ANSWER_STATUSES,
     enumName: 'FlightChangeAnswerStatus',
     description:
-      '`quote` (dry run, nothing changed), `pending_payment` (dearer: pay the difference before `holdExpiresAt`), `completed` (equal or cheaper: the booking flies the new flight now)',
+      '`quote` (dry run, nothing changed), `pending_payment` (dearer: pay the difference before `holdExpiresAt`), `completed` (equal or cheaper: the booking flies the new flight now), or `applying` (equal or cheaper, but a last step such as the refund could not be done yet: the change job finishes it within minutes)',
     example: 'quote',
   })
   status: FlightChangeAnswerStatus;

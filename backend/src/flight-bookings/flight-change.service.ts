@@ -20,6 +20,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { BookingType } from '../payments/enums/booking-type.enum';
 import { RefundReason } from '../payments/refunds/enums/refund-reason.enum';
 import type { RefundSummaryDto } from '../payments/refunds/dto/refund-response.dto';
+import { REFUND_EXCEEDS_PAYMENT_MESSAGE } from '../payments/refunds/refunds.constants';
 import { RefundsService } from '../payments/refunds/refunds.service';
 import { bookingChangedMessage } from './booking-change-message';
 import type { ChangeFlightDto } from './dto/change-flight.dto';
@@ -81,6 +82,16 @@ const isDuplicateKey = (error: unknown): boolean =>
   error instanceof Error &&
   'code' in error &&
   (error as { code?: unknown }).code === MONGO_DUPLICATE_KEY;
+
+/**
+ * A refund of a cheaper fare that can never succeed automatically: more than
+ * the payment still holds, or no succeeded payment. Anything else (another
+ * refund of the payment at the same moment, the database) is tried again.
+ */
+const isFinalRefundFailure = (error: unknown): boolean =>
+  error instanceof NotFoundException ||
+  (error instanceof ConflictException &&
+    error.message === REFUND_EXCEEDS_PAYMENT_MESSAGE);
 
 const badRequest = (errors: FieldError[]) =>
   new BadRequestException({ message: 'Validation failed', errors });
@@ -216,6 +227,10 @@ export class FlightChangeService {
         planned.seats,
         now,
       );
+      change = { ...change, heldAt: now };
+      await this.changes
+        .updateOne({ _id: change._id }, { $set: { heldAt: now } })
+        .exec();
       // The price, the date and the bag weight were checked before the hold:
       // if the flight changed in between (FLT-05), the quote is no longer it.
       const cabin = held.cabins.find((c) => c.cabin === planned.cabin);
@@ -416,31 +431,57 @@ export class FlightChangeService {
 
   /**
    * Applies an `applying` change, step by step; a step that already happened
-   * is not repeated, so the job and a repeated webhook can call it again.
+   * is not repeated, so the job and a repeated webhook can call it again. A
+   * step that fails gives its claim back and leaves the change `applying`
+   * (`unfinished`): the job does it again.
    *
+   * 0. A change that never held seats, or whose new flight the airline
+   *    cancelled before its seats were booked (FLT-06), is abandoned.
    * 1. The new flight's held seats become booked (claimed by `seatsBookedAt`).
    * 2. One conditional update swaps the segment and the totals of the booking
-   *    while it is confirmed and still on the old flight. When it matches
-   *    nothing and the booking is not already on the new flight (cancelled
-   *    or changed in between), the change is abandoned: `expired`, and the
-   *    new seats are given back.
-   * 3. The old flight's booked seats are given back (claimed by
-   *    `oldSeatsReleasedAt`) and the seats chosen on that segment are freed.
+   *    while it is confirmed, still on the old flight and still at the total
+   *    the change was planned on. When it matches nothing and the booking is
+   *    not already on the new flight (cancelled, completed or changed in
+   *    between), the change is abandoned: `expired`, and the new seats are
+   *    given back.
+   * 3. The old flight's booked seats are given back (`oldSeatsReleasedAt`)
+   *    and the seats chosen on that segment are freed (`chosenSeatsFreedAt`).
    * 4. A cheaper flight's difference is refunded from the booking's flight
    *    payment (PAY-03, `fare_difference`, idempotent per change). If the
-   *    refund cannot be made yet (not Stripe trouble, which leaves it
-   *    pending), the change stays `applying` and the job tries again.
-   * 5. `completed`, then the owner is notified.
+   *    refund cannot be made yet (another refund of the payment at the same
+   *    moment, the database), the change stays `applying`; a refund that can
+   *    never succeed (more than the payment holds, no payment) is logged.
+   * 5. `completed`, then the owner is notified, and a dearer change whose
+   *    booking was cancelled meanwhile refunds its own payment.
    */
   async apply(change: FlightChangeSource, now: Date): Promise<ApplyResult> {
     const id = change._id.toString();
 
-    if (await this.claimStep(change._id, 'seatsBookedAt', now)) {
-      await this.seatHolds
-        .confirm(change.toFlightId, change.cabin, change.seats)
-        .catch((error: unknown) =>
-          this.logFailure(id, 'booking its new seats', error),
-        );
+    // Nothing was held (a crash between the record and the hold): there are
+    // no seats to book, so the change never happened.
+    if (!change.heldAt) {
+      await this.abandon(change, now);
+      return 'abandoned';
+    }
+    // FLT-06: the airline cancelled the new flight after the hold. The
+    // booking must never move onto it; a paid difference is refunded in full.
+    if (!change.seatsBookedAt) {
+      const to = await this.flights
+        .findById(change.toFlightId)
+        .select('status')
+        .lean()
+        .exec();
+      if (!to || to.status === FlightStatus.Cancelled) {
+        await this.abandon(change, now);
+        return 'abandoned';
+      }
+    }
+
+    const booked = await this.runStep(change, 'seatsBookedAt', now, () =>
+      this.seatHolds.confirm(change.toFlightId, change.cabin, change.seats),
+    );
+    if (!booked) {
+      return 'unfinished';
     }
 
     const path = `segments.${change.segmentIndex}`;
@@ -450,6 +491,9 @@ export class FlightChangeService {
           _id: change.bookingId,
           status: FlightBookingStatus.Confirmed,
           [`${path}.flightId`]: change.fromFlightId,
+          // Another change of the other segment completed since this one was
+          // planned: these totals would undo its difference.
+          total: change.totalBefore,
         },
         {
           $set: {
@@ -477,17 +521,17 @@ export class FlightChangeService {
       }
     }
 
-    if (await this.claimStep(change._id, 'oldSeatsReleasedAt', now)) {
-      await this.seatHolds
-        .unbook(change.fromFlightId, change.cabin, change.seats)
-        .catch((error: unknown) =>
-          this.logFailure(id, 'giving back the old seats', error),
-        );
-      await this.seatAssignments
-        .releaseSegment(change.bookingId, change.segmentIndex)
-        .catch((error: unknown) =>
-          this.logFailure(id, 'freeing the chosen seats (FLT-28)', error),
-        );
+    const released = await this.runStep(change, 'oldSeatsReleasedAt', now, () =>
+      this.seatHolds.unbook(change.fromFlightId, change.cabin, change.seats),
+    );
+    const freed = await this.runStep(change, 'chosenSeatsFreedAt', now, () =>
+      this.seatAssignments.releaseSegment(
+        change.bookingId,
+        change.segmentIndex,
+      ),
+    );
+    if (!released || !freed) {
+      return 'unfinished';
     }
 
     if (change.difference < 0) {
@@ -507,7 +551,7 @@ export class FlightChangeService {
           },
         });
       } catch (error) {
-        if (!(error instanceof ConflictException)) {
+        if (!isFinalRefundFailure(error)) {
           this.logFailure(
             id,
             'the refund of the difference; the job tries again',
@@ -515,7 +559,8 @@ export class FlightChangeService {
           );
           return 'unfinished';
         }
-        // More than the payment holds: it can never succeed automatically.
+        // More than the payment holds, or no payment at all: it can never
+        // succeed automatically.
         this.logFailure(
           id,
           'the refund of the difference; check it by hand',
@@ -846,7 +891,9 @@ export class FlightChangeService {
     if (matchedCount === 0) {
       return 0;
     }
-    await this.releaseHeld(change, 'it expired');
+    if (change.heldAt) {
+      await this.releaseHeld(change, 'it expired');
+    }
     return 1;
   }
 
@@ -869,7 +916,7 @@ export class FlightChangeService {
     }
     const current = await this.changes
       .findById(change._id)
-      .select('seatsBookedAt')
+      .select('heldAt seatsBookedAt')
       .lean()
       .exec();
     const id = change._id.toString();
@@ -879,7 +926,7 @@ export class FlightChangeService {
         .catch((error: unknown) =>
           this.logFailure(id, 'giving back its new seats', error),
         );
-    } else {
+    } else if (current?.heldAt) {
       await this.releaseHeld(change, 'it was abandoned');
     }
   }
@@ -922,19 +969,41 @@ export class FlightChangeService {
       );
   }
 
-  /** Claims a seat step once: true only for the call that set it. */
-  private async claimStep(
-    changeId: Types.ObjectId,
-    step: 'seatsBookedAt' | 'oldSeatsReleasedAt',
+  /**
+   * One step of `apply`, done once: it is claimed on the change first, so a
+   * repeated call skips it. If the step fails, the claim is given back and
+   * `false` is answered: the change stays `applying` and the job does the
+   * step again.
+   */
+  private async runStep(
+    change: FlightChangeSource,
+    step: 'seatsBookedAt' | 'oldSeatsReleasedAt' | 'chosenSeatsFreedAt',
     now: Date,
+    work: () => Promise<unknown>,
   ): Promise<boolean> {
     const { matchedCount } = await this.changes
       .updateOne(
-        { _id: changeId, [step]: { $exists: false } },
+        { _id: change._id, [step]: { $exists: false } },
         { $set: { [step]: now } },
       )
       .exec();
-    return matchedCount > 0;
+    if (matchedCount === 0) {
+      return true;
+    }
+    try {
+      await work();
+      return true;
+    } catch (error) {
+      this.logFailure(
+        change._id.toString(),
+        `${step}; the job tries again`,
+        error,
+      );
+      await this.changes
+        .updateOne({ _id: change._id }, { $unset: { [step]: 1 } })
+        .exec();
+      return false;
+    }
   }
 
   /** The in-app notification of an applied change (GEN-01); never throws. */

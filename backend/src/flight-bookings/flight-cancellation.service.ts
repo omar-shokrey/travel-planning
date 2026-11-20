@@ -21,6 +21,7 @@ import { CancelledBy } from './enums/cancelled-by.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { flightCancelledMessage } from './flight-cancelled-message';
 import { FLIGHT_CANCELLATION_SWEEP_BATCH_SIZE } from './flight-bookings.constants';
+import { segmentFlightsOf } from './flight-booking-cancellation.service';
 import { FlightChangeService } from './flight-change.service';
 import { FlightSeatsService } from './flight-seats.service';
 import { FlightBooking } from './models/flight-booking.schema';
@@ -97,7 +98,7 @@ export class FlightCancellationService {
       .closePendingChangesTo(flight._id, now)
       .catch((error: unknown) =>
         this.logger.error(
-          `Flight ${flight._id.toString()} is cancelled, but the flight changes waiting for payment to it were not closed; the sweep tries again`,
+          `Flight ${flight._id.toString()} is cancelled, but the flight changes waiting for payment to it were not closed; they expire with their hold, and one paid meanwhile is abandoned and refunded`,
           error instanceof Error ? error.stack : error,
         ),
       );
@@ -221,7 +222,14 @@ export class FlightCancellationService {
   ): Promise<number> {
     const { matchedCount } = await this.bookings
       .updateOne(
-        { _id: booking._id, status: FlightBookingStatus.Confirmed },
+        {
+          _id: booking._id,
+          status: FlightBookingStatus.Confirmed,
+          // FLT-27: still on the flights this cascade read, so the seats
+          // given back are the ones the booking holds. A booking a change
+          // moved in between is left: off this flight, it is not cancelled.
+          ...segmentFlightsOf(booking),
+        },
         {
           $set: {
             status: FlightBookingStatus.Cancelled,

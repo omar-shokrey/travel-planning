@@ -147,6 +147,13 @@ export class FlightBookingChange {
   @Prop({ type: Date })
   holdExpiresAt?: Date;
 
+  /**
+   * When the new flight's seats were held. A change without it never held
+   * any (a crash before the hold): nothing is released or booked for it.
+   */
+  @Prop({ type: Date })
+  heldAt?: Date;
+
   /** When the payment of the difference was taken (the webhook). */
   @Prop({ type: Date })
   paidAt?: Date;
@@ -158,6 +165,10 @@ export class FlightBookingChange {
   /** When the booked seats of the old flight were given back; set once. */
   @Prop({ type: Date })
   oldSeatsReleasedAt?: Date;
+
+  /** When the seats chosen on the changed segment were freed (FLT-28); set once. */
+  @Prop({ type: Date })
+  chosenSeatsFreedAt?: Date;
 
   @Prop({ type: Date })
   completedAt?: Date;

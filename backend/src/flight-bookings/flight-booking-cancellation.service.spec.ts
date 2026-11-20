@@ -11,6 +11,7 @@ import { CancelledBy } from './enums/cancelled-by.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { FlightBookingCancellationService } from './flight-booking-cancellation.service';
 import {
+  CHANGE_BOOKING_CHANGED_MESSAGE,
   DEPARTED_MESSAGE,
   FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE,
   NOT_CANCELLABLE_MESSAGE,
@@ -309,6 +310,9 @@ describe('FlightBookingCancellationService.cancel (FLT-26)', () => {
         _id: new Types.ObjectId(BOOKING_ID),
         userId: new Types.ObjectId(USER_ID),
         status: FlightBookingStatus.Confirmed,
+        // FLT-27: the flights and total read, so a change in between is 409.
+        'segments.0.flightId': OUTBOUND_ID,
+        total: 50_001,
       },
       {
         $set: {
@@ -384,6 +388,18 @@ describe('FlightBookingCancellationService.cancel (FLT-26)', () => {
     bookings.updateOne.mockReturnValueOnce({
       exec: jest.fn(() => Promise.resolve({ matchedCount: 0 })),
     });
+    // The read before the update, then the read after it.
+    bookings.findOne
+      .mockReturnValueOnce({
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn(() => Promise.resolve(booking())),
+      })
+      .mockReturnValueOnce({
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn(() =>
+          Promise.resolve(booking({ status: FlightBookingStatus.Cancelled })),
+        ),
+      });
 
     const failure = await service
       .cancel(BOOKING_ID, USER_ID, 50, NOW)
@@ -522,7 +538,7 @@ describe('FlightBookingCancellationService after flight changes (FLT-27)', () =>
 
   it('shows the refund payment by payment, each rounded: the original payment and each paid difference', async () => {
     const { service, changes } = setup(booking({ total: 50_009 }));
-    changes.paidDifferencesOf.mockResolvedValueOnce(PAID);
+    changes.paidDifferencesOf.mockResolvedValue(PAID);
 
     // round((50009 - 8) × 50%) + round(3 × 50%) + round(5 × 50%) = 25001 + 2 + 3
     await expect(
@@ -539,7 +555,7 @@ describe('FlightBookingCancellationService after flight changes (FLT-27)', () =>
 
   it('refunds the original payment and each paid change at the same percent, and closes the open change', async () => {
     const { service, changes, refunds } = setup(booking({ total: 50_009 }));
-    changes.paidDifferencesOf.mockResolvedValueOnce(PAID);
+    changes.paidDifferencesOf.mockResolvedValue(PAID);
     refunds.refund
       .mockResolvedValueOnce(REFUND)
       .mockResolvedValueOnce({ ...REFUND, id: 'r2', amount: 2 })
@@ -579,7 +595,7 @@ describe('FlightBookingCancellationService after flight changes (FLT-27)', () =>
   it('keeps the cancellation when a change refund or closing the open change fails', async () => {
     const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
     const { service, changes, refunds } = setup();
-    changes.paidDifferencesOf.mockResolvedValueOnce([PAID[0]]);
+    changes.paidDifferencesOf.mockResolvedValue([PAID[0]]);
     changes.closeOpenChangeOf.mockRejectedValueOnce(new Error('db'));
     refunds.refund
       .mockResolvedValueOnce(REFUND)
@@ -611,5 +627,36 @@ describe('FlightBookingCancellationService after flight changes (FLT-27)', () =>
     );
     expect(changes.closeOpenChangeOf).not.toHaveBeenCalled();
     expect(refunds.refund).not.toHaveBeenCalled();
+  });
+
+  it('answers 409 "changed" when a flight change was applied in between (FLT-27), and gives back nothing', async () => {
+    const { service, bookings, seatHolds, refunds, changes } = setup();
+    bookings.updateOne.mockReturnValueOnce({
+      exec: jest.fn(() => Promise.resolve({ matchedCount: 0 })),
+    });
+
+    await expect(service.cancel(BOOKING_ID, USER_ID, 50, NOW)).rejects.toThrow(
+      new ConflictException(CHANGE_BOOKING_CHANGED_MESSAGE),
+    );
+    expect(seatHolds.unbook).not.toHaveBeenCalled();
+    expect(refunds.refund).not.toHaveBeenCalled();
+    expect(changes.closeOpenChangeOf).not.toHaveBeenCalled();
+  });
+
+  it('reads the paid changes again after the cancellation, so a change completed in between is refunded', async () => {
+    const { service, changes, refunds } = setup();
+    changes.paidDifferencesOf
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([PAID[0]]);
+
+    await service.cancel(BOOKING_ID, USER_ID, 50, NOW);
+
+    expect(changes.paidDifferencesOf).toHaveBeenCalledTimes(2);
+    expect(refunds.refund).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingType: BookingType.FlightChange,
+        bookingId: PAID[0].id,
+      }),
+    );
   });
 });

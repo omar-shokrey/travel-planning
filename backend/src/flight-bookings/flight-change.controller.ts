@@ -11,6 +11,8 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { EMAIL_NOT_VERIFIED_MESSAGE } from '../auth/auth.constants';
+import { RequireVerifiedEmail } from '../auth/decorators/require-verified-email.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
@@ -51,6 +53,8 @@ export class FlightChangeController {
 
   @Patch(':id/change-flight')
   @Roles(Role.User)
+  // ACC-02: a change holds seats, like a booking: a verified email only.
+  @RequireVerifiedEmail()
   @ApiOperation({
     summary: 'Change a flight of my confirmed flight booking (FLT-27)',
     description: [
@@ -65,7 +69,9 @@ export class FlightChangeController {
     description: `The id or \`newFlightId\` is not a valid id; "${SEGMENT_INDEX_REQUIRED_MESSAGE}", or \`segmentIndex\` is not a segment of the booking; "${SAME_FLIGHT_MESSAGE}"; the new flight flies another route; "${OUTBOUND_AFTER_RETURN_MESSAGE}" or "${RETURN_TOO_EARLY_MESSAGE}"; without \`dryRun: true\`, "${EXPECTED_DIFFERENCE_REQUIRED_MESSAGE}" or "${POLICIES_REQUIRED_MESSAGE}"; or another field was sent (the cabin, the price and the status are never sent)`,
   })
   @ApiUnauthorizedResponse({ description: 'Not logged in' })
-  @ApiForbiddenResponse({ description: 'Not a registered user' })
+  @ApiForbiddenResponse({
+    description: `Not a registered user; ACC-02: also "${EMAIL_NOT_VERIFIED_MESSAGE}" while the email of the account is not verified`,
+  })
   @ApiNotFoundResponse({
     description: `"${BOOKING_NOT_FOUND_MESSAGE}": no such booking, or it belongs to another user; "${FLIGHT_NOT_FOUND_MESSAGE}" or the new flight has no booked cabin`,
   })

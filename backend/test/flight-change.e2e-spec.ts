@@ -18,6 +18,7 @@ import { BOOKING_NOT_FOUND_MESSAGE } from './../src/flight-bookings/flight-booki
 import { FlightChangeExpiryService } from './../src/flight-bookings/flight-change-expiry.service';
 import { FlightBookingChange } from './../src/flight-bookings/models/flight-booking-change.schema';
 import { FlightBooking } from './../src/flight-bookings/models/flight-booking.schema';
+import { FlightSeatAssignment } from './../src/flight-bookings/models/flight-seat-assignment.schema';
 import { NOT_ENOUGH_SEATS_MESSAGE } from './../src/flights/flight-seat-holds.service';
 import { CabinClass } from './../src/flights/models/cabin-class.enum';
 import { NotificationType } from './../src/notifications/enums/notification-type.enum';
@@ -82,6 +83,7 @@ describe('Flight change (e2e, FLT-27)', () => {
   let fx: FlightFixture;
   let flightBookings: Model<FlightBooking>;
   let changes: Model<FlightBookingChange>;
+  let seatAssignments: Model<FlightSeatAssignment>;
   let payments: Model<Payment>;
   let stripeEvents: Model<StripeEvent>;
   let refunds: Model<Refund>;
@@ -270,6 +272,9 @@ describe('Flight change (e2e, FLT-27)', () => {
     changes = fx.app.get<Model<FlightBookingChange>>(
       getModelToken(FlightBookingChange.name),
     );
+    seatAssignments = fx.app.get<Model<FlightSeatAssignment>>(
+      getModelToken(FlightSeatAssignment.name),
+    );
     // One open change per booking is a unique index: make sure it exists.
     await changes.init();
     payments = fx.app.get<Model<Payment>>(getModelToken(Payment.name));
@@ -363,6 +368,14 @@ describe('Flight change (e2e, FLT-27)', () => {
         }
         for (const change of ours) {
           await changes.findByIdAndDelete(change._id).exec();
+        }
+        const seats = await seatAssignments
+          .find({ bookingId: new Types.ObjectId(id) })
+          .select('_id')
+          .lean()
+          .exec();
+        for (const { _id } of seats) {
+          await seatAssignments.findByIdAndDelete(_id).exec();
         }
       }
       for (const id of paymentIds) {
@@ -656,7 +669,7 @@ describe('Flight change (e2e, FLT-27)', () => {
       });
     });
 
-    it('gives the seats back when the hold ends unpaid, and refunds a payment that arrives after it in full', async () => {
+    it('refunds in full a payment that arrives after the hold ended, and the job then gives the held seats back', async () => {
       const booking = await confirmedBooking();
       const to = await newFlight(PRICE + 1000, { days: 32 });
       const body = (await changeTo(booking.id, to)).body as ChangeBody;
@@ -693,6 +706,27 @@ describe('Flight change (e2e, FLT-27)', () => {
         refundPercent: 100,
         reason: RefundReason.LatePayment,
       });
+    });
+
+    it('lets only the owner pay a change: another user gets 404 and no payment is made', async () => {
+      const booking = await confirmedBooking();
+      const to = await newFlight(PRICE + 900, { days: 32 });
+      const body = (await changeTo(booking.id, to)).body as ChangeBody;
+
+      const response = await fx
+        .http()
+        .post('/api/payments')
+        .set('Cookie', stranger.cookie)
+        .send({ bookingType: 'flight_change', bookingId: body.id });
+
+      expect(response.status).toBe(404);
+      expect(response.body.message).toBe(BOOKING_NOT_FOUND_MESSAGE);
+      expect(
+        await payments.countDocuments({
+          bookingType: BookingType.FlightChange,
+          bookingId: new Types.ObjectId(body.id as string),
+        }),
+      ).toBe(0);
     });
 
     it('lets one change at a time per booking, and a cabin never gives more seats than it has', async () => {
@@ -781,6 +815,69 @@ describe('Flight change (e2e, FLT-27)', () => {
       expect(refunded).toBe(preview.body.refundAmount);
       expect(refunded).toBeLessThanOrEqual(PRICE + 4200);
       expect(await cabinOf(to)).toEqual({ bookedSeats: 0, heldSeats: 0 });
+    });
+
+    it('previews exactly what POST refunds at the 50% tier after a cheaper change, each payment rounded', async () => {
+      const from = await newFlight(PRICE, { days: 10 });
+      const booking = await confirmedBooking(from);
+      const to = await newFlight(PRICE - 999, { days: 11 });
+      expect((await changeTo(booking.id, to)).status).toBe(200);
+
+      const preview = await fx
+        .http()
+        .get(`/api/flight-bookings/${booking.id}/cancel`)
+        .set('Cookie', fx.user.cookie);
+      const cancelled = await fx
+        .http()
+        .post(`/api/flight-bookings/${booking.id}/cancel`)
+        .set('Cookie', fx.user.cookie)
+        .send({ expectedRefundPercent: 50 });
+
+      // The payment of 25000 still holds 24001: 50% of it is 12000.5 -> 12001.
+      expect(preview.body).toMatchObject({
+        refundPercent: 50,
+        total: PRICE - 999,
+        refundAmount: 12_001,
+      });
+      expect(cancelled.status).toBe(200);
+      expect(cancelled.body).toMatchObject({
+        refund: { amount: 12_001 },
+        changeRefunds: [],
+      });
+      const original = await payments
+        .findOne({ bookingId: new Types.ObjectId(booking.id) })
+        .lean()
+        .orFail()
+        .exec();
+      const out = await refunds.find({ paymentId: original._id }).lean().exec();
+      // 999 for the cheaper fare, 12001 for the cancellation: never more than 25000.
+      expect(out.reduce((sum, refund) => sum + refund.amount, 0)).toBe(13_000);
+    });
+
+    it('frees the seat chosen on the changed flight (FLT-28)', async () => {
+      const booking = await confirmedBooking();
+      const to = await newFlight(PRICE, { days: 32 });
+      const chosen = await fx
+        .http()
+        .patch(`/api/flight-bookings/${booking.id}/seat`)
+        .set('Cookie', fx.user.cookie)
+        .send({ seats: [{ passengerIndex: 0, seatNumber: '1A' }] });
+      expect(chosen.status).toBe(200);
+
+      expect((await changeTo(booking.id, to)).status).toBe(200);
+
+      const details = await fx
+        .http()
+        .get(`/api/flight-bookings/${booking.id}`)
+        .set('Cookie', fx.user.cookie);
+      expect(details.body.seats).toEqual([
+        {
+          segmentIndex: 0,
+          flightId: to,
+          cabin: CabinClass.Economy,
+          passengers: [{ passengerIndex: 0, seatNumber: null }],
+        },
+      ]);
     });
 
     it('expires an open change when the booking is cancelled, and gives its held seats back', async () => {
