@@ -15,7 +15,9 @@ import type { SessionsService } from '../sessions.service';
 import {
   ACCOUNT_SUSPENDED_MESSAGE,
   LOGIN_REQUIRED_MESSAGE,
+  PASSWORD_CHANGE_REQUIRED_MESSAGE,
 } from '../auth.constants';
+import { AllowTemporaryPassword } from '../decorators/allow-temporary-password.decorator';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 class ProtectedController {
@@ -36,14 +38,42 @@ class OpenController {
   }
 }
 
+class AuthLikeController {
+  @AllowTemporaryPassword()
+  allowedRoute(): string {
+    return 'ok';
+  }
+
+  otherRoute(): string {
+    return 'ok';
+  }
+}
+
+@AllowTemporaryPassword()
+class AllowedController {
+  anyRoute(): string {
+    return 'ok';
+  }
+}
+
 const USER_ID = '6740f1c2a4b5c6d7e8f90123';
 const SESSION_ID = '6740f1c2a4b5c6d7e8f90abc';
 
-function storedUser(fields: { role?: Role; status?: UserStatus } = {}) {
+function storedUser(
+  fields: {
+    role?: Role;
+    status?: UserStatus;
+    /** Left out unless given, like a document saved before the field existed. */
+    mustChangePassword?: boolean;
+  } = {},
+) {
   return {
     _id: new Types.ObjectId(USER_ID),
     role: fields.role ?? Role.User,
     status: fields.status ?? UserStatus.Active,
+    ...(fields.mustChangePassword === undefined
+      ? {}
+      : { mustChangePassword: fields.mustChangePassword }),
   };
 }
 
@@ -280,6 +310,148 @@ describe('JwtAuthGuard', () => {
       await result;
       // The token carries only the user id and the session id, so a role can only come from the database.
       expect(request.user).toEqual({ id: USER_ID, role: Role.Admin });
+    });
+  });
+
+  describe('a temporary password that must be changed first (ACC-13, ACC-07a)', () => {
+    it('answers 403 with its own message on a route without @AllowTemporaryPassword()', async () => {
+      const { usersService, runPrivate } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({ mustChangePassword: true }),
+      );
+
+      const { request, result } = runPrivate();
+
+      await expect(result).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(result).rejects.toThrow(PASSWORD_CHANGE_REQUIRED_MESSAGE);
+      expect(request.user).toBeUndefined();
+    });
+
+    it('also refuses a route of the same controller that is not marked', async () => {
+      const { usersService, run } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({ mustChangePassword: true }),
+      );
+
+      const { result } = run(
+        AuthLikeController,
+        AuthLikeController.prototype.otherRoute,
+      );
+
+      await expect(result).rejects.toThrow(PASSWORD_CHANGE_REQUIRED_MESSAGE);
+    });
+
+    it('lets the account through a route marked on the handler, with its id and role', async () => {
+      const { usersService, run } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({ mustChangePassword: true }),
+      );
+
+      const { request, result } = run(
+        AuthLikeController,
+        AuthLikeController.prototype.allowedRoute,
+      );
+
+      await expect(result).resolves.toBe(true);
+      expect(request.user).toEqual({ id: USER_ID, role: Role.User });
+    });
+
+    it('lets the account through a route of a controller marked as a whole', async () => {
+      const { usersService, run } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({ mustChangePassword: true }),
+      );
+
+      const { result } = run(
+        AllowedController,
+        AllowedController.prototype.anyRoute,
+      );
+
+      await expect(result).resolves.toBe(true);
+    });
+
+    it.each([
+      ['false', false],
+      ['missing (an account saved before the field existed)', undefined],
+    ])(
+      'does not restrict an account whose flag is %s',
+      async (_name, mustChangePassword) => {
+        const { usersService, runPrivate } = setup();
+        usersService.findEntityById.mockResolvedValue(
+          storedUser({ mustChangePassword }),
+        );
+
+        const { request, result } = runPrivate();
+
+        await expect(result).resolves.toBe(true);
+        expect(request.user).toEqual({ id: USER_ID, role: Role.User });
+      },
+    );
+
+    it('tells a suspended account that it is suspended, not that its password is temporary', async () => {
+      const { usersService, runPrivate } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({ status: UserStatus.Suspended, mustChangePassword: true }),
+      );
+
+      const { result } = runPrivate();
+
+      await expect(result).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(result).rejects.toThrow(ACCOUNT_SUSPENDED_MESSAGE);
+    });
+
+    it('tells a suspended account that it is suspended on an allowed route too', async () => {
+      const { usersService, run } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({ status: UserStatus.Suspended, mustChangePassword: true }),
+      );
+
+      const { result } = run(
+        AuthLikeController,
+        AuthLikeController.prototype.allowedRoute,
+      );
+
+      await expect(result).rejects.toThrow(ACCOUNT_SUSPENDED_MESSAGE);
+    });
+
+    it('answers 401 for a deactivated account with the flag', async () => {
+      const { usersService, runPrivate } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({
+          status: UserStatus.Deactivated,
+          mustChangePassword: true,
+        }),
+      );
+
+      const { result } = runPrivate();
+
+      await expect(result).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(result).rejects.toThrow(LOGIN_REQUIRED_MESSAGE);
+    });
+
+    it('answers 401 for a guest and a missing account, before the flag is looked at', async () => {
+      const { usersService, runPrivate } = setup();
+      usersService.findEntityById.mockResolvedValue(null);
+
+      await expect(runPrivate().result).rejects.toThrow(LOGIN_REQUIRED_MESSAGE);
+      await expect(runPrivate({ cookies: {} }).result).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+    });
+
+    it('leaves a @Public() route open, without reading the account', async () => {
+      const { usersService, run } = setup();
+      usersService.findEntityById.mockResolvedValue(
+        storedUser({ mustChangePassword: true }),
+      );
+
+      const { result } = run(
+        ProtectedController,
+        ProtectedController.prototype.openRoute,
+      );
+
+      await expect(result).resolves.toBe(true);
+      expect(usersService.findEntityById).not.toHaveBeenCalled();
     });
   });
 });

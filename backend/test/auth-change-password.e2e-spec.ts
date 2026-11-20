@@ -14,6 +14,7 @@ import {
   CURRENT_PASSWORD_INCORRECT_MESSAGE,
   INVALID_CREDENTIALS_MESSAGE,
   LOGIN_REQUIRED_MESSAGE,
+  PASSWORD_CHANGE_REQUIRED_MESSAGE,
   SAME_PASSWORD_MESSAGE,
 } from './../src/auth/auth.constants';
 import {
@@ -403,6 +404,77 @@ describe('PATCH /api/auth/change-password (e2e, ACC-08)', () => {
 
       expect(response.status).toBe(403);
       expect(response.body.message).toBe(ACCOUNT_SUSPENDED_MESSAGE);
+    });
+  });
+
+  describe('a temporary password must be changed first (ACC-13, ACC-07a, GEN-13)', () => {
+    /** A route of another module that any logged-in user may call. */
+    const otherRoute = (access?: string) => {
+      const call = request(app.getHttpServer()).get('/api/notifications');
+      return access ? call.set('Cookie', access) : call;
+    };
+
+    it('allows only me, change-password, refresh and logout, and refuses every other route with 403', async () => {
+      const user = await createUser({ mustChangePassword: true });
+      const session = await startSession(user.email);
+
+      expect(await meStatus(session.access)).toBe(200);
+      const refused = await otherRoute(session.access);
+      expect(refused.status).toBe(403);
+      expect(refused.body.message).toBe(PASSWORD_CHANGE_REQUIRED_MESSAGE);
+      expect(await refreshStatus(session.refresh)).toBe(200);
+
+      const other = await startSession(user.email);
+      const logout = await request(app.getHttpServer())
+        .post('/api/auth/logout')
+        .set('Cookie', `${other.access}; ${other.refresh}`);
+      expect(logout.status).toBe(204);
+    });
+
+    it('lets the same session use every route once the password is changed', async () => {
+      const user = await createUser({ mustChangePassword: true });
+      const { access } = await startSession(user.email);
+      expect((await otherRoute(access)).status).toBe(403);
+
+      const change = await changePassword(
+        { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+        access,
+      );
+
+      expect(change.status).toBe(200);
+      expect(change.body.mustChangePassword).toBe(false);
+      expect((await otherRoute(access)).status).toBe(200);
+    });
+
+    it('changes nothing for an account without the flag', async () => {
+      const user = await createUser({ mustChangePassword: false });
+      const { access } = await startSession(user.email);
+
+      expect((await otherRoute(access)).status).toBe(200);
+      expect(await meStatus(access)).toBe(200);
+    });
+
+    it('tells a suspended account with the flag that it is suspended, on every route', async () => {
+      const user = await createUser({ mustChangePassword: true });
+      const { access } = await startSession(user.email);
+      await users.findByIdAndUpdate(user.id, { status: UserStatus.Suspended });
+
+      const other = await otherRoute(access);
+      const me = await request(app.getHttpServer())
+        .get('/api/auth/me')
+        .set('Cookie', access);
+
+      for (const response of [other, me]) {
+        expect(response.status).toBe(403);
+        expect(response.body.message).toBe(ACCOUNT_SUSPENDED_MESSAGE);
+      }
+    });
+
+    it('still answers a guest 401, not 403', async () => {
+      const response = await otherRoute();
+
+      expect(response.status).toBe(401);
+      expect(response.body.message).toBe(LOGIN_REQUIRED_MESSAGE);
     });
   });
 
