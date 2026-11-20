@@ -7,6 +7,8 @@ import { HotelsModule } from '../hotels/hotels.module';
 import { ItineraryBookingsController } from './itinerary-bookings.controller';
 import { ItineraryBookingsService } from './itinerary-bookings.service';
 import { ItineraryFlightsController } from './itinerary-flights.controller';
+import { ItineraryPdfController } from './itinerary-pdf.controller';
+import { ItineraryPdfService } from './itinerary-pdf.service';
 import { ItineraryFlightsService } from './itinerary-flights.service';
 import { ItineraryHotelsController } from './itinerary-hotels.controller';
 import { ItineraryHotelsService } from './itinerary-hotels.service';
@@ -73,6 +75,17 @@ describe('ItinerariesModule', () => {
     const controllers = metadata<Type>(MODULE_METADATA.CONTROLLERS);
 
     expect(controllers.indexOf(ItineraryBookingsController)).toBeGreaterThan(
+      controllers.indexOf(PublicItinerariesController),
+    );
+  });
+
+  it('provides the PDF export and registers it after the public itineraries (ITN-28)', () => {
+    const controllers = metadata<Type>(MODULE_METADATA.CONTROLLERS);
+
+    expect(metadata<unknown>(MODULE_METADATA.PROVIDERS)).toContain(
+      ItineraryPdfService,
+    );
+    expect(controllers.indexOf(ItineraryPdfController)).toBeGreaterThan(
       controllers.indexOf(PublicItinerariesController),
     );
   });
