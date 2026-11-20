@@ -2091,3 +2091,17 @@ Claude Code added FlightBookingsService.confirmPaid, which delegates to a new Fl
 Accepted, changed, or rejected:
 Accepted: the design (confirm first, then the seats, then the notification), the reference format and the e-ticket. Changed after the reviewer agent: the Swagger 409 text now names completed bookings too. Not changed, listed as follow-ups: a crash between the confirmation and the seat move leaves the seats counted as held until the counters are recomputed (safe, nothing oversold; a marker would need a new field in the data model), and an e-ticket for completed bookings.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Omar Hossam
+Tool: Claude Code (VS Code extension, model Claude Opus 5.5)
+Branch / Issue: fix/PAY-03-late-payment-e2e-stripe-stub / no issue (CI on develop red since #235)
+Related Requirement: PAY-03, FLT-23, HTL-17
+Prompt:
+CI on develop failed on 4511b97 and 7b21eb8 in two e2e tests. I asked Claude Code to fix it at its cause, in tests only: FLT-23 (#233), HTL-17 (#236) and PAY-03 (#235) each passed CI alone, but together a late payment is now refunded, so the two "late payment" tests that expected no notification fail, and they also reached the real Stripe API with the fake test key.
+How the output was used:
+Claude Code reproduced the failure, read develop's failed CI log (only these 2 tests in the step "E2E tests"; lint, typecheck, build, unit tests and the frontend job were green), and changed only backend/test/flight-booking-confirmation.e2e-spec.ts and backend/test/hotel-booking-confirmation.e2e-spec.ts: StripeGateway.createRefund is replaced in every test (beforeEach, restored afterEach) on the one gateway that PaymentsModule and RefundsModule share, and the wrong assertion "no notification" became the real outcome: no booking_confirmed notification, exactly one refund notification, exactly one refund (100%, late_payment, the payment amount, refunded as the stub answers), createRefund called once with the key refund-<type>-<bookingId>, and a second delivery of the same payment creates no second refund or notification. Every other assertion was kept, and the refunds are deleted by id. It checked every other suite that can reach a refund: refunds.e2e-spec already stubs it and payments.e2e-spec cannot reach it, so they were not changed. On my laptop the four suites ran with no "Invalid API Key" line.
+Accepted, changed, or rejected:
+Accepted: the stub and the new assertions as asked. Changed: nothing in production code. Rejected: nothing.
+================================================
