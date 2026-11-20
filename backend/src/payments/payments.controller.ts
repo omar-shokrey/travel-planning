@@ -63,16 +63,17 @@ export class PaymentsController {
       'Registered users only, for their own booking. The body names the booking (`bookingType` and `bookingId`) and nothing else: **the amount and the currency are always the booking total**, never sent by the client.',
       'The booking must be waiting for payment, its hold must be live and its policies must be accepted (`POST /api/bookings/:type/:id/accept-policies`, PAY-02). Stripe test mode creates a PaymentIntent and the answer carries its `clientSecret`: the frontend confirms the payment with Stripe Elements, so **card details never reach this backend**. Only the Stripe payment id, the amount, the currency and the status are stored.',
       '**The booking is not confirmed by this call.** It is confirmed only after the Stripe webhook (`POST /api/payments/webhook`) reports that the PaymentIntent succeeded. A booking has one payment: calling again while it waits for the card returns the same PaymentIntent; if the last attempt failed, use `POST /api/payments/:id/retry`. When the hold ends, the PaymentIntent is cancelled.',
+      '**A flight change (FLT-27)** to a dearer flight is paid the same way with `bookingType: flight_change` and the id of the change as `bookingId`: the amount is the fare difference of the change, and the change is applied only after the webhook reports the payment.',
     ].join('\n\n'),
   })
   @ApiCreatedResponse({ type: PaymentIntentResponseDto })
   @ApiBadRequestResponse({
     description:
-      '`bookingType` is not `flight` or `hotel`, `bookingId` is not a valid id, or a field that is not allowed was sent (such as `amount`). `errors` lists each field.',
+      '`bookingType` is not `flight`, `hotel` or `flight_change`, `bookingId` is not a valid id, or a field that is not allowed was sent (such as `amount`). `errors` lists each field.',
   })
   @ApiNotFoundResponse({
     description:
-      '"Booking not found": no such booking, or it belongs to another user',
+      '"Booking not found": no such booking or flight change, or it belongs to another user',
   })
   @ApiConflictResponse({
     description: `"${NOT_WAITING_FOR_PAYMENT_MESSAGE}", "${HOLD_EXPIRED_MESSAGE}", "${POLICIES_NOT_ACCEPTED_MESSAGE}", "${ALREADY_PAID_MESSAGE}", "${PAYMENT_FAILED_MESSAGE}" or "${PAYMENT_CANCELLED_MESSAGE}". Stripe is not called.`,

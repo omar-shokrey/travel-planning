@@ -17,6 +17,8 @@ export const BOOKING_CHANGED_MESSAGE =
 export const PENDING_PAYMENT = 'pending_payment';
 
 /** PAY-01: the answers of the payment routes. */
+/** A flight change (FLT-27) that cannot be found, worded like a missing booking. */
+export const BOOKING_NOT_FOUND_MESSAGE = 'Booking not found';
 export const PAYMENT_NOT_FOUND_MESSAGE = 'Payment not found';
 export const ALREADY_PAID_MESSAGE = 'This booking is already paid';
 export const PAYMENT_FAILED_MESSAGE =

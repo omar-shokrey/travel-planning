@@ -1,6 +1,10 @@
 /** PAY-03: someone else's refund or a missing one (ACC-11). */
 export const REFUND_NOT_FOUND_MESSAGE = 'Refund not found';
 
+/** FLT-27: asking to refund more than is left of a payment. */
+export const REFUND_EXCEEDS_PAYMENT_MESSAGE =
+  'The refund is larger than what is left of the payment';
+
 /** At most this many refunds are sent again per run of the recovery job. */
 export const REFUND_RECOVERY_BATCH_SIZE = 50;
 

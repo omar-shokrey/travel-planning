@@ -7,7 +7,10 @@ import type { FieldError } from '../../common/interfaces/error-response.interfac
 import { validationExceptionFactory } from '../../common/pipes/validation-exception.factory';
 import { FlightBookingStatus } from '../../flight-bookings/enums/flight-booking-status.enum';
 import { HotelBookingStatus } from '../../hotel-bookings/enums/hotel-booking-status.enum';
-import { BookingType } from '../../payments/enums/booking-type.enum';
+import {
+  BOOKING_KINDS,
+  BookingType,
+} from '../../payments/enums/booking-type.enum';
 import {
   ADMIN_BOOKING_STATUSES,
   BOOKING_RANGE_ORDER_MESSAGE,
@@ -90,8 +93,17 @@ describe('ListAdminBookingsQueryDto (ACC-17)', () => {
     expect(await invalidFields(query)).toEqual([]);
   });
 
-  it.each(Object.values(BookingType))('accepts type %s', async (type) => {
+  it.each(BOOKING_KINDS)('accepts type %s', async (type) => {
     expect(await invalidFields({ type })).toEqual([]);
+  });
+
+  it('rejects type flight_change: a flight change is not a booking (FLT-27)', async () => {
+    expect(await errorsOf({ type: BookingType.FlightChange })).toEqual([
+      {
+        field: 'type',
+        messages: ['type must be one of the following values: flight, hotel'],
+      },
+    ]);
   });
 
   it.each(ADMIN_BOOKING_STATUSES)('accepts status %s', async (status) => {

@@ -5,7 +5,7 @@ import type {
   BookingPoliciesResponseDto,
   PolicyCancellationTierDto,
 } from '../dto/booking-policies-response.dto';
-import { BookingType } from '../enums/booking-type.enum';
+import { type BookingKind, BookingType } from '../enums/booking-type.enum';
 import { PENDING_PAYMENT } from '../payments.constants';
 
 /** The fields both kinds of booking share. */
@@ -23,7 +23,7 @@ const tiersOf = (
     refundPercent,
   }));
 
-const common = (type: BookingType, booking: CommonSource) => ({
+const common = (type: BookingKind, booking: CommonSource) => ({
   type,
   bookingId: booking._id.toString(),
   status: booking.status,

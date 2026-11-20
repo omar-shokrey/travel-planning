@@ -23,6 +23,23 @@ export type BookingPaymentHandlers = Partial<
 /** The injection token of the handlers, by booking type. */
 export const BOOKING_PAYMENT_HANDLERS = Symbol('BOOKING_PAYMENT_HANDLERS');
 
+/**
+ * The handlers by type: a booking service is a handler once it has
+ * `confirmPaid`; a flight change (FLT-27) is confirmed by the flight change
+ * port, and has no handler while the port is not provided.
+ */
+export function paymentHandlersOf(
+  flightBookings: object,
+  hotelBookings: object,
+  flightChanges?: BookingPaymentHandler,
+): BookingPaymentHandlers {
+  return {
+    [BookingType.Flight]: paymentHandlerOf(flightBookings),
+    [BookingType.Hotel]: paymentHandlerOf(hotelBookings),
+    [BookingType.FlightChange]: flightChanges,
+  };
+}
+
 /** The handler a booking service offers, or `undefined` until its issue adds `confirmPaid`. */
 export function paymentHandlerOf(
   service: object,

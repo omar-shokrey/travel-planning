@@ -1,6 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { ProviderType } from '../../common/enums/provider-type.enum';
-import { BookingType } from '../../payments/enums/booking-type.enum';
+import {
+  BOOKING_KINDS,
+  type BookingKind,
+  BookingType,
+} from '../../payments/enums/booking-type.enum';
 import {
   ADMIN_BOOKING_STATUSES,
   type AdminBookingStatus,
@@ -76,11 +80,11 @@ export class AdminBookingResponseDto {
   id: string;
 
   @ApiProperty({
-    enum: BookingType,
-    enumName: 'BookingType',
+    enum: BOOKING_KINDS,
+    enumName: 'BookingKind',
     example: BookingType.Flight,
   })
-  type: BookingType;
+  type: BookingKind;
 
   @ApiProperty({
     type: String,

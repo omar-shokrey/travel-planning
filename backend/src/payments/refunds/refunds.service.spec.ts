@@ -1,9 +1,11 @@
 import {
   BadGatewayException,
+  ConflictException,
   Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import type { ModuleRef } from '@nestjs/core';
 import { Types } from 'mongoose';
 import { NotificationLinkType } from '../../notifications/enums/notification-link-type.enum';
 import { NotificationType } from '../../notifications/enums/notification-type.enum';
@@ -13,7 +15,9 @@ import { PaymentStatus } from '../enums/payment-status.enum';
 import type { StripeGateway } from '../stripe.gateway';
 import { RefundReason } from './enums/refund-reason.enum';
 import { RefundStatus } from './enums/refund-status.enum';
-import { RefundsService } from './refunds.service';
+import { FLIGHT_CHANGE_PAYMENT_PORT } from '../flight-change-payment-port';
+import { REFUND_EXCEEDS_PAYMENT_MESSAGE } from './refunds.constants';
+import { percentOf, RefundsService } from './refunds.service';
 
 const BOOKING_ID = '6740f1c2a4b5c6d7e8f90789';
 const PAYMENT_ID = new Types.ObjectId('6740f1c2a4b5c6d7e8f90bbb');
@@ -90,6 +94,24 @@ function setup(storedPayment: unknown = payment()) {
       },
     ),
     findById: jest.fn(() => query([...stored.values()][0] ?? null)),
+    // The refunds already made against a payment (FLT-27 remaining amount).
+    find: jest.fn((filter: { paymentId?: unknown }) =>
+      query(
+        [...stored.values()].filter(
+          (refund) =>
+            String(refund.paymentId) === String(filter.paymentId) &&
+            refund.status !== RefundStatus.Failed,
+        ),
+      ),
+    ),
+    deleteOne: jest.fn((filter: { _id: unknown }) => {
+      for (const [key, refund] of stored) {
+        if (String(refund._id) === String(filter._id)) {
+          stored.delete(key);
+        }
+      }
+      return query({ deletedCount: 1 });
+    }),
   };
   const payments = {
     findOne: jest.fn(() => query(storedPayment)),
@@ -548,5 +570,474 @@ describe('RefundsService: owner read, webhook status and resend (PAY-03)', () =>
     await service.resubmit(pending);
 
     expect(notifications.notify).not.toHaveBeenCalled();
+  });
+});
+
+describe('RefundsService with several refunds per payment (FLT-27)', () => {
+  const CHANGE_ID = '6740f1c2a4b5c6d7e8f90ccc';
+  const FLIGHT_PAYMENT = payment({ amount: 25100 });
+
+  type Doc = Record<string, unknown> & { _id: Types.ObjectId };
+
+  /**
+   * A fake collection that keeps several refunds per payment (unique per
+   * bookingType + bookingId), several payments by key, and a module reference
+   * that may hold the flight change port.
+   */
+  function many(
+    options: {
+      payments?: Record<string, unknown>[];
+      port?: { linkOf: jest.Mock } | null;
+    } = {},
+  ) {
+    const paymentList = options.payments ?? [FLIGHT_PAYMENT];
+    const stored: Doc[] = [];
+    const keyOf = (doc: Record<string, unknown>) =>
+      `${String(doc.bookingType)}-${String(doc.bookingId)}`;
+    const refunds = {
+      create: jest.fn((doc: Record<string, unknown>) => {
+        if (stored.some((refund) => keyOf(refund) === keyOf(doc))) {
+          return Promise.reject(duplicateKey());
+        }
+        const saved: Doc = {
+          _id: new Types.ObjectId(),
+          ...doc,
+          createdAt: NOW,
+          updatedAt: NOW,
+        };
+        stored.push(saved);
+        return Promise.resolve({ toObject: () => ({ ...saved }) });
+      }),
+      findOne: jest.fn((filter: Record<string, unknown>) =>
+        query(
+          stored.find((refund) =>
+            filter.stripeRefundId
+              ? refund.stripeRefundId === filter.stripeRefundId
+              : keyOf(refund) === keyOf(filter),
+          ) ?? null,
+        ),
+      ),
+      find: jest.fn((filter: { paymentId?: unknown }) =>
+        query(
+          stored.filter(
+            (refund) =>
+              String(refund.paymentId) === String(filter.paymentId) &&
+              refund.status !== RefundStatus.Failed,
+          ),
+        ),
+      ),
+      findOneAndUpdate: jest.fn(
+        (
+          filter: { _id: unknown; status?: unknown },
+          update: { $set: Record<string, unknown> },
+        ) => {
+          const refund = stored.find(
+            (doc) =>
+              String(doc._id) === String(filter._id) &&
+              (filter.status === undefined || doc.status === filter.status),
+          );
+          if (refund) Object.assign(refund, update.$set);
+          return query(refund ? { ...refund } : null);
+        },
+      ),
+      findById: jest.fn((id: unknown) =>
+        query(stored.find((doc) => String(doc._id) === String(id)) ?? null),
+      ),
+      deleteOne: jest.fn((filter: { _id: unknown }) => {
+        const index = stored.findIndex(
+          (doc) => String(doc._id) === String(filter._id),
+        );
+        if (index >= 0) stored.splice(index, 1);
+        return query({ deletedCount: index >= 0 ? 1 : 0 });
+      }),
+    };
+    const payments = {
+      findOne: jest.fn((filter: Record<string, unknown>) =>
+        query(
+          paymentList.find(
+            (candidate) =>
+              keyOf(candidate) === keyOf(filter) &&
+              candidate.status === filter.status,
+          ) ?? null,
+        ),
+      ),
+      findById: jest.fn(() => query(paymentList[0])),
+    };
+    let sent = 0;
+    const gateway = {
+      createRefund: jest.fn((input: { amount: number }) => {
+        sent += 1;
+        return Promise.resolve({
+          id: `re_${sent}`,
+          status: 'pending',
+          amount: input.amount,
+          currency: 'usd',
+          paymentIntentId: 'pi_1',
+        });
+      }),
+    };
+    const notifications = { notify: jest.fn(() => Promise.resolve()) };
+    const moduleRef = {
+      get: jest.fn(() => {
+        if (!options.port) throw new Error('not found');
+        return options.port;
+      }),
+    };
+    const service = new RefundsService(
+      refunds as never,
+      payments as never,
+      gateway as unknown as StripeGateway,
+      notifications as unknown as NotificationsService,
+      moduleRef as unknown as ModuleRef,
+    );
+    return { service, refunds, gateway, notifications, moduleRef, stored };
+  }
+
+  const fareDifference = (fields: Record<string, unknown> = {}) => ({
+    bookingType: BookingType.FlightChange,
+    bookingId: CHANGE_ID,
+    paymentOf: { bookingType: BookingType.Flight, bookingId: BOOKING_ID },
+    amount: 4000,
+    reason: RefundReason.FareDifference,
+    link: { bookingType: BookingType.Flight, bookingId: BOOKING_ID } as const,
+    ...fields,
+  });
+
+  describe('refund: the remaining amount', () => {
+    it('refunds the percent of the whole payment when nothing was refunded before (unchanged)', async () => {
+      const { service } = many();
+
+      await expect(
+        service.refund(request({ refundPercent: 50 })),
+      ).resolves.toMatchObject({ amount: 12550, refundPercent: 50 });
+    });
+
+    it('takes the percent of what is left after a fare difference refund', async () => {
+      const { service } = many();
+      await service.refundAmount(fareDifference());
+
+      // (25100 - 4000) x 50% = 10550
+      await expect(
+        service.refund(request({ refundPercent: 50 })),
+      ).resolves.toMatchObject({ amount: 10550, refundPercent: 50 });
+    });
+
+    it('ignores a failed earlier refund: it gave nothing back', async () => {
+      const { service, stored } = many();
+      await service.refundAmount(fareDifference());
+      stored[0].status = RefundStatus.Failed;
+
+      await expect(
+        service.refund(request({ refundPercent: 50 })),
+      ).resolves.toMatchObject({ amount: 12550 });
+    });
+
+    it('rounds the share of the remainder to whole minor units', async () => {
+      const { service } = many();
+      await service.refundAmount(fareDifference({ amount: 3999 }));
+
+      // (25100 - 3999) x 33% = 6963.33 -> 6963
+      await expect(
+        service.refund(request({ refundPercent: 33 })),
+      ).resolves.toMatchObject({ amount: 6963 });
+    });
+
+    it('creates nothing for 0%, and nothing when the whole payment was already refunded', async () => {
+      const { service, gateway } = many();
+      await expect(
+        service.refund(request({ refundPercent: 0 })),
+      ).resolves.toBeNull();
+      await service.refundAmount(fareDifference({ amount: 25100 }));
+
+      await expect(service.refund(request())).resolves.toBeNull();
+      expect(gateway.createRefund).toHaveBeenCalledTimes(1);
+    });
+
+    it('never counts its own key: a retried cancellation returns the first refund unchanged', async () => {
+      const { service, gateway } = many();
+      await service.refundAmount(fareDifference());
+      const first = await service.refund(request({ refundPercent: 100 }));
+
+      const again = await service.refund(request({ refundPercent: 100 }));
+
+      expect(first).toMatchObject({ amount: 21100 });
+      expect(again).toEqual(first);
+      expect(gateway.createRefund).toHaveBeenCalledTimes(2);
+    });
+
+    it('lets money out never exceed money in: fare difference plus a 100% cancellation equals the payment', async () => {
+      const { service, stored } = many();
+      await service.refundAmount(fareDifference({ amount: 7777 }));
+      await service.refund(request({ refundPercent: 100 }));
+
+      const total = stored.reduce(
+        (sum, refund) => sum + (refund.amount as number),
+        0,
+      );
+      expect(total).toBe(25100);
+    });
+  });
+
+  describe('refundAmount', () => {
+    it('records the exact amount against the payment of paymentOf, keyed on the change, then sends it to Stripe', async () => {
+      const { service, refunds, gateway } = many();
+
+      const refund = await service.refundAmount(fareDifference());
+
+      expect(refunds.create).toHaveBeenCalledWith({
+        bookingType: BookingType.FlightChange,
+        bookingId: new Types.ObjectId(CHANGE_ID),
+        paymentId: PAYMENT_ID,
+        userId: USER_ID,
+        amount: 4000,
+        currency: 'USD',
+        refundPercent: 16,
+        reason: RefundReason.FareDifference,
+        status: RefundStatus.Pending,
+      });
+      expect(gateway.createRefund).toHaveBeenCalledWith(
+        {
+          paymentIntentId: 'pi_1',
+          amount: 4000,
+          metadata: {
+            bookingType: BookingType.FlightChange,
+            bookingId: CHANGE_ID,
+          },
+        },
+        `refund-flight_change-${CHANGE_ID}`,
+      );
+      expect(refund).toMatchObject({
+        bookingType: 'flight_change',
+        bookingId: CHANGE_ID,
+        paymentId: PAYMENT_ID.toString(),
+        amount: 4000,
+        reason: 'fare_difference',
+        status: 'pending',
+        stripeRefundId: 're_1',
+      });
+    });
+
+    it('notifies the owner with the fare difference text, linked to the flight booking', async () => {
+      const { service, notifications } = many();
+
+      await service.refundAmount(fareDifference());
+
+      expect(notifications.notify).toHaveBeenCalledWith(
+        USER_ID,
+        NotificationType.Refund,
+        'Your new flight costs less: the fare difference of 40.00 USD is being refunded to your card.',
+        { type: NotificationLinkType.FlightBooking, id: BOOKING_ID },
+      );
+    });
+
+    it('is idempotent: a second call returns the first refund, Stripe and the notification once', async () => {
+      const { service, gateway, notifications } = many();
+
+      const first = await service.refundAmount(fareDifference());
+      const second = await service.refundAmount(
+        fareDifference({ amount: 9999 }),
+      );
+
+      expect(second).toEqual(first);
+      expect(gateway.createRefund).toHaveBeenCalledTimes(1);
+      expect(notifications.notify).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns the first refund when two calls race and the insert hits the unique index', async () => {
+      const { service, refunds, gateway } = many();
+      const first = await service.refundAmount(fareDifference());
+      // The other call recorded it between our read and our insert.
+      refunds.findOne.mockReturnValueOnce(query(null));
+
+      await expect(service.refundAmount(fareDifference())).resolves.toEqual(
+        first,
+      );
+      expect(gateway.createRefund).toHaveBeenCalledTimes(1);
+    });
+
+    it('answers 409 above what is left of the payment and records nothing; exactly the remainder is allowed', async () => {
+      const { service, refunds, gateway } = many();
+      await service.refund(request({ refundPercent: 50 })); // 12550 left
+
+      await expect(
+        service.refundAmount(fareDifference({ amount: 12551 })),
+      ).rejects.toThrow(new ConflictException(REFUND_EXCEEDS_PAYMENT_MESSAGE));
+      expect(refunds.create).toHaveBeenCalledTimes(1);
+      expect(gateway.createRefund).toHaveBeenCalledTimes(1);
+
+      await expect(
+        service.refundAmount(fareDifference({ amount: 12550 })),
+      ).resolves.toMatchObject({ amount: 12550 });
+    });
+
+    it('removes its own refund by id and answers 409 when a refund made at the same moment would exceed the payment', async () => {
+      const { service, refunds, gateway, stored } = many();
+      const create = refunds.create.getMockImplementation();
+      refunds.create.mockImplementationOnce((doc) => {
+        // Another refund of the same payment is recorded in the same instant.
+        stored.push({
+          _id: new Types.ObjectId(),
+          bookingType: BookingType.Flight,
+          bookingId: new Types.ObjectId(BOOKING_ID),
+          paymentId: PAYMENT_ID,
+          amount: 25000,
+          status: RefundStatus.Pending,
+        });
+        return create!(doc);
+      });
+
+      await expect(service.refundAmount(fareDifference())).rejects.toThrow(
+        ConflictException,
+      );
+      expect(refunds.deleteOne).toHaveBeenCalledTimes(1);
+      expect(stored.map((refund) => refund.amount)).toEqual([25000]);
+      expect(gateway.createRefund).not.toHaveBeenCalled();
+    });
+
+    it('leaves the refund pending when Stripe is down, does not throw, and still notifies', async () => {
+      const { service, gateway, notifications } = many();
+      gateway.createRefund.mockRejectedValueOnce(
+        new ServiceUnavailableException('Payments are not configured'),
+      );
+
+      await expect(
+        service.refundAmount(fareDifference()),
+      ).resolves.toMatchObject({ status: 'pending', stripeRefundId: null });
+      expect(notifications.notify).toHaveBeenCalledTimes(1);
+    });
+
+    it('answers 404 when paymentOf has no succeeded payment', async () => {
+      const { service, refunds } = many({ payments: [] });
+
+      await expect(service.refundAmount(fareDifference())).rejects.toThrow(
+        new NotFoundException('Payment not found'),
+      );
+      expect(refunds.create).not.toHaveBeenCalled();
+    });
+
+    it('creates nothing for 0 and refuses a negative or fractional amount', async () => {
+      const { service, refunds } = many();
+
+      await expect(
+        service.refundAmount(fareDifference({ amount: 0 })),
+      ).resolves.toBeNull();
+      for (const amount of [-1, 10.5]) {
+        await expect(
+          service.refundAmount(fareDifference({ amount })),
+        ).rejects.toBeInstanceOf(RangeError);
+      }
+      expect(refunds.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the notification link of a flight change refund', () => {
+    const changePayment = payment({
+      bookingType: BookingType.FlightChange,
+      bookingId: new Types.ObjectId(CHANGE_ID),
+      amount: 4200,
+    });
+    const late = request({
+      bookingType: BookingType.FlightChange,
+      bookingId: CHANGE_ID,
+      reason: RefundReason.LatePayment,
+    });
+
+    it('asks the flight change port for the booking when no link is given (late payment)', async () => {
+      const port = {
+        linkOf: jest.fn(() =>
+          Promise.resolve({
+            bookingType: BookingType.Flight,
+            bookingId: BOOKING_ID,
+          }),
+        ),
+      };
+      const { service, notifications, moduleRef } = many({
+        payments: [changePayment],
+        port,
+      });
+
+      await service.refund(late);
+
+      expect(moduleRef.get).toHaveBeenCalledWith(FLIGHT_CHANGE_PAYMENT_PORT, {
+        strict: false,
+      });
+      expect(port.linkOf).toHaveBeenCalledWith(CHANGE_ID);
+      expect(notifications.notify).toHaveBeenCalledWith(
+        USER_ID,
+        NotificationType.Refund,
+        'Your payment arrived after your booking hold ended, so it is being refunded in full (42.00 USD).',
+        { type: NotificationLinkType.FlightBooking, id: BOOKING_ID },
+      );
+    });
+
+    it('notifies without a link when no port is provided', async () => {
+      const { service, notifications } = many({
+        payments: [changePayment],
+        port: null,
+      });
+
+      await service.refund(late);
+
+      expect(notifications.notify).toHaveBeenCalledWith(
+        USER_ID,
+        NotificationType.Refund,
+        expect.any(String),
+        undefined,
+      );
+    });
+
+    it('notifies without a link, and logs, when the port fails', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn');
+      const port = { linkOf: jest.fn(() => Promise.reject(new Error('db'))) };
+      const { service, notifications } = many({
+        payments: [changePayment],
+        port,
+      });
+
+      await service.refund(late);
+
+      expect(notifications.notify).toHaveBeenCalledWith(
+        USER_ID,
+        NotificationType.Refund,
+        expect.any(String),
+        undefined,
+      );
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(CHANGE_ID));
+    });
+
+    it('reconciles a fare_difference refund from the webhook and links its second notification through the port', async () => {
+      const port = {
+        linkOf: jest.fn(() =>
+          Promise.resolve({
+            bookingType: BookingType.Flight,
+            bookingId: BOOKING_ID,
+          }),
+        ),
+      };
+      const { service, notifications, stored } = many({ port });
+      await service.refundAmount(fareDifference());
+
+      await service.applyStripeStatus('re_1', 'succeeded');
+
+      expect(stored[0].status).toBe(RefundStatus.Refunded);
+      expect(notifications.notify).toHaveBeenLastCalledWith(
+        USER_ID,
+        NotificationType.Refund,
+        'Your refund of 40.00 USD for your flight booking has been sent to your card.',
+        { type: NotificationLinkType.FlightBooking, id: BOOKING_ID },
+      );
+      expect(port.linkOf).toHaveBeenCalledWith(CHANGE_ID);
+    });
+  });
+});
+
+describe('percentOf (FLT-27)', () => {
+  it.each([
+    [4000, 25100, 16],
+    [1, 25100, 1],
+    [25100, 25100, 100],
+    [12550, 25100, 50],
+  ])('%p of %p is %p%%', (amount, total, percent) => {
+    expect(percentOf(amount, total)).toBe(percent);
   });
 });

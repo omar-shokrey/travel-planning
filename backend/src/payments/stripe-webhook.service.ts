@@ -165,8 +165,9 @@ export class StripeWebhookService {
       now,
     );
     if (!confirmed) {
-      // PAY-03: a late payment is refunded in full. refund() is idempotent
-      // per booking, so a repeated event refunds once. An unexpected error
+      // PAY-03: a late payment (of a booking or of a flight change, FLT-27)
+      // is refunded in full. refund() is idempotent per (bookingType,
+      // bookingId), so a repeated event refunds once. An unexpected error
       // (the database) answers 500 and Stripe sends the event again.
       this.logger.warn(
         `Payment ${payment._id.toString()} succeeded after the hold of ${payment.bookingType} booking ${payment.bookingId.toString()} ended. It is refunded in full (PAY-03).`,

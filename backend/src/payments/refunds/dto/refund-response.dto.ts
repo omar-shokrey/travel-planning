@@ -15,10 +15,17 @@ export class RefundResponseDto {
   })
   bookingType: BookingType;
 
-  @ApiProperty({ example: '6740f1c2a4b5c6d7e8f90789' })
+  @ApiProperty({
+    description:
+      'Id of the booking, or of the flight change for `flight_change` (FLT-27)',
+    example: '6740f1c2a4b5c6d7e8f90789',
+  })
   bookingId: string;
 
-  @ApiProperty({ example: '6740f1c2a4b5c6d7e8f90bbb' })
+  @ApiProperty({
+    description: 'The payment the money is refunded from',
+    example: '6740f1c2a4b5c6d7e8f90bbb',
+  })
   paymentId: string;
 
   @ApiProperty({
@@ -31,7 +38,8 @@ export class RefundResponseDto {
   currency: string;
 
   @ApiProperty({
-    description: 'Share of the payment refunded, 1 to 100',
+    description:
+      'Share refunded, 1 to 100: of what was left of the payment for a cancellation or a late payment, of the whole payment (rounded) for a fare difference',
     example: 50,
   })
   refundPercent: number;

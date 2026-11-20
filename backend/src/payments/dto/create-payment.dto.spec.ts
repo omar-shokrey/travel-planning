@@ -29,7 +29,7 @@ async function errorsOf(body: unknown): Promise<FieldError[]> {
 }
 
 describe('CreatePaymentDto (PAY-01)', () => {
-  it.each(Object.values(BookingType))('accepts a %s booking', async (type) => {
+  it.each(Object.values(BookingType))('accepts a %s payment', async (type) => {
     const dto = (await pipe.transform(
       { bookingType: type, bookingId: ID },
       metadata,
@@ -43,7 +43,7 @@ describe('CreatePaymentDto (PAY-01)', () => {
     expect(await errorsOf({ bookingType: 'car', bookingId: ID })).toEqual([
       {
         field: 'bookingType',
-        messages: ['bookingType must be one of: flight, hotel'],
+        messages: ['bookingType must be one of: flight, hotel, flight_change'],
       },
     ]);
   });

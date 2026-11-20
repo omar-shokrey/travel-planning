@@ -1,8 +1,11 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsIn, IsOptional, ValidateBy } from 'class-validator';
+import { IsIn, IsOptional, ValidateBy } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { IsDateOnly } from '../../hotels/dto/date-only.validators';
-import { BookingType } from '../../payments/enums/booking-type.enum';
+import {
+  BOOKING_KINDS,
+  type BookingKind,
+} from '../../payments/enums/booking-type.enum';
 import {
   ADMIN_BOOKING_STATUSES,
   type AdminBookingStatus,
@@ -37,12 +40,15 @@ const IsNotAfterTo = (): PropertyDecorator =>
 export class ListAdminBookingsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     description: 'Only flight or only hotel bookings. Without it, both.',
-    enum: BookingType,
-    enumName: 'BookingType',
+    enum: BOOKING_KINDS,
+    enumName: 'BookingKind',
   })
   @IsOptional()
-  @IsEnum(BookingType)
-  type?: BookingType;
+  // A flight change (FLT-27) is not a booking: `flight_change` is 400.
+  @IsIn(BOOKING_KINDS, {
+    message: `type must be one of the following values: ${BOOKING_KINDS.join(', ')}`,
+  })
+  type?: BookingKind;
 
   @ApiPropertyOptional({
     description: 'Only bookings with this status',

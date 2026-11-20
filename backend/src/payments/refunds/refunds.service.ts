@@ -1,16 +1,26 @@
 import {
   BadGatewayException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { NotificationLinkType } from '../../notifications/enums/notification-link-type.enum';
 import { NotificationType } from '../../notifications/enums/notification-type.enum';
-import { NotificationsService } from '../../notifications/notifications.service';
-import { BookingType } from '../enums/booking-type.enum';
+import {
+  type NotificationLink,
+  NotificationsService,
+} from '../../notifications/notifications.service';
+import { type BookingKind, BookingType } from '../enums/booking-type.enum';
+import {
+  FLIGHT_CHANGE_PAYMENT_PORT,
+  type FlightChangePaymentPort,
+} from '../flight-change-payment-port';
 import { PaymentStatus } from '../enums/payment-status.enum';
 import { Payment } from '../models/payment.schema';
 import { PAYMENT_NOT_FOUND_MESSAGE } from '../payments.constants';
@@ -29,7 +39,10 @@ import {
 import { Refund } from './models/refund.schema';
 import { refundMessage } from './refund-messages';
 import { refundStatusOf } from './refund-status';
-import { REFUND_NOT_FOUND_MESSAGE } from './refunds.constants';
+import {
+  REFUND_EXCEEDS_PAYMENT_MESSAGE,
+  REFUND_NOT_FOUND_MESSAGE,
+} from './refunds.constants';
 
 const MONGO_DUPLICATE_KEY = 11000;
 
@@ -37,17 +50,53 @@ const MONGO_DUPLICATE_KEY = 11000;
 export interface RefundRequest {
   bookingType: BookingType;
   bookingId: string;
-  /** Whole, 0 to 100. The caller computes it (refundPercentFor, or 100). */
+  /**
+   * Whole, 0 to 100, of what is left of the payment (its amount minus the
+   * refunds already made against it). The caller computes it
+   * (refundPercentFor, or 100).
+   */
   refundPercent: number;
   reason: RefundReason;
 }
 
-const LINK_TYPE: Record<BookingType, NotificationLinkType> = {
+/** The booking a refund's notification links to. */
+export interface RefundLink {
+  bookingType: BookingKind;
+  bookingId: string;
+}
+
+/**
+ * An exact amount to refund (FLT-27: the fare difference of a cheaper
+ * flight). The refund is keyed on (`bookingType`, `bookingId`) and paid back
+ * from the succeeded payment of `paymentOf`.
+ */
+export interface AmountRefundRequest {
+  bookingType: BookingType;
+  bookingId: string;
+  paymentOf: { bookingType: BookingType; bookingId: string };
+  /** Whole minor units of the payment's currency. */
+  amount: number;
+  reason: RefundReason;
+  /** Where the first notification links; otherwise worked out from the refund. */
+  link?: RefundLink;
+}
+
+const LINK_TYPE: Record<BookingKind, NotificationLinkType> = {
   [BookingType.Flight]: NotificationLinkType.FlightBooking,
   [BookingType.Hotel]: NotificationLinkType.HotelBooking,
 };
 
-/** The idempotency key of a booking's refund: one per booking, at Stripe too. */
+/** The fields of a payment the refunds need. */
+interface RefundablePayment {
+  _id: Types.ObjectId;
+  bookingId: Types.ObjectId;
+  userId: Types.ObjectId;
+  stripePaymentIntentId: string;
+  amount: number;
+  currency: string;
+}
+
+/** The idempotency key of a refund: one per (`bookingType`, `bookingId`), at Stripe too. */
 export const refundIdempotencyKey = (
   bookingType: BookingType,
   bookingId: Types.ObjectId | string,
@@ -67,17 +116,24 @@ export class RefundsService {
     @InjectModel(Payment.name) private readonly payments: Model<Payment>,
     private readonly gateway: StripeGateway,
     private readonly notifications: NotificationsService,
+    // FLT-27: finds the flight change port, which the flight-bookings module
+    // provides. That module imports this one, so the port cannot be injected
+    // here; it is looked up when a flight change's refund is notified.
+    @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
   /**
-   * PAY-03: refunds `refundPercent` of a booking's succeeded payment.
+   * PAY-03: refunds `refundPercent` of what is left of a booking's succeeded
+   * payment: its amount minus the refunds already made against it (pending or
+   * refunded, never failed; FLT-27 refunds a cheaper fare from the same
+   * payment). With no earlier refund that is the whole payment, as before.
    *
    * - 0% or an amount that rounds to 0: nothing is created, sent or notified;
    *   returns `null` (only a positive refund amount is refunded).
    * - No succeeded payment: 404 "Payment not found".
-   * - The refund is recorded first (`pending`), then sent to Stripe. A booking
-   *   has at most one refund: a second call returns the first one unchanged,
-   *   so a retried cancellation is harmless.
+   * - The refund is recorded first (`pending`), then sent to Stripe. One
+   *   (`bookingType`, `bookingId`) has at most one refund: a second call
+   *   returns the first one unchanged, so a retried cancellation is harmless.
    * - If Stripe is unavailable the refund stays `pending` without a Stripe id
    *   and this method still answers: a cancellation never fails because of
    *   Stripe. The recovery job sends it later.
@@ -109,9 +165,12 @@ export class RefundsService {
     if (!payment) {
       throw new NotFoundException(PAYMENT_NOT_FOUND_MESSAGE);
     }
-    // Whole minor units, never more than the payment.
-    const amount = Math.round((payment.amount * refundPercent) / 100);
-    if (amount === 0) {
+    const remaining =
+      payment.amount -
+      (await this.refundedFrom(payment._id, bookingType, bookingId));
+    // Whole minor units, never more than what is left of the payment.
+    const amount = Math.round((remaining * refundPercent) / 100);
+    if (amount <= 0) {
       return null;
     }
 
@@ -143,9 +202,139 @@ export class RefundsService {
       return toRefundResponse(existing);
     }
 
+    await this.assertWithinPayment(created, payment);
     const sent = await this.submit(created, payment.stripePaymentIntentId);
     await this.notify(sent, true);
     return toRefundResponse(sent);
+  }
+
+  /**
+   * FLT-27: refunds an exact `amount` (whole minor units) from the succeeded
+   * payment of `paymentOf`, keyed on (`bookingType`, `bookingId`).
+   *
+   * - Idempotent: a refund with the same key already recorded is returned
+   *   unchanged (Stripe and the notification once in total).
+   * - 0 creates nothing and returns `null`.
+   * - No succeeded payment: 404 "Payment not found". More than what is left
+   *   of the payment: 409, and nothing is recorded.
+   * - Recorded first (`pending`), then sent to Stripe with an idempotency key
+   *   of its own key; Stripe trouble leaves it `pending` for the recovery job
+   *   and never throws.
+   * - `refundPercent` is the share of the payment, rounded, from 1 to 100.
+   * - The owner is notified once it is recorded, linked to `link` when given.
+   */
+  async refundAmount(
+    request: AmountRefundRequest,
+  ): Promise<RefundResponseDto | null> {
+    const { bookingType, bookingId, paymentOf, amount, reason, link } = request;
+    if (!Number.isInteger(amount) || amount < 0) {
+      throw new RangeError(
+        `amount must be a whole number of minor units, 0 or more: ${amount}`,
+      );
+    }
+    if (amount === 0) {
+      return null;
+    }
+    const key = { bookingType, bookingId: new Types.ObjectId(bookingId) };
+    const already = await this.refunds.findOne(key).lean().exec();
+    if (already) {
+      return toRefundResponse(already);
+    }
+
+    const payment = await this.payments
+      .findOne({
+        bookingType: paymentOf.bookingType,
+        bookingId: new Types.ObjectId(paymentOf.bookingId),
+        status: PaymentStatus.Succeeded,
+      })
+      .lean()
+      .exec();
+    if (!payment) {
+      throw new NotFoundException(PAYMENT_NOT_FOUND_MESSAGE);
+    }
+    const remaining =
+      payment.amount -
+      (await this.refundedFrom(payment._id, bookingType, bookingId));
+    if (amount > remaining) {
+      throw new ConflictException(REFUND_EXCEEDS_PAYMENT_MESSAGE);
+    }
+
+    let created: RefundSource;
+    try {
+      created = (
+        await this.refunds.create({
+          ...key,
+          paymentId: payment._id,
+          userId: payment.userId,
+          amount,
+          currency: payment.currency,
+          refundPercent: percentOf(amount, payment.amount),
+          reason,
+          status: RefundStatus.Pending,
+        })
+      ).toObject();
+    } catch (error) {
+      if (!isDuplicateKey(error)) {
+        throw error;
+      }
+      // Two calls at the same moment: the other one recorded it first.
+      const existing = await this.refunds.findOne(key).lean().orFail().exec();
+      return toRefundResponse(existing);
+    }
+
+    await this.assertWithinPayment(created, payment);
+    const sent = await this.submit(created, payment.stripePaymentIntentId);
+    await this.notify(sent, true, link);
+    return toRefundResponse(sent);
+  }
+
+  /**
+   * What was already refunded from a payment: every refund against it that is
+   * pending or refunded (a failed one gave nothing back), except the refund
+   * with the key being asked for, which is the same refund asked again.
+   */
+  private async refundedFrom(
+    paymentId: Types.ObjectId,
+    bookingType: BookingType,
+    bookingId: string,
+  ): Promise<number> {
+    const earlier = await this.refunds
+      .find({ paymentId, status: { $ne: RefundStatus.Failed } })
+      .select('bookingType bookingId amount')
+      .lean()
+      .exec();
+    return earlier
+      .filter(
+        (refund) =>
+          refund.bookingType !== bookingType ||
+          refund.bookingId.toString() !== bookingId,
+      )
+      .reduce((sum, refund) => sum + refund.amount, 0);
+  }
+
+  /**
+   * Two refunds from the same payment at the same moment could each see the
+   * whole remainder. After recording, the refunds of the payment are summed
+   * again: if they now exceed it, this refund (by its id) is removed before
+   * anything reached Stripe, and the answer is 409.
+   */
+  private async assertWithinPayment(
+    created: RefundSource,
+    payment: RefundablePayment,
+  ): Promise<void> {
+    const refunded = await this.refundedFrom(
+      payment._id,
+      created.bookingType,
+      created.bookingId.toString(),
+    );
+    if (refunded + created.amount <= payment.amount) {
+      return;
+    }
+    await this.refunds.deleteOne({ _id: created._id }).exec();
+    this.logger.warn(
+      `Refund ${created._id.toString()} was removed: with the refunds made at the same moment it exceeded payment ${payment._id.toString()}.`,
+    );
+    throw new ConflictException(REFUND_EXCEEDS_PAYMENT_MESSAGE);
   }
 
   /**
@@ -295,14 +484,65 @@ export class RefundsService {
   }
 
   /** The in-app notification of a refund (GEN-01). `notify` never throws. */
-  private async notify(refund: RefundSource, first: boolean): Promise<void> {
+  private async notify(
+    refund: RefundSource,
+    first: boolean,
+    link?: RefundLink,
+  ): Promise<void> {
+    const target = link ?? (await this.linkOf(refund));
+    const notificationLink: NotificationLink | undefined = target
+      ? { type: LINK_TYPE[target.bookingType], id: target.bookingId }
+      : undefined;
     await this.notifications.notify(
       refund.userId,
       NotificationType.Refund,
       refundMessage(refund, first),
-      { type: LINK_TYPE[refund.bookingType], id: refund.bookingId.toString() },
+      notificationLink,
     );
   }
+
+  /**
+   * The booking a refund is about. A flight change's refund (FLT-27) links to
+   * its flight booking, which only the flight change port knows; without the
+   * port, or when it fails, the notification is sent without a link.
+   */
+  private async linkOf(refund: RefundSource): Promise<RefundLink | null> {
+    if (refund.bookingType !== BookingType.FlightChange) {
+      return {
+        bookingType: refund.bookingType,
+        bookingId: refund.bookingId.toString(),
+      };
+    }
+    const port = this.flightChangePort();
+    if (!port) {
+      return null;
+    }
+    try {
+      return await port.linkOf(refund.bookingId.toString());
+    } catch (error) {
+      this.logger.warn(
+        `The booking of flight change ${refund.bookingId.toString()} could not be found for its refund notification: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+      return null;
+    }
+  }
+
+  private flightChangePort(): FlightChangePaymentPort | undefined {
+    try {
+      return this.moduleRef?.get<FlightChangePaymentPort>(
+        FLIGHT_CHANGE_PAYMENT_PORT,
+        { strict: false },
+      );
+    } catch {
+      // Not provided (the flight-bookings module has no flight change yet).
+      return undefined;
+    }
+  }
+}
+
+/** The share of a payment an amount is, rounded, from 1 to 100 (the schema's range). */
+export function percentOf(amount: number, paymentAmount: number): number {
+  return Math.min(100, Math.max(1, Math.round((amount * 100) / paymentAmount)));
 }
 
 function isDuplicateKey(error: unknown): boolean {

@@ -1,6 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CabinClass } from '../../flights/models/cabin-class.enum';
-import { BookingType } from '../enums/booking-type.enum';
+import {
+  BOOKING_KINDS,
+  type BookingKind,
+  BookingType,
+} from '../enums/booking-type.enum';
 import { PENDING_PAYMENT } from '../payments.constants';
 
 const BOOKING_STATUSES = [
@@ -119,11 +123,11 @@ export class HotelPoliciesDto {
 /** PAY-02: the provider's policies of one booking, shown before payment, and whether they were accepted. */
 export class BookingPoliciesResponseDto {
   @ApiProperty({
-    enum: BookingType,
-    enumName: 'BookingType',
+    enum: BOOKING_KINDS,
+    enumName: 'BookingKind',
     example: BookingType.Flight,
   })
-  type: BookingType;
+  type: BookingKind;
 
   @ApiProperty({ example: '6740f1c2a4b5c6d7e8f90789' })
   bookingId: string;
@@ -164,7 +168,7 @@ export class BookingPoliciesResponseDto {
 
 /** PAY-02 for PAY-01: what may be charged, once the policies are accepted and the hold is live. */
 export interface PayableBooking {
-  type: BookingType;
+  type: BookingKind;
   bookingId: string;
   /** Minor units of `currency`. */
   total: number;
