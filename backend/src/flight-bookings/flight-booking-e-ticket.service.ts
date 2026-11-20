@@ -18,8 +18,10 @@ import {
   renderETicket,
 } from './e-ticket/e-ticket-pdf';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
+import { FlightSeatsService } from './flight-seats.service';
 import { E_TICKET_NOT_CONFIRMED_MESSAGE } from './flight-bookings.constants';
 import { BOOKING_NOT_FOUND_MESSAGE } from './flight-bookings.service';
+import { needsSeat, type SeatRecord } from './mappers/booking-seats.mapper';
 import type { FlightBookingSource } from './mappers/flight-booking.mapper';
 import {
   FlightBooking,
@@ -38,6 +40,22 @@ const plural = (count: number, word: string): string =>
 
 const capitalised = (value: string): string =>
   value.charAt(0).toUpperCase() + value.slice(1);
+
+/** FLT-28: the seat of one passenger on one leg, as the e-ticket prints it. */
+function seatLineOf(
+  passenger: Passenger,
+  passengerIndex: number,
+  segmentIndex: number,
+  seats: readonly SeatRecord[],
+): string {
+  if (!needsSeat(passenger.type)) return 'no seat (infant)';
+  const seat = seats.find(
+    (one) =>
+      one.segmentIndex === segmentIndex &&
+      one.passengerIndex === passengerIndex,
+  );
+  return seat ? `seat ${seat.seatNumber}` : 'seat not chosen yet';
+}
 
 /** The cabin's free allowance copied into the segment (PAY-02). A segment saved before PAY-02 has none. */
 function freeBaggageOf(segment: BookingSegment): string {
@@ -71,6 +89,7 @@ export class FlightBookingETicketService {
     @InjectModel(Flight.name) private readonly flights: Model<Flight>,
     private readonly airlines: AirlinesService,
     private readonly flightResponses: FlightResponsesService,
+    private readonly seats: FlightSeatsService,
   ) {}
 
   async eTicket(id: string, userId: string): Promise<ETicketFile> {
@@ -116,7 +135,15 @@ export class FlightBookingETicketService {
             .name,
       ),
     );
-    return buildETicket(booking, reference, flights, airlineNames, zones);
+    const seats = await this.seats.findByBooking(booking._id);
+    return buildETicket(
+      booking,
+      reference,
+      flights,
+      airlineNames,
+      zones,
+      seats,
+    );
   }
 }
 
@@ -143,6 +170,7 @@ export function buildETicket(
   flights: readonly ETicketFlight[],
   airlineNames: readonly string[],
   zones: ReadonlyMap<string, string>,
+  seats: readonly SeatRecord[],
 ): ETicket {
   const zoneOf = (code: string): string => {
     const zone = zones.get(code);
@@ -185,12 +213,15 @@ export function buildETicket(
   return {
     reference,
     legs,
-    passengers: (booking.passengers ?? []).map((passenger) => ({
+    passengers: (booking.passengers ?? []).map((passenger, passengerIndex) => ({
       fullName: passenger.fullName,
       type: capitalised(passenger.type),
       passport: maskPassport(passenger.passportNumber),
       extraBaggage: booking.segments.map((_segment, index) =>
         extraBaggageOf(passenger, index),
+      ),
+      seats: booking.segments.map((_segment, segmentIndex) =>
+        seatLineOf(passenger, passengerIndex, segmentIndex, seats),
       ),
     })),
     seats: booking.segments[0].seatsReserved,

@@ -15,6 +15,7 @@ import type { ListFlightBookingsQueryDto } from './dto/list-flight-bookings-quer
 import { FlightBookingGroup } from './enums/flight-booking-group.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { BOOKING_NOT_FOUND_MESSAGE } from './flight-bookings.service';
+import { FlightSeatsService } from './flight-seats.service';
 import {
   type FlightsById,
   toFlightBookingDetails,
@@ -79,6 +80,7 @@ export class FlightBookingListService {
     @InjectModel(Flight.name) private readonly flights: Model<Flight>,
     private readonly flightResponses: FlightResponsesService,
     private readonly refunds: RefundsService,
+    private readonly seats: FlightSeatsService,
   ) {}
 
   /**
@@ -135,9 +137,18 @@ export class FlightBookingListService {
       .exec();
     const page = result?.page ?? [];
     const total = result?.total[0]?.count ?? 0;
-    const flights = await this.flightsOf(page, now);
+    const [flights, seats] = await Promise.all([
+      this.flightsOf(page, now),
+      this.seats.findByBookings(page.map((booking) => booking._id)),
+    ]);
     return paginate(
-      page.map((booking) => toFlightBookingListItem(booking, flights)),
+      page.map((booking) =>
+        toFlightBookingListItem(
+          booking,
+          flights,
+          seats.get(booking._id.toString()) ?? [],
+        ),
+      ),
       total,
       query,
     );
@@ -156,11 +167,12 @@ export class FlightBookingListService {
     if (!booking) {
       throw new NotFoundException(BOOKING_NOT_FOUND_MESSAGE);
     }
-    const [flights, refund] = await Promise.all([
+    const [flights, refund, seats] = await Promise.all([
       this.flightsOf([booking], now),
       this.refunds.findSummaryByBooking(BookingType.Flight, id),
+      this.seats.findByBooking(booking._id),
     ]);
-    return toFlightBookingDetails(booking, flights, refund);
+    return toFlightBookingDetails(booking, flights, refund, seats);
   }
 
   /** The flights of these bookings, read in one query, by id. */

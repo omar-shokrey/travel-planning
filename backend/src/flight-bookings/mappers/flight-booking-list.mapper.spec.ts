@@ -109,8 +109,15 @@ describe('toBookedFlight (FLT-25)', () => {
 });
 
 describe('toFlightBookingListItem (FLT-25)', () => {
-  it('shows the reference, each flight with its cabin and seats, the passengers and the status', () => {
-    const item = toFlightBookingListItem(booking(), flights);
+  it('shows the reference, each flight with its cabin and seats, the passengers, the status and the chosen seats', () => {
+    const item = toFlightBookingListItem(booking(), flights, [
+      {
+        bookingId: booking()._id,
+        segmentIndex: 1,
+        passengerIndex: 0,
+        seatNumber: '311A',
+      },
+    ]);
 
     expect(item).toEqual({
       id: '6740f1c2a4b5c6d7e8f90aaa',
@@ -136,6 +143,21 @@ describe('toFlightBookingListItem (FLT-25)', () => {
       currency: 'USD',
       createdAt: '2026-11-19T10:00:00.000Z',
       cancelledAt: null,
+      // FLT-28: the adult only; the infant takes no seat.
+      seats: [
+        {
+          segmentIndex: 0,
+          flightId: OUT.toString(),
+          cabin: CabinClass.Economy,
+          passengers: [{ passengerIndex: 0, seatNumber: null }],
+        },
+        {
+          segmentIndex: 1,
+          flightId: BACK.toString(),
+          cabin: CabinClass.Business,
+          passengers: [{ passengerIndex: 0, seatNumber: '311A' }],
+        },
+      ],
     });
     expect(JSON.stringify(item)).not.toContain('A12345678');
   });
@@ -149,11 +171,13 @@ describe('toFlightBookingListItem (FLT-25)', () => {
         passengers: undefined,
       }),
       new Map([[OUT.toString(), flight(OUT, 'MS777')]]),
+      [],
     );
 
     expect(item.reference).toBeNull();
     expect(item.segments[1].flight).toBeNull();
     expect(item.passengers).toEqual([]);
+    expect(item.seats.map((segment) => segment.passengers)).toEqual([[], []]);
     expect(item.cancelledAt).toBe('2026-11-20T09:00:00.000Z');
   });
 });
@@ -177,6 +201,14 @@ describe('toFlightBookingDetails (FLT-25)', () => {
       }),
       new Map([[OUT.toString(), flight(OUT, 'MS777')]]),
       refund,
+      [
+        {
+          bookingId: booking()._id,
+          segmentIndex: 0,
+          passengerIndex: 0,
+          seatNumber: '12C',
+        },
+      ],
     );
 
     expect(details).toMatchObject({
@@ -191,10 +223,16 @@ describe('toFlightBookingDetails (FLT-25)', () => {
       refund,
     });
     expect(details.passengers[0].passportNumber).toBe('A12345678');
+    expect(details.seats[0].passengers).toEqual([
+      { passengerIndex: 0, seatNumber: '12C' },
+    ]);
+    expect(details.seats[1].passengers).toEqual([
+      { passengerIndex: 0, seatNumber: null },
+    ]);
   });
 
   it('has nulls for a booking that was never cancelled or accepted', () => {
-    expect(toFlightBookingDetails(booking(), flights, null)).toMatchObject({
+    expect(toFlightBookingDetails(booking(), flights, null, [])).toMatchObject({
       policyAcceptedAt: null,
       cancelledAt: null,
       cancelledBy: null,
