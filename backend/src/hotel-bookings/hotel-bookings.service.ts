@@ -180,13 +180,18 @@ export class HotelBookingsService {
    * only.
    */
   async hasConfirmedBooking(userId: string): Promise<boolean> {
+    // A count with a limit of 1, not exists(): a findOne that matched stalled
+    // in local e2e runs against the Atlas test database (see PostsService).
     const found = await this.bookings
-      .exists({
-        userId: new Types.ObjectId(userId),
-        status: HotelBookingStatus.Confirmed,
-      })
+      .countDocuments(
+        {
+          userId: new Types.ObjectId(userId),
+          status: HotelBookingStatus.Confirmed,
+        },
+        { limit: 1 },
+      )
       .exec();
-    return found !== null;
+    return found > 0;
   }
 
   /**
@@ -197,14 +202,19 @@ export class HotelBookingsService {
    * (PAY-03). Read only.
    */
   async hasLiveHold(userId: string, now: Date): Promise<boolean> {
+    // A count with a limit of 1, not exists(): a findOne that matched stalled
+    // in local e2e runs against the Atlas test database (see PostsService).
     const found = await this.bookings
-      .exists({
-        userId: new Types.ObjectId(userId),
-        status: HotelBookingStatus.PendingPayment,
-        holdExpiresAt: { $gt: now },
-      })
+      .countDocuments(
+        {
+          userId: new Types.ObjectId(userId),
+          status: HotelBookingStatus.PendingPayment,
+          holdExpiresAt: { $gt: now },
+        },
+        { limit: 1 },
+      )
       .exec();
-    return found !== null;
+    return found > 0;
   }
 
   /**

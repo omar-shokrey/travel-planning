@@ -571,13 +571,18 @@ export class FlightBookingsService {
    * (`userId`, `status`) index.
    */
   async hasConfirmedBooking(userId: string): Promise<boolean> {
+    // A count with a limit of 1, not exists(): a findOne that matched stalled
+    // in local e2e runs against the Atlas test database (see PostsService).
     const found = await this.bookings
-      .exists({
-        userId: new Types.ObjectId(userId),
-        status: FlightBookingStatus.Confirmed,
-      })
+      .countDocuments(
+        {
+          userId: new Types.ObjectId(userId),
+          status: FlightBookingStatus.Confirmed,
+        },
+        { limit: 1 },
+      )
       .exec();
-    return found !== null;
+    return found > 0;
   }
 
   /**
@@ -588,14 +593,19 @@ export class FlightBookingsService {
    * Read only.
    */
   async hasLiveHold(userId: string, now: Date): Promise<boolean> {
+    // A count with a limit of 1, not exists(): a findOne that matched stalled
+    // in local e2e runs against the Atlas test database (see PostsService).
     const found = await this.bookings
-      .exists({
-        userId: new Types.ObjectId(userId),
-        status: FlightBookingStatus.PendingPayment,
-        holdExpiresAt: { $gt: now },
-      })
+      .countDocuments(
+        {
+          userId: new Types.ObjectId(userId),
+          status: FlightBookingStatus.PendingPayment,
+          holdExpiresAt: { $gt: now },
+        },
+        { limit: 1 },
+      )
       .exec();
-    return found !== null;
+    return found > 0;
   }
 
   /**
