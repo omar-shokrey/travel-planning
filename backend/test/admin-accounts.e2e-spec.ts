@@ -167,6 +167,7 @@ describe('GET /api/admin/accounts (e2e, ACC-14)', () => {
         role: 'user',
         status: 'suspended',
         mustChangePassword: false,
+        emailVerified: true,
         createdAt: expect.stringMatching(
           /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
         ),

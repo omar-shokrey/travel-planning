@@ -276,6 +276,7 @@ describe('Owner-only access (e2e, ACC-11)', () => {
       expect(Object.keys(response.body).sort()).toEqual([
         'createdAt',
         'email',
+        'emailVerified',
         'id',
         'mustChangePassword',
         'name',

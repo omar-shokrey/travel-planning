@@ -90,7 +90,16 @@ describe('UsersService', () => {
         role: Role.User,
         status: UserStatus.Active,
         consentAcceptedAt: input.consentAcceptedAt,
+        emailVerified: true,
       });
+    });
+
+    it('stores emailVerified false when the email must be verified (ACC-02)', async () => {
+      const { service, storedFields } = setup();
+
+      await service.createRegisteredUser({ ...input, emailVerified: false });
+
+      expect(storedFields().emailVerified).toBe(false);
     });
 
     it('trims and lowercases the email before it checks and stores it', async () => {
@@ -577,6 +586,31 @@ describe('UsersService', () => {
           'N3wPassword',
         ),
       ).toBeNull();
+    });
+  });
+
+  describe('markEmailVerified (ACC-02)', () => {
+    function setupMark(matchedCount: number) {
+      const exec = jest.fn().mockResolvedValue({ matchedCount });
+      const model = { updateOne: jest.fn(() => ({ exec })) };
+      const service = new UsersService(model as unknown as Model<User>);
+      return { model, service };
+    }
+
+    it('sets emailVerified to true on the account, by id, and nothing else', async () => {
+      const { model, service } = setupMark(1);
+
+      await expect(service.markEmailVerified(userObjectId)).resolves.toBe(true);
+      expect(model.updateOne).toHaveBeenCalledWith(
+        { _id: userObjectId },
+        { $set: { emailVerified: true } },
+      );
+    });
+
+    it('returns false when the account no longer exists', async () => {
+      await expect(
+        setupMark(0).service.markEmailVerified(userObjectId),
+      ).resolves.toBe(false);
     });
   });
 

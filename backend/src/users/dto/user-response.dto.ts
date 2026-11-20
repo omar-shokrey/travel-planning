@@ -44,6 +44,13 @@ export class UserResponseDto {
   })
   mustChangePassword: boolean;
 
+  @ApiProperty({
+    description:
+      'ACC-02: false until the user opens the link of the verification email sent at registration; until then booking answers 403. True for every other account, and for an account registered while the server sends no email.',
+    example: true,
+  })
+  emailVerified: boolean;
+
   @ApiPropertyOptional({
     description: 'The phone number (ACC-09). Left out when there is none.',
     example: '+20 10 1234 5678',
