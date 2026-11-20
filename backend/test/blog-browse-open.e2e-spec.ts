@@ -714,17 +714,20 @@ describe('Browse posts by tag and open a post (e2e, BLG-02)', () => {
       });
     });
 
-    it('shows "Deleted user" for an author whose account is deactivated', async () => {
+    it('answers 404 "Post not found" for a post of an author whose account is deactivated (ACC-12)', async () => {
+      // ACC-12 hides the posts of a deactivated author: the deactivation sets
+      // `authorDeactivated` on them, so the post page no longer shows them.
       const gone = await createUser('BLG-02 Gone', UserStatus.Deactivated);
-      const post = await createPost({ authorId: gone, title: 'By a ghost' });
+      const post = await createPost({
+        authorId: gone,
+        title: 'By a ghost',
+        authorDeactivated: true,
+      });
 
       const response = await openPost(post);
 
-      expect(response.status).toBe(200);
-      expect(response.body.author).toEqual({
-        id: gone,
-        name: DELETED_USER_NAME,
-      });
+      expect(response.status).toBe(404);
+      expect(response.body.message).toBe('Post not found');
     });
 
     it('shows "Deleted user" for a commenter whose account is deactivated', async () => {

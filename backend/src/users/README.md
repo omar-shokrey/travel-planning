@@ -1,6 +1,6 @@
 # users
 
-Owns the `users` collection: the `User` schema, `UsersService`, the public shape of an account (`UserResponseDto`) and its mapper. It also has the own-account routes `GET /api/users/me` (ACC-11) and `PATCH /api/users/me` (ACC-09), in `UsersController` and `ProfileService`; own-account deactivation (ACC-12) comes later.
+Owns the `users` collection: the `User` schema, `UsersService`, the public shape of an account (`UserResponseDto`) and its mapper. It also has the own-account routes `GET /api/users/me` (ACC-11) and `PATCH /api/users/me` (ACC-09), in `UsersController` and `ProfileService`. `DELETE /api/users/me` (ACC-12, deactivate my own account) is in the auth module; see below.
 
 ## Design decisions
 
@@ -11,6 +11,7 @@ Owns the `users` collection: the `User` schema, `UsersService`, the public shape
 - **`createRegisteredUser` takes no role and no status.** It always creates an active account with the `user` role. Moderator accounts (ACC-13) are made by `createModerator`: an active account with a moderator role, the `assignment` to its one airline or hotel, the hash of the temporary password and `mustChangePassword` set. `AdminService` checks the provider first. The mapper adds `assignment` (with a string `providerId`) only when the account has one.
 - **`listAccounts` is the query of the admin account list (ACC-14).** It filters by role and status, searches part of the name or the email (escaped, case-insensitive) and returns one page of entities, newest first, with the total. `AdminService` maps and paginates them.
 - **`changeStatus(id, from, to)` is the admin suspension (ACC-16).** One `findOneAndUpdate` that matches only when the account still has the `from` status, so two admins acting at once cannot both win; the loser gets `null`.
+- **`deactivateOwnAccount(id, now)` is the own-account deactivation (ACC-12).** One conditional `findOneAndUpdate` on `{ _id, role: user, status: active }` that sets `status: deactivated` and `deactivatedAt` together and returns the account after, or `null` when nothing matched (suspended meanwhile, already deactivated, or not a user). The auth module calls it after its checks.
 - **`setTemporaryPassword` is the admin reset (ACC-07a).** In one update it stores the hash of the temporary password, sets `mustChangePassword` and clears the login lockout. `AdminService` calls it; no controller exposes it.
 - **A duplicate email is checked twice.** The service looks the email up first and answers 409. If two requests arrive together, the unique index on `email` rejects the second one, and the exception filter turns that error into 409 as well.
 - **`UserResponseDto` has `id`, `name`, `email`, `role`, `status`, `mustChangePassword` and `createdAt`.** `mustChangePassword` (ACC-08) tells the frontend that the account has a temporary password and must set a new one; the backend enforces it too (ACC-13, ACC-07a, GEN-13): `JwtAuthGuard` answers 403 on every route but `GET /api/auth/me` and `PATCH /api/auth/change-password` while it is `true` (see the auth README). The mapper lists these fields one by one, so the password hash, the login counters and the lock time can never be returned by accident. `phone` and `preferredCurrency` (ACC-09) are added only when the account has them.
@@ -38,3 +39,11 @@ Owns the `users` collection: the `User` schema, `UsersService`, the public shape
 - **The preferred currency must be a currency of the countries list** (the supported currencies of GEN-12: the distinct `currency` values of `countries`). The code is uppercased first, so `eur` is `EUR`. An unknown code answers 400 with `preferredCurrency` in `errors`. It only changes how prices are shown: prices, payments and refunds stay in USD (PAY-04).
 - **`ProfileService` does the checks, `UsersService.updateProfile` writes.** `ProfileService` reads `countries` through `ReferenceModule`, as the itineraries module does. Keeping that out of `UsersService` leaves its constructor and its many callers unchanged, and `UsersService` stays the only writer of `users`.
 - **The answer is `UserResponseDto`.** `phone` and `preferredCurrency` are left out when the account has none, so the existing responses keep their shape.
+
+## Deactivate my account (ACC-12)
+
+`DELETE /api/users/me` is documented under the `users` tag with the other `/users/me` routes, but it lives in the auth module (`AccountDeactivationController`, `AccountDeactivationService`; see "Deactivate my own account (ACC-12)" in the auth README).
+
+- **Why not here.** It reads the bookings, hides the posts and itineraries and ends the sessions. The blog and itineraries modules import `UsersModule`, so `UsersModule` cannot import them (or the booking modules) without a circular import. The auth module can. This module only adds `deactivateOwnAccount` and stays the only writer of `users`.
+- **What a deactivated account means elsewhere.** It cannot log in (401 "Invalid email or password") and its cookies get 401; an admin cannot suspend or reactivate it (409); its author page answers 404; its posts and public itineraries are hidden (`authorDeactivated`); its comments stay and show "Deleted user". The email stays taken (the unique index), so it cannot register again.
+- **Reviews (HTL-23, not built yet) must follow the same rule:** show "Deleted user" for the author of a review whose account status is `deactivated`, as the blog does for comments (the author-name map leaves out deactivated users). Nothing to code here; the review pull request does it.

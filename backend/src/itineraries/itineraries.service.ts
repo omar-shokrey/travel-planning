@@ -445,6 +445,25 @@ export class ItinerariesService {
     };
   }
 
+  /**
+   * ACC-12: hides the public itineraries of an owner who deactivated their
+   * own account, for the auth module (never through a controller). One
+   * `updateMany` whose filter names only this owner sets `authorDeactivated`,
+   * which `PUBLICLY_VISIBLE` already honours (search, view, clone, reports).
+   * Private itineraries get the flag too and stay as they are: nobody else
+   * could see them anyway. `timestamps: false` keeps `updatedAt`, the order
+   * of the public search. Idempotent, so a failed deactivation can be retried.
+   */
+  async markOwnerDeactivated(ownerId: string): Promise<void> {
+    await this.itineraries
+      .updateMany(
+        { ownerId: new Types.ObjectId(ownerId) },
+        { $set: { authorDeactivated: true } },
+        { timestamps: false },
+      )
+      .exec();
+  }
+
   /** For the admin module (GEN-10): whether an itinerary with this id exists. */
   async existsById(id: string): Promise<boolean> {
     // A count, not exists(): a findOne that matched stalled in local e2e runs

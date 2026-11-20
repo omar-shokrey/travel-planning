@@ -202,11 +202,13 @@ export class ReportsService {
     }
     if (targetType === ReportTargetType.Post) {
       // A draft answers like a missing post (BLG-01, BLG-02), and so does a
-      // post an admin hid, except to its author (GEN-10).
+      // post an admin hid (GEN-10) or a post whose author deactivated their
+      // account (ACC-12), except to its author.
       const post = await this.posts.findPublishedSummary(targetId);
       const visibleToReporter =
         post !== null &&
-        (post.moderation === PostModeration.Visible ||
+        ((post.moderation === PostModeration.Visible &&
+          !post.authorDeactivated) ||
           post.authorId === reporterId);
       if (!visibleToReporter) {
         throw new NotFoundException('Post not found');

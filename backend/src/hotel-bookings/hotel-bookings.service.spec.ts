@@ -370,3 +370,82 @@ describe('HotelBookingsService.findTravellerIdsOfHotel (ACC-15)', () => {
     ).resolves.toEqual([]);
   });
 });
+
+describe('HotelBookingsService.hasConfirmedBooking and hasLiveHold (ACC-12)', () => {
+  const NOW = new Date('2026-11-20T10:00:00.000Z');
+
+  /** A fake model whose `countDocuments` resolves to the given count. */
+  const existsSetup = (found: number) => {
+    const bookings = {
+      countDocuments: jest.fn(() => ({
+        exec: jest.fn().mockResolvedValue(found),
+      })),
+    };
+    const service = new HotelBookingsService(
+      bookings as never,
+      {} as HotelRoomHoldsService,
+      {} as HotelBookingConfirmationService,
+    );
+    return { service, bookings };
+  };
+
+  it('asks for a confirmed reservation of the user only', async () => {
+    const { service, bookings } = existsSetup(1);
+
+    await expect(service.hasConfirmedBooking(USER_ID)).resolves.toBe(true);
+
+    expect(bookings.countDocuments).toHaveBeenCalledTimes(1);
+    expect(bookings.countDocuments).toHaveBeenCalledWith(
+      {
+        userId: new Types.ObjectId(USER_ID),
+        status: HotelBookingStatus.Confirmed,
+      },
+      { limit: 1 },
+    );
+  });
+
+  it('answers false when the user has no confirmed reservation', async () => {
+    const { service } = existsSetup(0);
+
+    await expect(service.hasConfirmedBooking(USER_ID)).resolves.toBe(false);
+  });
+
+  it('asks for a reservation of the user waiting for payment whose hold ends after now', async () => {
+    const { service, bookings } = existsSetup(1);
+
+    await expect(service.hasLiveHold(USER_ID, NOW)).resolves.toBe(true);
+
+    expect(bookings.countDocuments).toHaveBeenCalledTimes(1);
+    expect(bookings.countDocuments).toHaveBeenCalledWith(
+      {
+        userId: new Types.ObjectId(USER_ID),
+        status: HotelBookingStatus.PendingPayment,
+        holdExpiresAt: { $gt: NOW },
+      },
+      { limit: 1 },
+    );
+  });
+
+  it('answers false when the user has no live hold', async () => {
+    const { service } = existsSetup(0);
+
+    await expect(service.hasLiveHold(USER_ID, NOW)).resolves.toBe(false);
+  });
+
+  it('throws for an id that is not an ObjectId, like the other lookups, and reads nothing', async () => {
+    const { service, bookings } = existsSetup(0);
+
+    await expect(service.hasConfirmedBooking('not-an-id')).rejects.toThrow();
+    await expect(service.hasLiveHold('not-an-id', NOW)).rejects.toThrow();
+    expect(bookings.countDocuments).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing', async () => {
+    const { service, bookings } = existsSetup(0);
+
+    await service.hasConfirmedBooking(USER_ID);
+    await service.hasLiveHold(USER_ID, NOW);
+
+    expect(Object.keys(bookings)).toEqual(['countDocuments']);
+  });
+});

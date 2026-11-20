@@ -336,7 +336,10 @@ describe('Post tags (e2e, BLG-08)', () => {
       }
     });
 
-    it('shows "Deleted user" for a deactivated author', async () => {
+    // The post was stored without `authorDeactivated`, as a post written
+    // before ACC-12 was. A post of an account deactivated through ACC-12 is
+    // hidden instead (test/users-deactivate-account.e2e-spec.ts).
+    it('shows "Deleted user" for a deactivated author whose post was stored before ACC-12', async () => {
       const response = await list(TAG);
       const row = (response.body.items as SummaryRow[]).find(
         (item) => item.id === goneAuthorPost,

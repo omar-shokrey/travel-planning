@@ -2,8 +2,14 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
+import { BlogModule } from '../blog/blog.module';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { FlightBookingsModule } from '../flight-bookings/flight-bookings.module';
+import { HotelBookingsModule } from '../hotel-bookings/hotel-bookings.module';
+import { ItinerariesModule } from '../itineraries/itineraries.module';
 import { UsersModule } from '../users/users.module';
+import { AccountDeactivationController } from './account-deactivation.controller';
+import { AccountDeactivationService } from './account-deactivation.service';
 import { AuthCookiesService } from './auth-cookies.service';
 import { AuthTokensService } from './auth-tokens.service';
 import { AuthController } from './auth.controller';
@@ -19,9 +25,20 @@ import { SessionsService } from './sessions.service';
     JwtModule.register({}),
     MongooseModule.forFeature([{ name: Session.name, schema: SessionSchema }]),
     UsersModule,
+    // ACC-12: deactivating your own account. None of these four modules
+    // imports AuthModule (only AppModule and AdminModule do), so no cycle.
+    // PostsService hides the posts of the account.
+    BlogModule,
+    // ItinerariesService hides its public itineraries.
+    ItinerariesModule,
+    // FlightBookingsService tells whether a flight booking blocks it.
+    FlightBookingsModule,
+    // HotelBookingsService tells whether a hotel reservation blocks it.
+    HotelBookingsModule,
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, AccountDeactivationController],
   providers: [
+    AccountDeactivationService,
     AuthCookiesService,
     AuthService,
     AuthTokensService,

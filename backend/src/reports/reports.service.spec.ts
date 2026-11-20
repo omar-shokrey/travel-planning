@@ -40,6 +40,7 @@ function setup() {
     findPublishedSummary: jest.fn().mockResolvedValue({
       authorId: AUTHOR,
       moderation: PostModeration.Visible,
+      authorDeactivated: false,
     }),
     isVisibleTo: jest.fn().mockResolvedValue(true),
   };
@@ -166,6 +167,20 @@ describe('ReportsService (GEN-09)', () => {
       expect(reports.create).not.toHaveBeenCalled();
     });
 
+    it('answers 404 for a post whose author deactivated their account (ACC-12)', async () => {
+      const { service, posts, reports } = setup();
+      posts.findPublishedSummary.mockResolvedValue({
+        authorId: AUTHOR,
+        moderation: PostModeration.Visible,
+        authorDeactivated: true,
+      });
+
+      await expect(service.create(postDto, REPORTER)).rejects.toThrow(
+        new NotFoundException('Post not found'),
+      );
+      expect(reports.create).not.toHaveBeenCalled();
+    });
+
     it('passes on the 404 of a missing itinerary', async () => {
       const { service, itineraries } = setup();
       itineraries.findOwnerAndVisibilityOrThrow.mockRejectedValue(
@@ -253,6 +268,19 @@ describe('ReportsService (GEN-09)', () => {
         new BadRequestException(OWN_CONTENT_MESSAGE),
       );
       expect(reports.create).not.toHaveBeenCalled();
+    });
+
+    it('keeps the rule for the author: my own post of a deactivated account is still 400 (ACC-12)', async () => {
+      const { service, posts } = setup();
+      posts.findPublishedSummary.mockResolvedValue({
+        authorId: REPORTER,
+        moderation: PostModeration.Visible,
+        authorDeactivated: true,
+      });
+
+      await expect(service.create(postDto, REPORTER)).rejects.toThrow(
+        new BadRequestException(OWN_CONTENT_MESSAGE),
+      );
     });
 
     it('refuses my own post with 400, even a hidden one: its author still sees it', async () => {
