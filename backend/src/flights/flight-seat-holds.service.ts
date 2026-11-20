@@ -240,6 +240,40 @@ export class FlightSeatHoldsService {
     }
     return true;
   }
+
+  /**
+   * FLT-26: gives `seats` booked seats of the `cabin` cabin back to the
+   * inventory when a confirmed booking is cancelled. One update that matches
+   * only if the cabin has at least that many booked seats, so the counter
+   * never goes below 0. Returns whether it matched; a mismatch is logged, not
+   * thrown, like `release`: the cancellation stands, and the counter is
+   * recomputed from the bookings.
+   */
+  async unbook(
+    flightId: FlightId,
+    cabin: CabinClass,
+    seats: number,
+  ): Promise<boolean> {
+    assertSeatCount(seats);
+
+    const { matchedCount } = await this.flights
+      .updateOne(
+        {
+          _id: flightId,
+          cabins: { $elemMatch: { cabin, bookedSeats: { $gte: seats } } },
+        },
+        { $inc: { 'cabins.$[c].bookedSeats': -seats } },
+        { arrayFilters: [{ 'c.cabin': cabin }] },
+      )
+      .exec();
+    if (matchedCount === 0) {
+      this.logger.warn(
+        `Could not give back ${seats} booked ${cabin} seat(s) of flight ${String(flightId)}: the flight is gone or has fewer booked seats. Recompute the seat counters from the bookings.`,
+      );
+      return false;
+    }
+    return true;
+  }
 }
 
 /** A programming error, never user input: the DTO limits the seats. */

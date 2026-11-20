@@ -381,3 +381,59 @@ describe('FlightSeatHoldsService.confirm (FLT-23)', () => {
     },
   );
 });
+
+describe('FlightSeatHoldsService.unbook (FLT-26)', () => {
+  let warn: jest.SpyInstance;
+
+  beforeEach(() => {
+    warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+  });
+
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
+  it('gives the booked seats of that cabin back, only if it has at least that many', async () => {
+    const { service, flights } = setup();
+
+    await expect(
+      service.unbook(FLIGHT_ID, CabinClass.Business, 2),
+    ).resolves.toBe(true);
+
+    expect(flights.updateOne).toHaveBeenCalledWith(
+      {
+        _id: FLIGHT_ID,
+        cabins: {
+          $elemMatch: { cabin: CabinClass.Business, bookedSeats: { $gte: 2 } },
+        },
+      },
+      { $inc: { 'cabins.$[c].bookedSeats': -2 } },
+      { arrayFilters: [{ 'c.cabin': 'business' }] },
+    );
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('logs a mismatch instead of throwing, so the counter never goes below 0', async () => {
+    const { service, matches } = setup();
+    matches.push(0);
+
+    await expect(
+      service.unbook(FLIGHT_ID, CabinClass.Economy, 3),
+    ).resolves.toBe(false);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('Recompute the seat counters');
+  });
+
+  it.each([0, -1, 1.5])(
+    'refuses %p seats as a programming error, before any update',
+    async (seats) => {
+      const { service, flights } = setup();
+
+      await expect(
+        service.unbook(FLIGHT_ID, CabinClass.Economy, seats),
+      ).rejects.toBeInstanceOf(RangeError);
+      expect(flights.updateOne).not.toHaveBeenCalled();
+    },
+  );
+});
