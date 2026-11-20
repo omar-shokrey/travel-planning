@@ -16,7 +16,7 @@ const review = (
 const names = new Map([[AUTHOR.toString(), 'Sara Ahmed']]);
 
 describe('toHotelReviewResponse (HTL-24)', () => {
-  it('maps the id, the rating, the text, the author name and the UTC time', () => {
+  it('maps the id, the rating, the text, the author name and the UTC time, with no reply', () => {
     expect(toHotelReviewResponse(review(), names)).toEqual({
       id: '6740f1c2a4b5c6d7e8f90789',
       rating: 4,
@@ -51,5 +51,28 @@ describe('toHotelReviewResponse (HTL-24)', () => {
       ['authorName', 'createdAt', 'id', 'rating', 'text'].sort(),
     );
     expect(JSON.stringify(mapped)).not.toContain(AUTHOR.toString());
+  });
+});
+
+describe('toHotelReviewResponse: the reply (HTL-26)', () => {
+  it("shows the hotel's reply with its UTC time when there is one", () => {
+    const mapped = toHotelReviewResponse(
+      review({
+        reply: {
+          text: 'Thank you for your stay.',
+          repliedAt: new Date('2026-11-06T09:15:00.000Z'),
+        },
+      }),
+      names,
+    );
+
+    expect(mapped.reply).toEqual({
+      text: 'Thank you for your stay.',
+      repliedAt: '2026-11-06T09:15:00.000Z',
+    });
+  });
+
+  it('leaves the reply out when there is none', () => {
+    expect(toHotelReviewResponse(review(), names)).not.toHaveProperty('reply');
   });
 });

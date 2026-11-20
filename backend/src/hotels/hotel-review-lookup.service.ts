@@ -16,14 +16,21 @@ export interface HotelReviewRecord {
   userId: Types.ObjectId;
   rating: number;
   text?: string;
+  /** HTL-26: the hotel's reply, once there is one. Never its moderator id. */
+  reply?: { text: string; repliedAt: Date };
   createdAt: Date;
 }
 
-/** The fields the list reads: no booking id, moderation or update time. */
+/**
+ * The fields the list reads: no booking id, moderation, update time or the
+ * moderator id of a reply.
+ */
 const REVIEW_PROJECTION = {
   userId: 1,
   rating: 1,
   text: 1,
+  'reply.text': 1,
+  'reply.repliedAt': 1,
   createdAt: 1,
 } as const;
 

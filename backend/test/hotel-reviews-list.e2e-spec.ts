@@ -371,8 +371,13 @@ describe('Reviews of a hotel (e2e, HTL-24)', () => {
     expect(schemas).toHaveProperty('HotelReviewResponseDto');
     expect(
       Object.keys(schemas.HotelReviewResponseDto.properties).sort(),
-    ).toEqual(['authorName', 'createdAt', 'id', 'rating', 'text']);
+    ).toEqual(['authorName', 'createdAt', 'id', 'rating', 'reply', 'text']);
     expect(schemas.HotelReviewResponseDto.required).not.toContain('text');
+    // HTL-26: the reply is optional and has its own schema name.
+    expect(schemas.HotelReviewResponseDto.required).not.toContain('reply');
+    expect(
+      Object.keys(schemas.HotelReviewReplyResponseDto.properties).sort(),
+    ).toEqual(['repliedAt', 'text']);
     // The review schema of HTL-23 keeps its own name.
     expect(schemas).toHaveProperty('ReviewResponseDto');
   });
