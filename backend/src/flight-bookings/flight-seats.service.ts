@@ -179,4 +179,23 @@ export class FlightSeatsService {
       .exec();
     return deletedCount;
   }
+
+  /**
+   * FLT-27: frees the seats of one segment of a booking, when that flight is
+   * changed to another one (the seat numbers of the old flight mean nothing
+   * on the new one). The filter is the booking's id and the segment only.
+   * Returns how many seats were freed.
+   */
+  async releaseSegment(
+    bookingId: string | Types.ObjectId,
+    segmentIndex: number,
+  ): Promise<number> {
+    const { deletedCount } = await this.assignments
+      .deleteMany({
+        bookingId: new Types.ObjectId(bookingId.toString()),
+        segmentIndex,
+      })
+      .exec();
+    return deletedCount;
+  }
 }

@@ -70,7 +70,7 @@ export const tooHeavyMessage = (bags: number, maxBagKg: number): string =>
  * maximum weight of one bag. A broken rule is reported at `path` (the
  * `extraBags` or `returnExtraBags` of a passenger) and costs 0.
  */
-function feeOfExtraBags(
+export function feeOfExtraBags(
   extraBags: { bags: number; weightKg: number } | undefined,
   rule: BaggageRule,
   path: string,

@@ -18,6 +18,7 @@ import {
 } from './flight-bookings.constants';
 import { BOOKING_NOT_FOUND_MESSAGE } from './flight-bookings.service';
 import type { FlightSeatsService } from './flight-seats.service';
+import type { FlightChangeService } from './flight-change.service';
 
 const BOOKING_ID = '6740f1c2a4b5c6d7e8f90aaa';
 const USER_ID = '6740f1c2a4b5c6d7e8f90bbb';
@@ -95,15 +96,25 @@ function setup(
   const seatAssignments = {
     releaseBooking: jest.fn((..._args: unknown[]) => Promise.resolve(2)),
   };
+  // FLT-27: no flight change unless a test adds one.
+  const changes = {
+    paidDifferencesOf: jest.fn(
+      (): Promise<{ id: string; difference: number }[]> => Promise.resolve([]),
+    ),
+    closeOpenChangeOf: jest.fn(() => Promise.resolve()),
+    closePendingChangesTo: jest.fn(() => Promise.resolve(0)),
+  };
   const service = new FlightBookingCancellationService(
     bookings as never,
     flights as never,
     seatHolds as unknown as FlightSeatHoldsService,
     refunds as unknown as RefundsService,
     seatAssignments as unknown as FlightSeatsService,
+    changes as unknown as FlightChangeService,
   );
   return {
     service,
+    changes,
     bookings,
     flights,
     select,
@@ -289,6 +300,8 @@ describe('FlightBookingCancellationService.cancel (FLT-26)', () => {
           currency: 'USD',
           refundPercent: 50,
         },
+        // FLT-27: the booking was never changed to a dearer flight.
+        changeRefunds: [],
       },
     );
     expect(bookings.updateOne).toHaveBeenCalledWith(
@@ -498,5 +511,105 @@ describe('FlightBookingCancellationService.cancel (FLT-26)', () => {
       $set: { cancelledAt: Date };
     };
     expect(update.$set.cancelledAt).toBeInstanceOf(Date);
+  });
+});
+
+describe('FlightBookingCancellationService after flight changes (FLT-27)', () => {
+  const PAID = [
+    { id: '6740f1c2a4b5c6d7e8f90c01', difference: 3 },
+    { id: '6740f1c2a4b5c6d7e8f90c02', difference: 5 },
+  ];
+
+  it('shows the refund payment by payment, each rounded: the original payment and each paid difference', async () => {
+    const { service, changes } = setup(booking({ total: 50_009 }));
+    changes.paidDifferencesOf.mockResolvedValueOnce(PAID);
+
+    // round((50009 - 8) × 50%) + round(3 × 50%) + round(5 × 50%) = 25001 + 2 + 3
+    await expect(
+      service.preview(BOOKING_ID, USER_ID, NOW),
+    ).resolves.toMatchObject({
+      total: 50_009,
+      refundPercent: 50,
+      refundAmount: 25_006,
+    });
+    expect(changes.paidDifferencesOf).toHaveBeenCalledWith(
+      new Types.ObjectId(BOOKING_ID),
+    );
+  });
+
+  it('refunds the original payment and each paid change at the same percent, and closes the open change', async () => {
+    const { service, changes, refunds } = setup(booking({ total: 50_009 }));
+    changes.paidDifferencesOf.mockResolvedValueOnce(PAID);
+    refunds.refund
+      .mockResolvedValueOnce(REFUND)
+      .mockResolvedValueOnce({ ...REFUND, id: 'r2', amount: 2 })
+      .mockResolvedValueOnce(null as never);
+
+    const answer = await service.cancel(BOOKING_ID, USER_ID, 50, NOW);
+
+    expect(refunds.refund).toHaveBeenNthCalledWith(1, {
+      bookingType: BookingType.Flight,
+      bookingId: BOOKING_ID,
+      refundPercent: 50,
+      reason: RefundReason.UserCancellation,
+    });
+    for (const [index, paid] of PAID.entries()) {
+      expect(refunds.refund).toHaveBeenNthCalledWith(index + 2, {
+        bookingType: BookingType.FlightChange,
+        bookingId: paid.id,
+        refundPercent: 50,
+        reason: RefundReason.UserCancellation,
+      });
+    }
+    expect(answer.changeRefunds).toEqual([
+      {
+        id: 'r2',
+        status: RefundStatus.Pending,
+        amount: 2,
+        currency: 'USD',
+        refundPercent: 50,
+      },
+    ]);
+    expect(changes.closeOpenChangeOf).toHaveBeenCalledWith(
+      new Types.ObjectId(BOOKING_ID),
+      NOW,
+    );
+  });
+
+  it('keeps the cancellation when a change refund or closing the open change fails', async () => {
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    const { service, changes, refunds } = setup();
+    changes.paidDifferencesOf.mockResolvedValueOnce([PAID[0]]);
+    changes.closeOpenChangeOf.mockRejectedValueOnce(new Error('db'));
+    refunds.refund
+      .mockResolvedValueOnce(REFUND)
+      .mockRejectedValueOnce(new Error('db'));
+
+    const answer = await service.cancel(BOOKING_ID, USER_ID, 50, NOW);
+
+    expect(answer.status).toBe(FlightBookingStatus.Cancelled);
+    expect(answer.changeRefunds).toEqual([]);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('its open flight change was not closed'),
+      expect.anything(),
+    );
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(`flight change ${PAID[0].id}`),
+      expect.anything(),
+    );
+    error.mockRestore();
+  });
+
+  it('closes no change and refunds no change when the conditional update matched nothing', async () => {
+    const { service, changes, bookings, refunds } = setup();
+    bookings.updateOne.mockReturnValueOnce({
+      exec: jest.fn(() => Promise.resolve({ matchedCount: 0 })),
+    });
+
+    await expect(service.cancel(BOOKING_ID, USER_ID, 50, NOW)).rejects.toThrow(
+      ConflictException,
+    );
+    expect(changes.closeOpenChangeOf).not.toHaveBeenCalled();
+    expect(refunds.refund).not.toHaveBeenCalled();
   });
 });

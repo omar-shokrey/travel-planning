@@ -16,6 +16,7 @@ import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { FLIGHT_CANCELLATION_SWEEP_BATCH_SIZE } from './flight-bookings.constants';
 import { FlightCancellationService } from './flight-cancellation.service';
 import type { FlightSeatsService } from './flight-seats.service';
+import type { FlightChangeService } from './flight-change.service';
 
 const FLIGHT_ID = new Types.ObjectId('6740f1c2a4b5c6d7e8f90456');
 const RETURN_ID = new Types.ObjectId('6740f1c2a4b5c6d7e8f90457');
@@ -97,6 +98,14 @@ function setup(affected: unknown[] = [], matched = 1) {
   const seatAssignments = {
     releaseBooking: jest.fn((..._args: unknown[]) => Promise.resolve(1)),
   };
+  // FLT-27: no flight change unless a test adds one.
+  const changes = {
+    paidDifferencesOf: jest.fn(
+      (): Promise<{ id: string; difference: number }[]> => Promise.resolve([]),
+    ),
+    closeOpenChangeOf: jest.fn(() => Promise.resolve()),
+    closePendingChangesTo: jest.fn(() => Promise.resolve(0)),
+  };
   const service = new FlightCancellationService(
     bookings as never,
     flights as never,
@@ -106,9 +115,11 @@ function setup(affected: unknown[] = [], matched = 1) {
     refunds as unknown as RefundsService,
     notifications as unknown as NotificationsService,
     seatAssignments as unknown as FlightSeatsService,
+    changes as unknown as FlightChangeService,
   );
   return {
     service,
+    changes,
     bookings,
     select,
     flights,
@@ -449,5 +460,82 @@ describe('FlightCancellationService.sweepJob (FLT-06)', () => {
 
     expect(String(logError.mock.calls[0][0])).toContain('sweep failed');
     expect(logError.mock.calls[1][1]).toBe('down');
+  });
+});
+
+describe('FlightCancellationService and flight changes (FLT-27)', () => {
+  it('closes the changes waiting for payment to the cancelled flight before its bookings', async () => {
+    const { service, changes, bookings } = setup([]);
+
+    await service.cascade(flight, NOW);
+
+    expect(changes.closePendingChangesTo).toHaveBeenCalledWith(FLIGHT_ID, NOW);
+    expect(
+      changes.closePendingChangesTo.mock.invocationCallOrder[0],
+    ).toBeLessThan(bookings.find.mock.invocationCallOrder[0]);
+  });
+
+  it('closes the open change of a cancelled booking and refunds each paid change in full', async () => {
+    const confirmed = booking(FlightBookingStatus.Confirmed);
+    const { service, changes, refunds } = setup([confirmed]);
+    changes.paidDifferencesOf.mockResolvedValueOnce([
+      { id: '6740f1c2a4b5c6d7e8f90c01', difference: 4200 },
+    ]);
+
+    await service.cascade(flight, NOW);
+
+    expect(changes.closeOpenChangeOf).toHaveBeenCalledWith(confirmed._id, NOW);
+    expect(refunds.refund).toHaveBeenCalledWith({
+      bookingType: BookingType.Flight,
+      bookingId: confirmed._id.toString(),
+      refundPercent: 100,
+      reason: RefundReason.FlightCancelled,
+    });
+    expect(refunds.refund).toHaveBeenCalledWith({
+      bookingType: BookingType.FlightChange,
+      bookingId: '6740f1c2a4b5c6d7e8f90c01',
+      refundPercent: 100,
+      reason: RefundReason.FlightCancelled,
+    });
+  });
+
+  it('keeps the cancellation when closing the changes or a change refund fails, and logs it', async () => {
+    const confirmed = booking(FlightBookingStatus.Confirmed);
+    const { service, changes, refunds } = setup([confirmed]);
+    changes.closePendingChangesTo.mockRejectedValueOnce(new Error('db'));
+    changes.closeOpenChangeOf.mockRejectedValueOnce(new Error('db'));
+    changes.paidDifferencesOf.mockResolvedValueOnce([
+      { id: '6740f1c2a4b5c6d7e8f90c01', difference: 4200 },
+    ]);
+    refunds.refund
+      .mockResolvedValueOnce(null as never)
+      .mockRejectedValueOnce(new Error('db'));
+
+    await expect(service.cascade(flight, NOW)).resolves.toEqual({
+      cancelledBookings: 1,
+      expiredHolds: 0,
+    });
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining('flight changes waiting for payment'),
+      expect.anything(),
+    );
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining('open flight change (FLT-27)'),
+      expect.anything(),
+    );
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining('refund of flight change'),
+      expect.anything(),
+    );
+  });
+
+  it('refunds no change of a hold that expires', async () => {
+    const { service, changes } = setup([
+      booking(FlightBookingStatus.PendingPayment),
+    ]);
+
+    await service.cascade(flight, NOW);
+
+    expect(changes.paidDifferencesOf).not.toHaveBeenCalled();
   });
 });

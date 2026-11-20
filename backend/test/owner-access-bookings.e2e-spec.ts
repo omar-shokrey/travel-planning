@@ -274,6 +274,20 @@ describe('Owner-only access to bookings (e2e, ACC-11)', () => {
       owner: null,
     },
     {
+      // FLT-27: changing a flight writes, so the owner is not sent it here;
+      // test/flight-change.e2e-spec.ts covers the owner. A dry run body, so
+      // nothing could change even if the access checks failed.
+      label: 'PATCH /api/flight-bookings/:id/change-flight',
+      verb: 'PATCH',
+      path: (ids) => `/api/flight-bookings/${ids.flightBooking}/change-flight`,
+      body: () => ({
+        newFlightId: new Types.ObjectId().toString(),
+        dryRun: true,
+      }),
+      notFound: BOOKING_NOT_FOUND_MESSAGE,
+      owner: null,
+    },
+    {
       label: 'POST /api/flight-bookings/:id/cancel',
       verb: 'POST',
       path: (ids) => `/api/flight-bookings/${ids.flightBooking}/cancel`,

@@ -33,7 +33,8 @@ export class FlightBookingCancellationPreviewDto {
   total: number;
 
   @ApiProperty({
-    description: 'The refund in minor units: total × refundPercent, rounded',
+    description:
+      'The refund in minor units: refundPercent of each payment of the booking, each rounded (total × refundPercent for a booking never changed to a dearer flight, FLT-27)',
     example: 26250,
   })
   refundAmount: number;
@@ -57,7 +58,14 @@ export class FlightBookingCancellationResponseDto extends FlightBookingCancellat
     type: RefundSummaryDto,
     nullable: true,
     description:
-      'The refund through Stripe (PAY-03) with its status; `null` when nothing is refunded (0%)',
+      "The refund of the booking's payment through Stripe (PAY-03) with its status; `null` when nothing is refunded (0%)",
   })
   refund: RefundSummaryDto | null;
+
+  @ApiProperty({
+    type: [RefundSummaryDto],
+    description:
+      'FLT-27: the refunds of the fare differences paid for dearer flight changes, at the same percent; empty when there were none',
+  })
+  changeRefunds: RefundSummaryDto[];
 }

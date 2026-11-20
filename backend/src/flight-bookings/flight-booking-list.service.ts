@@ -15,6 +15,7 @@ import type { ListFlightBookingsQueryDto } from './dto/list-flight-bookings-quer
 import { FlightBookingGroup } from './enums/flight-booking-group.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { BOOKING_NOT_FOUND_MESSAGE } from './flight-bookings.service';
+import { FlightChangeService } from './flight-change.service';
 import { FlightSeatsService } from './flight-seats.service';
 import {
   type FlightsById,
@@ -81,6 +82,8 @@ export class FlightBookingListService {
     private readonly flightResponses: FlightResponsesService,
     private readonly refunds: RefundsService,
     private readonly seats: FlightSeatsService,
+    // FLT-27: the flight changes of each booking.
+    private readonly changes: FlightChangeService,
   ) {}
 
   /**
@@ -137,9 +140,11 @@ export class FlightBookingListService {
       .exec();
     const page = result?.page ?? [];
     const total = result?.total[0]?.count ?? 0;
-    const [flights, seats] = await Promise.all([
+    const ids = page.map((booking) => booking._id);
+    const [flights, seats, changes] = await Promise.all([
       this.flightsOf(page, now),
-      this.seats.findByBookings(page.map((booking) => booking._id)),
+      this.seats.findByBookings(ids),
+      this.changes.summariesOfMany(ids),
     ]);
     return paginate(
       page.map((booking) =>
@@ -147,6 +152,7 @@ export class FlightBookingListService {
           booking,
           flights,
           seats.get(booking._id.toString()) ?? [],
+          changes.get(booking._id.toString()) ?? [],
         ),
       ),
       total,
@@ -167,12 +173,13 @@ export class FlightBookingListService {
     if (!booking) {
       throw new NotFoundException(BOOKING_NOT_FOUND_MESSAGE);
     }
-    const [flights, refund, seats] = await Promise.all([
+    const [flights, refund, seats, changes] = await Promise.all([
       this.flightsOf([booking], now),
       this.refunds.findSummaryByBooking(BookingType.Flight, id),
       this.seats.findByBooking(booking._id),
+      this.changes.summariesOf(booking._id),
     ]);
-    return toFlightBookingDetails(booking, flights, refund, seats);
+    return toFlightBookingDetails(booking, flights, refund, seats, changes);
   }
 
   /** The flights of these bookings, read in one query, by id. */

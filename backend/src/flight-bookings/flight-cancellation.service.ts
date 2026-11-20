@@ -21,6 +21,7 @@ import { CancelledBy } from './enums/cancelled-by.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { flightCancelledMessage } from './flight-cancelled-message';
 import { FLIGHT_CANCELLATION_SWEEP_BATCH_SIZE } from './flight-bookings.constants';
+import { FlightChangeService } from './flight-change.service';
 import { FlightSeatsService } from './flight-seats.service';
 import { FlightBooking } from './models/flight-booking.schema';
 
@@ -60,6 +61,9 @@ export class FlightCancellationService {
     private readonly refunds: RefundsService,
     private readonly notifications: NotificationsService,
     private readonly seatAssignments: FlightSeatsService,
+    // FLT-27: the open changes of a cancelled booking or to a cancelled
+    // flight, and the paid changes refunded in full with the booking.
+    private readonly changes: FlightChangeService,
   ) {}
 
   /**
@@ -88,6 +92,15 @@ export class FlightCancellationService {
    * moment. A failure on one booking is logged and the others go on.
    */
   async cascade(flight: CancelledFlight, now: Date): Promise<CascadeResult> {
+    // FLT-27: a change waiting for payment to this flight can never fly it.
+    await this.changes
+      .closePendingChangesTo(flight._id, now)
+      .catch((error: unknown) =>
+        this.logger.error(
+          `Flight ${flight._id.toString()} is cancelled, but the flight changes waiting for payment to it were not closed; the sweep tries again`,
+          error instanceof Error ? error.stack : error,
+        ),
+      );
     const affected = await this.bookings
       .find({
         'segments.flightId': flight._id,
@@ -233,6 +246,11 @@ export class FlightCancellationService {
       .catch((error: unknown) =>
         this.logFailure(id, 'chosen seats (FLT-28)', error),
       );
+    await this.changes
+      .closeOpenChangeOf(booking._id, now)
+      .catch((error: unknown) =>
+        this.logFailure(id, 'open flight change (FLT-27)', error),
+      );
     await this.refunds
       .refund({
         bookingType: BookingType.Flight,
@@ -241,6 +259,25 @@ export class FlightCancellationService {
         reason: RefundReason.FlightCancelled,
       })
       .catch((error: unknown) => this.logFailure(id, 'refund', error));
+    // FLT-27: each dearer flight change was paid by its own payment.
+    const paidChanges = await this.changes
+      .paidDifferencesOf(booking._id)
+      .catch((error: unknown) => {
+        this.logFailure(id, 'reading its paid flight changes', error);
+        return [];
+      });
+    for (const paid of paidChanges) {
+      await this.refunds
+        .refund({
+          bookingType: BookingType.FlightChange,
+          bookingId: paid.id,
+          refundPercent: 100,
+          reason: RefundReason.FlightCancelled,
+        })
+        .catch((error: unknown) =>
+          this.logFailure(id, `refund of flight change ${paid.id}`, error),
+        );
+    }
     await this.notifications
       .notify(
         booking.userId,

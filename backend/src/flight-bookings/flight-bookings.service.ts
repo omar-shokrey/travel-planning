@@ -85,7 +85,7 @@ type HeldFlightWithTimes = HeldFlight &
  * read-only read of the flight (`PLANNED_FLIGHT_FIELDS`) and one of its
  * airline.
  */
-async function readFlightForBooking(
+export async function readFlightForBooking(
   flights: Model<Flight>,
   airlines: AirlinesService,
   flightId: string,
@@ -126,7 +126,7 @@ async function readFlightForBooking(
   return { flightId, flight, airline, cabin, cabinClass };
 }
 
-type FlightForBooking = Awaited<ReturnType<typeof readFlightForBooking>>;
+export type FlightForBooking = Awaited<ReturnType<typeof readFlightForBooking>>;
 
 /** One flight of a booking with what each passenger has on it. */
 type PlannedLeg = FlightForBooking & {
@@ -142,7 +142,10 @@ interface PlannedBooking {
 }
 
 /** The extra-bag rule of a flight: its airline's price and maximum, its cabin's bag weight. */
-const baggageRuleOf = ({ airline, cabin }: FlightForBooking): BaggageRule => ({
+export const baggageRuleOf = ({
+  airline,
+  cabin,
+}: FlightForBooking): BaggageRule => ({
   extraBagPrice: airline.policy?.extraBagPrice,
   maxExtraBags: airline.policy?.maxExtraBags ?? 0,
   maxBagKg: cabin.maxBagKg,

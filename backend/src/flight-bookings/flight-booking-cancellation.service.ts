@@ -27,6 +27,8 @@ import {
   REFUND_CHANGED_MESSAGE,
 } from './flight-bookings.constants';
 import { BOOKING_NOT_FOUND_MESSAGE } from './flight-bookings.service';
+import { cancellationRefundOf } from './flight-change-pricing';
+import { FlightChangeService } from './flight-change.service';
 import { FlightSeatsService } from './flight-seats.service';
 import type { FlightBookingSource } from './mappers/flight-booking.mapper';
 import { FlightBooking } from './models/flight-booking.schema';
@@ -52,6 +54,8 @@ export class FlightBookingCancellationService {
     private readonly seatHolds: FlightSeatHoldsService,
     private readonly refunds: RefundsService,
     private readonly seatAssignments: FlightSeatsService,
+    // FLT-27: the paid changes refunded with the booking, and its open change.
+    private readonly changes: FlightChangeService,
   ) {}
 
   /**
@@ -65,7 +69,7 @@ export class FlightBookingCancellationService {
     now: Date = new Date(),
   ): Promise<FlightBookingCancellationPreviewDto> {
     const booking = await this.findOwnedOrThrow(id, userId);
-    return this.quote(booking, now);
+    return (await this.quote(booking, now)).preview;
   }
 
   /**
@@ -85,7 +89,7 @@ export class FlightBookingCancellationService {
     now: Date = new Date(),
   ): Promise<FlightBookingCancellationResponseDto> {
     const booking = await this.findOwnedOrThrow(id, userId);
-    const quote = await this.quote(booking, now);
+    const { preview: quote, paidChanges } = await this.quote(booking, now);
     if (quote.refundPercent !== expectedRefundPercent) {
       throw new ConflictException(REFUND_CHANGED_MESSAGE);
     }
@@ -122,6 +126,15 @@ export class FlightBookingCancellationService {
           ),
         );
     }
+    // FLT-27: a change waiting for payment expires and gives its seats back.
+    await this.changes
+      .closeOpenChangeOf(booking._id, now)
+      .catch((error: unknown) =>
+        this.logger.error(
+          `Booking ${quote.bookingId} is cancelled, but its open flight change was not closed`,
+          error instanceof Error ? error.stack : error,
+        ),
+      );
     // FLT-28: the chosen seats are free again for other users.
     await this.seatAssignments
       .releaseBooking(booking._id)
@@ -154,11 +167,41 @@ export class FlightBookingCancellationService {
       );
     }
 
+    // FLT-27: each dearer flight change was paid by its own payment, refunded
+    // at the same percent (PAY-03 takes the percent of what it still holds).
+    const changeRefunds: FlightBookingCancellationResponseDto['changeRefunds'] =
+      [];
+    for (const paid of paidChanges) {
+      try {
+        const created = await this.refunds.refund({
+          bookingType: BookingType.FlightChange,
+          bookingId: paid.id,
+          refundPercent: quote.refundPercent,
+          reason: RefundReason.UserCancellation,
+        });
+        if (created) {
+          changeRefunds.push({
+            id: created.id,
+            status: created.status,
+            amount: created.amount,
+            currency: created.currency,
+            refundPercent: created.refundPercent,
+          });
+        }
+      } catch (error) {
+        this.logger.error(
+          `Booking ${quote.bookingId} is cancelled, but the refund of its flight change ${paid.id} could not be created`,
+          error instanceof Error ? error.stack : error,
+        );
+      }
+    }
+
     return {
       ...quote,
       status: FlightBookingStatus.Cancelled,
       cancelledAt: now.toISOString(),
       refund,
+      changeRefunds,
     };
   }
 
@@ -181,12 +224,17 @@ export class FlightBookingCancellationService {
    * The refund at `now`: 409 unless the booking is confirmed and its first
    * flight has not departed. The tiers are those copied into the booking
    * (refundTiersOf: the outbound flight's), compared with the whole days
-   * left before the departure (FLT-09, refundPercentFor).
+   * left before the departure (FLT-09, refundPercentFor). FLT-27: the amount
+   * is the percent of each payment, rounded the same way PAY-03 refunds it:
+   * the original payment (what it still holds) and each paid flight change.
    */
   private async quote(
     booking: FlightBookingSource,
     now: Date,
-  ): Promise<FlightBookingCancellationPreviewDto> {
+  ): Promise<{
+    preview: FlightBookingCancellationPreviewDto;
+    paidChanges: { id: string; difference: number }[];
+  }> {
     if (booking.status !== FlightBookingStatus.Confirmed) {
       throw new ConflictException(NOT_CANCELLABLE_MESSAGE);
     }
@@ -210,14 +258,22 @@ export class FlightBookingCancellationService {
       refundTiersOf(booking),
       daysRemaining,
     );
+    const paidChanges = await this.changes.paidDifferencesOf(booking._id);
     return {
-      bookingId: booking._id.toString(),
-      departureAt: first.departureAt.toISOString(),
-      daysRemaining,
-      refundPercent,
-      total: booking.total,
-      refundAmount: Math.round((booking.total * refundPercent) / 100),
-      currency: booking.currency,
+      preview: {
+        bookingId: booking._id.toString(),
+        departureAt: first.departureAt.toISOString(),
+        daysRemaining,
+        refundPercent,
+        total: booking.total,
+        refundAmount: cancellationRefundOf(
+          booking.total,
+          paidChanges.map((change) => change.difference),
+          refundPercent,
+        ),
+        currency: booking.currency,
+      },
+      paidChanges,
     };
   }
 }
