@@ -9,6 +9,7 @@ import { FlightBookingConfirmationService } from './flight-booking-confirmation.
 import { FlightBookingETicketService } from './flight-booking-e-ticket.service';
 import { FlightBookingCompletionService } from './flight-booking-completion.service';
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
+import { FlightBookingListService } from './flight-booking-list.service';
 import { FlightBookingsController } from './flight-bookings.controller';
 import { FlightBookingsService } from './flight-bookings.service';
 import {
@@ -46,6 +47,8 @@ import {
     FlightBookingCancellationService,
     // GEN-11: the completion job (Confirmed -> Completed).
     FlightBookingCompletionService,
+    // FLT-25: the user's lists of bookings and the details of one.
+    FlightBookingListService,
   ],
   // FlightBookingsService: the owner lookup and the policy acceptance for the
   // payments module (PAY-02). The payments module imports this one, never the
