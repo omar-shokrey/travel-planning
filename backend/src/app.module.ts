@@ -11,6 +11,7 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { BlogModule } from './blog/blog.module';
 import { ExchangeRatesModule } from './exchange-rates/exchange-rates.module';
+import { FavouritesModule } from './favourites/favourites.module';
 import { FlightBookingsModule } from './flight-bookings/flight-bookings.module';
 import { FlightsModule } from './flights/flights.module';
 import { HotelBookingsModule } from './hotel-bookings/hotel-bookings.module';
@@ -40,6 +41,8 @@ import { UsersModule } from './users/users.module';
     AuthModule,
     BlogModule,
     ExchangeRatesModule,
+    // BON-02: favourites of hotels and public itineraries.
+    FavouritesModule,
     FlightBookingsModule,
     FlightsModule,
     HotelBookingsModule,
