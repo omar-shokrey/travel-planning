@@ -9,13 +9,17 @@ import type { HotelSearchResultResponseDto } from './dto/hotel-search-result-res
 import type { SearchHotelsQueryDto } from './dto/search-hotels-query.dto';
 import {
   canHost,
+  defaultSortOrder,
   groupNightsByRoom,
   isFreeForStay,
   nightsOfTheStay,
+  passesFilters,
   roomsThatCanBeFree,
+  sortResults,
   STAY_NIGHT_FIELDS,
   type SearchRoom,
 } from './hotel-search';
+import { HOTEL_PRICE_RANGE_MESSAGE } from './hotels.constants';
 import { toHotelSearchResult } from './mappers/hotel-search-result.mapper';
 import { Hotel } from './models/hotel.schema';
 import { RoomNight } from './models/room-night.schema';
@@ -27,9 +31,9 @@ const HOTEL_FIELDS =
   'name addressLine cityId countryCode description photos starClass amenities active ratingCount averageRating createdAt updatedAt';
 
 /**
- * HTL-11: hotel search for guests and users. It reads only; booking (HTL-16)
- * takes rooms in its own concurrency-safe way, so a room listed here can still
- * be gone when the user books it.
+ * HTL-11 and HTL-12: hotel search for guests and users. It reads only;
+ * booking (HTL-16) takes rooms in its own concurrency-safe way, so a room
+ * listed here can still be gone when the user books it.
  */
 @Injectable()
 export class HotelSearchService {
@@ -43,7 +47,10 @@ export class HotelSearchService {
   /**
    * Active hotels in the city or country with at least `rooms` active rooms
    * free for every night from `checkIn` up to `checkOut` (not included),
-   * whose largest `rooms` free rooms together hold `guests`. Sorted by name.
+   * whose largest `rooms` free rooms together hold `guests` (HTL-11). Then
+   * HTL-12: the price range and the minimum rating filter the matches, which
+   * are ordered by `sortBy` and `sortOrder` (by name by default) and only
+   * then paginated, so `total` counts every match after the filters.
    */
   async search(
     query: SearchHotelsQueryDto,
@@ -52,6 +59,13 @@ export class HotelSearchService {
     const place = this.placeFilter(query);
     const stay = { from: query.checkIn, to: query.checkOut };
     assertStay(stay);
+    if (
+      query.minPrice !== undefined &&
+      query.maxPrice !== undefined &&
+      query.minPrice > query.maxPrice
+    ) {
+      throw invalid('minPrice', HOTEL_PRICE_RANGE_MESSAGE);
+    }
 
     const hotels = await this.hotels
       .find({ ...place, active: true })
@@ -96,12 +110,18 @@ export class HotelSearchService {
       freeByHotel.set(key, [...(freeByHotel.get(key) ?? []), room]);
     }
 
-    const matches = hotels.flatMap((hotel) => {
+    // `hotels` is in the name order, so `byName` is too.
+    const byName = hotels.flatMap((hotel) => {
       const free = freeByHotel.get(hotel._id.toString()) ?? [];
       return canHost(free, query.rooms, query.guests)
         ? [toHotelSearchResult(hotel, free)]
         : [];
     });
+    const matches = sortResults(
+      byName.filter((result) => passesFilters(result, query)),
+      query.sortBy,
+      query.sortOrder ?? defaultSortOrder(query.sortBy),
+    );
     return paginate(
       matches.slice(query.skip, query.skip + query.limit),
       matches.length,

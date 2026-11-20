@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { Types, type Model } from 'mongoose';
 import type { SearchHotelsQueryDto } from './dto/search-hotels-query.dto';
 import { HotelSearchService } from './hotel-search.service';
+import { HOTEL_PRICE_RANGE_MESSAGE } from './hotels.constants';
 import type { Hotel } from './models/hotel.schema';
 import { RoomNightState } from './models/room-night-state.enum';
 import type { RoomNight } from './models/room-night.schema';
@@ -68,6 +69,7 @@ const search = (change: Partial<SearchHotelsQueryDto> = {}) =>
     page: 1,
     limit: 10,
     skip: 0,
+    sortBy: 'name',
     ...change,
   }) as SearchHotelsQueryDto;
 
@@ -274,5 +276,172 @@ describe('HotelSearchService (HTL-11)', () => {
         NOW,
       ),
     ).resolves.toMatchObject({ items: [] });
+  });
+});
+
+describe('HotelSearchService: filters and order (HTL-12)', () => {
+  const rated = (name: string, averageRating: number, ratingCount = 2) => ({
+    ...hotel(name),
+    averageRating,
+    ratingCount,
+  });
+
+  /** Five hotels in the name order, each with one free room at its price. */
+  const fiveHotels = () => {
+    const hotels = [
+      rated('Alpha', 4.5),
+      hotel('Bravo'),
+      rated('Charlie', 3),
+      rated('Delta', 5),
+      rated('Echo', 4),
+    ];
+    const prices = [20000, 5000, 10000, 30000, 10000];
+    return setUp(
+      hotels,
+      hotels.map((each, i) => room(each._id, 2, prices[i])),
+    );
+  };
+
+  const namesOf = (page: { items: { name: string }[] }) =>
+    page.items.map((item) => item.name);
+
+  it('refuses a minPrice above maxPrice with 400 and reads nothing', async () => {
+    const { service, hotelModel } = setUp([]);
+    const query = search({ minPrice: 20000, maxPrice: 10000 });
+    const error = validationError('minPrice', HOTEL_PRICE_RANGE_MESSAGE);
+
+    await expect(service.search(query, NOW)).rejects.toThrow(error);
+    await expect(service.search(query, NOW)).rejects.toMatchObject({
+      response: error.getResponse(),
+    });
+    expect(hotelModel.find).not.toHaveBeenCalled();
+  });
+
+  it('accepts a minPrice equal to maxPrice and keeps that exact price', async () => {
+    const { service } = fiveHotels();
+
+    const page = await service.search(
+      search({ minPrice: 10000, maxPrice: 10000 }),
+      NOW,
+    );
+
+    expect(namesOf(page)).toEqual(['Charlie', 'Echo']);
+  });
+
+  it('filters in memory: the hotel query is the same as without filters', async () => {
+    const { service, hotelModel } = fiveHotels();
+
+    await service.search(
+      search({ minPrice: 1, maxPrice: 2, minRating: 5 }),
+      NOW,
+    );
+
+    expect(hotelModel.find).toHaveBeenCalledWith({
+      cityId: 'cairo',
+      active: true,
+    });
+  });
+
+  it('leaves out a hotel whose cheapest free room is below minPrice, even with a dearer room inside', async () => {
+    const garden = hotel('Garden');
+    const { service } = setUp(
+      [garden],
+      [room(garden._id, 2, 8000), room(garden._id, 2, 15000)],
+    );
+
+    const below = await service.search(search({ minPrice: 9000 }), NOW);
+    const inside = await service.search(search({ maxPrice: 8000 }), NOW);
+
+    expect(below).toMatchObject({ items: [], meta: { total: 0 } });
+    expect(inside.items).toEqual([
+      expect.objectContaining({ name: 'Garden', lowestPricePerNight: 8000 }),
+    ]);
+  });
+
+  it('keeps hotels rated at least minRating and leaves out unrated ones', async () => {
+    const { service } = fiveHotels();
+
+    const page = await service.search(search({ minRating: 4.5 }), NOW);
+
+    expect(namesOf(page)).toEqual(['Alpha', 'Delta']);
+  });
+
+  it('sorts by price cheapest first when no order is sent, ties in the name order', async () => {
+    const { service } = fiveHotels();
+
+    const page = await service.search(search({ sortBy: 'price' }), NOW);
+
+    expect(namesOf(page)).toEqual([
+      'Bravo',
+      'Charlie',
+      'Echo',
+      'Alpha',
+      'Delta',
+    ]);
+  });
+
+  it('sorts by rating best first when no order is sent, unrated hotels last', async () => {
+    const { service } = fiveHotels();
+
+    const page = await service.search(search({ sortBy: 'rating' }), NOW);
+
+    expect(namesOf(page)).toEqual([
+      'Delta',
+      'Alpha',
+      'Echo',
+      'Charlie',
+      'Bravo',
+    ]);
+  });
+
+  it('lets a sent order win over the default: rating asc, unrated still last', async () => {
+    const { service } = fiveHotels();
+
+    const page = await service.search(
+      search({ sortBy: 'rating', sortOrder: 'asc' }),
+      NOW,
+    );
+
+    expect(namesOf(page)).toEqual([
+      'Charlie',
+      'Echo',
+      'Alpha',
+      'Delta',
+      'Bravo',
+    ]);
+  });
+
+  it('filters and sorts before the page is cut, and counts the matches in total', async () => {
+    const { service } = fiveHotels();
+    // Matches, dearest first: Alpha 20000, Charlie 10000, Echo 10000.
+    const query = { maxPrice: 20000, minRating: 1, sortBy: 'price' as const };
+
+    const first = await service.search(
+      search({ ...query, sortOrder: 'desc', page: 1, limit: 2, skip: 0 }),
+      NOW,
+    );
+    const second = await service.search(
+      search({ ...query, sortOrder: 'desc', page: 2, limit: 2, skip: 2 }),
+      NOW,
+    );
+
+    expect(namesOf(first)).toEqual(['Alpha', 'Charlie']);
+    expect(namesOf(second)).toEqual(['Echo']);
+    expect(first.meta).toEqual({ page: 1, limit: 2, total: 3, totalPages: 2 });
+    expect(second.meta).toEqual({
+      page: 2,
+      limit: 2,
+      total: 3,
+      totalPages: 2,
+    });
+  });
+
+  it('leaves out a hotel that cannot host the guests, even when it passes the filters', async () => {
+    const small = rated('Small', 5);
+    const { service } = setUp([small], [room(small._id, 1, 5000)]);
+
+    const page = await service.search(search({ minRating: 1 }), NOW);
+
+    expect(page).toMatchObject({ items: [], meta: { total: 0 } });
   });
 });
