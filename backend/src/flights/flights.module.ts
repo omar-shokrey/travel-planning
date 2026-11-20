@@ -1,5 +1,9 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import {
+  FlightBooking,
+  FlightBookingSchema,
+} from '../flight-bookings/models/flight-booking.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { UsersModule } from '../users/users.module';
 import { UploadsModule } from '../uploads/uploads.module';
@@ -13,6 +17,8 @@ import { FlightDetailsController } from './flight-details.controller';
 import { FlightDetailsService } from './flight-details.service';
 import { FlightBookingLookup } from './flight-booking-lookup.service';
 import { FlightCabinsService } from './flight-cabins.service';
+import { FlightPassengersController } from './flight-passengers.controller';
+import { FlightPassengersService } from './flight-passengers.service';
 import { FlightResponsesService } from './flight-responses.service';
 import { FlightSearchController } from './flight-search.controller';
 import { FlightSearchService } from './flight-search.service';
@@ -25,6 +31,10 @@ import { FlightsService } from './flights.service';
     MongooseModule.forFeature([
       { name: Airline.name, schema: AirlineSchema },
       { name: Flight.name, schema: FlightSchema },
+      // FLT-29: read only, for the bookings and the passenger list of a
+      // flight. The booking module owns and writes them; it imports this
+      // module, so this module reads the model instead of its service.
+      { name: FlightBooking.name, schema: FlightBookingSchema },
     ]),
     UsersModule,
     UploadsModule,
@@ -41,6 +51,8 @@ import { FlightsService } from './flights.service';
     AirlinesController,
     FlightsController,
     FlightCabinsController,
+    // FLT-29: after the search, like every /flights/:id route.
+    FlightPassengersController,
   ],
   providers: [
     AirlinesService,
@@ -51,6 +63,7 @@ import { FlightsService } from './flights.service';
     FlightDetailsService,
     FlightBookingLookup,
     FlightSeatHoldsService,
+    FlightPassengersService,
   ],
   // FlightResponsesService: flight responses with local times (GEN-06) for
   // the flight-bookings module (FLT-23, FLT-25, FLT-29). FlightSeatHoldsService:
