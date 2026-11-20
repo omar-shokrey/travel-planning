@@ -39,6 +39,7 @@ If the payment does not succeed within the 10 minutes, the reservation becomes `
 - **The reference** looks like `HB-7KQ2MX`: `HB-` (hotel booking, never mixed up with a flight `FB-`) and 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ`, without the look-alikes 0/O and 1/I/L, drawn with `crypto.randomInt` (about 887 million values). The unique sparse index on `reference` decides uniqueness: on a duplicate key the confirming update is tried again with a new reference, at most 5 times (`REFERENCE_ATTEMPTS`).
 - **The notification** names the reference, the hotel, the check-in and check-out dates exactly as stored (`YYYY-MM-DD` strings, never converted to a `Date`, so no time zone can shift them), the nights, each room and the guests, for example "Your reservation HB-7KQ2MX at Nile Hotel is confirmed: check-in 2027-06-15, check-out 2027-06-18 (3 nights), 2 rooms (101 (Double), 102 (Family)), 3 adults and 1 child." If reading the hotel or sending fails, it is logged with the reservation id only and the reservation stays confirmed.
 - **Confirmation page.** `GET /api/hotel-bookings/:id` does not exist yet (HTL-20 owns the list and detail routes), so it was not added; the response DTO and mapper already return `reference` and `status`.
+- **For the admin module (ACC-15):** `findTravellerIdsOfHotel(hotelId, now)`, read only: the distinct user ids with a `confirmed` reservation of the hotel whose `checkOut` is today or later (UTC date), used to notify the travellers when the hotel is deactivated.
 
 ## Not in this module yet
 
