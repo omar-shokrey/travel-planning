@@ -4,6 +4,8 @@ import { ReferenceModule } from '../reference/reference.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { UsersModule } from '../users/users.module';
 import { HotelBookingLookup } from './hotel-booking-lookup.service';
+import { HotelModeratorReservationsController } from './hotel-moderator-reservations.controller';
+import { HotelModeratorReservationsService } from './hotel-moderator-reservations.service';
 import { HotelAvailableRoomsController } from './hotel-available-rooms.controller';
 import { HotelAvailableRoomsService } from './hotel-available-rooms.service';
 import { HotelDetailsController } from './hotel-details.controller';
@@ -43,6 +45,8 @@ import { HotelsService } from './hotels.service';
     HotelRoomStatusController,
     HotelSearchController,
     HotelAvailableRoomsController,
+    // HTL-22: the reservations of a hotel, for its moderator.
+    HotelModeratorReservationsController,
     HotelDetailsController,
   ],
   providers: [
@@ -54,8 +58,10 @@ import { HotelsService } from './hotels.service';
     HotelSearchService,
     HotelAvailableRoomsService,
     HotelRoomHoldsService,
-    // HotelBookingLookup: reads reservations for room deletion (HTL-06, HTL-18).
+    // HotelBookingLookup: reads reservations for room deletion (HTL-06, HTL-18)
+    // and for the moderator's list of reservations (HTL-22).
     HotelBookingLookup,
+    HotelModeratorReservationsService,
   ],
   // HotelSearchService: the hotels of a city group of an itinerary (ITN-25),
   // so that the itinerary and the search use the one free-room rule (HTL-11).
