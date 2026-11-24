@@ -220,6 +220,7 @@ export class FlightChangeService {
       throw error;
     }
 
+    let heldNow = false;
     try {
       const held = await this.seatHolds.hold(
         planned.toFlightId,
@@ -227,6 +228,7 @@ export class FlightChangeService {
         planned.seats,
         now,
       );
+      heldNow = true;
       change = { ...change, heldAt: now };
       await this.changes
         .updateOne({ _id: change._id }, { $set: { heldAt: now } })
@@ -241,11 +243,14 @@ export class FlightChangeService {
         cabin.maxBagKg !== planned.toMaxBagKg ||
         heldFlight.departureDateLocal !== planned.toDepartureDateLocal
       ) {
-        await this.releaseHeld(change, 'its flight changed during the hold');
         throw new ConflictException(CHANGE_DIFFERENCE_CHANGED_MESSAGE);
       }
     } catch (error) {
-      // Nothing was held (or it was just given back): the change never happened.
+      // The change never happened: give back what this request held (the
+      // price moved, or recording `heldAt` failed), then close it.
+      if (heldNow) {
+        await this.releaseHeld(change, 'the change was refused after the hold');
+      }
       await this.markExpired(change._id, now);
       throw error;
     }
@@ -769,6 +774,20 @@ export class FlightChangeService {
   }
 
   /**
+   * FLT-26: whether a change of the booking is being applied right now (its
+   * cheaper fare's refund may not be recorded yet).
+   */
+  async hasApplyingChange(bookingId: Types.ObjectId): Promise<boolean> {
+    const found = await this.changes
+      .countDocuments(
+        { bookingId, status: FlightChangeStatus.Applying },
+        { limit: 1 },
+      )
+      .exec();
+    return found > 0;
+  }
+
+  /**
    * FLT-26 and FLT-06: the completed changes to a dearer flight, each paid by
    * its own payment (keyed on the change), which a cancellation refunds too.
    */
@@ -988,10 +1007,21 @@ export class FlightChangeService {
       )
       .exec();
     if (matchedCount === 0) {
-      return true;
+      // Claimed by this call before, or by another call right now: done only
+      // once its work is recorded; otherwise the change stays `applying` and
+      // the job looks again (a repeated webhook never completes past it).
+      const current = await this.changes
+        .findById(change._id)
+        .select('doneSteps')
+        .lean()
+        .exec();
+      return current?.doneSteps?.includes(step) === true;
     }
     try {
       await work();
+      await this.changes
+        .updateOne({ _id: change._id }, { $addToSet: { doneSteps: step } })
+        .exec();
       return true;
     } catch (error) {
       this.logFailure(

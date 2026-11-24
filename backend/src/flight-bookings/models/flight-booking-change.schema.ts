@@ -170,6 +170,15 @@ export class FlightBookingChange {
   @Prop({ type: Date })
   chosenSeatsFreedAt?: Date;
 
+  /**
+   * The steps above whose work is done (`seatsBookedAt`, `oldSeatsReleasedAt`,
+   * `chosenSeatsFreedAt`). A step is claimed before its work and listed here
+   * after it, so a call running at the same moment waits for the job instead
+   * of counting a step as done before it is.
+   */
+  @Prop({ type: [String], default: undefined })
+  doneSteps?: string[];
+
   @Prop({ type: Date })
   completedAt?: Date;
 

@@ -10,16 +10,21 @@ import {
   CHANGE_DIFFERENCE_CHANGED_MESSAGE,
   CHANGE_IN_PROGRESS_MESSAGE,
   CHANGE_NOT_CONFIRMED_MESSAGE,
+  FLIGHT_CHANGE_STUCK_AFTER_MS,
   POLICIES_REQUIRED_MESSAGE,
   SAME_FLIGHT_MESSAGE,
   changeRouteMessage,
 } from './../src/flight-bookings/flight-bookings.constants';
 import { BOOKING_NOT_FOUND_MESSAGE } from './../src/flight-bookings/flight-bookings.service';
 import { FlightChangeExpiryService } from './../src/flight-bookings/flight-change-expiry.service';
+import { FlightChangeService } from './../src/flight-bookings/flight-change.service';
 import { FlightBookingChange } from './../src/flight-bookings/models/flight-booking-change.schema';
 import { FlightBooking } from './../src/flight-bookings/models/flight-booking.schema';
 import { FlightSeatAssignment } from './../src/flight-bookings/models/flight-seat-assignment.schema';
-import { NOT_ENOUGH_SEATS_MESSAGE } from './../src/flights/flight-seat-holds.service';
+import {
+  FlightSeatHoldsService,
+  NOT_ENOUGH_SEATS_MESSAGE,
+} from './../src/flights/flight-seat-holds.service';
 import { CabinClass } from './../src/flights/models/cabin-class.enum';
 import { NotificationType } from './../src/notifications/enums/notification-type.enum';
 import { Notification } from './../src/notifications/models/notification.schema';
@@ -29,6 +34,7 @@ import { StripeEvent } from './../src/payments/models/stripe-event.schema';
 import { RefundReason } from './../src/payments/refunds/enums/refund-reason.enum';
 import { RefundStatus } from './../src/payments/refunds/enums/refund-status.enum';
 import { Refund } from './../src/payments/refunds/models/refund.schema';
+import { RefundsService } from './../src/payments/refunds/refunds.service';
 import {
   StripeGateway,
   type GatewayIntent,
@@ -430,6 +436,10 @@ describe('Flight change (e2e, FLT-27)', () => {
         to,
       );
       expect(await cabinOf(to)).toEqual({ bookedSeats: 0, heldSeats: 0 });
+      expect(await cabinOf(booking.flightId)).toEqual({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
       expect(await changesOf(booking.id)).toHaveLength(0);
       expect((await storedBooking(booking.id)).total).toBe(PRICE);
     });
@@ -499,6 +509,10 @@ describe('Flight change (e2e, FLT-27)', () => {
       expect(guest.status).toBe(401);
       expect(await changesOf(booking.id)).toHaveLength(0);
       expect(await cabinOf(to)).toEqual({ bookedSeats: 0, heldSeats: 0 });
+      expect(await cabinOf(booking.flightId)).toEqual({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
     });
 
     it('answers 409 for a booking that is not confirmed, and for a difference other than the one shown', async () => {
@@ -613,6 +627,11 @@ describe('Flight change (e2e, FLT-27)', () => {
         .exec();
       expect(refund?.paymentId.toString()).toBe(original._id.toString());
       expect((await storedBooking(booking.id)).total).toBe(PRICE - 4000);
+      expect(await cabinOf(booking.flightId)).toEqual({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(to)).toEqual({ bookedSeats: 1, heldSeats: 0 });
 
       const shown = await fx
         .http()
@@ -752,6 +771,14 @@ describe('Flight change (e2e, FLT-27)', () => {
       expect(other.status).toBe(409);
       expect(other.body.message).toBe(NOT_ENOUGH_SEATS_MESSAGE);
       expect(await cabinOf(to)).toEqual({ bookedSeats: 0, heldSeats: 1 });
+      expect(await cabinOf(first.flightId)).toEqual({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(second.flightId)).toEqual({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
       const open = (await changesOf(first.id)).filter((c) => c.open);
       expect(open).toHaveLength(1);
     });
@@ -815,6 +842,57 @@ describe('Flight change (e2e, FLT-27)', () => {
       expect(refunded).toBe(preview.body.refundAmount);
       expect(refunded).toBeLessThanOrEqual(PRICE + 4200);
       expect(await cabinOf(to)).toEqual({ bookedSeats: 0, heldSeats: 0 });
+      expect(await cabinOf(booking.flightId)).toEqual({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+    });
+
+    it('answers 409 to the cancellation preview and the cancellation while a change is being applied, and cancels nothing', async () => {
+      const booking = await confirmedBooking();
+      const to = await newFlight(PRICE + 600, { days: 32 });
+      const body = (await changeTo(booking.id, to)).body as ChangeBody;
+      const id = new Types.ObjectId(body.id as string);
+      // The moment between the payment and the end of the swap.
+      await changes
+        .updateOne(
+          { _id: id },
+          { $set: { status: FlightChangeStatus.Applying } },
+        )
+        .exec();
+
+      try {
+        const preview = await fx
+          .http()
+          .get(`/api/flight-bookings/${booking.id}/cancel`)
+          .set('Cookie', fx.user.cookie);
+        const cancelled = await fx
+          .http()
+          .post(`/api/flight-bookings/${booking.id}/cancel`)
+          .set('Cookie', fx.user.cookie)
+          .send({ expectedRefundPercent: 100 });
+
+        expect(preview.status).toBe(409);
+        expect(preview.body.message).toBe(CHANGE_IN_PROGRESS_MESSAGE);
+        expect(cancelled.status).toBe(409);
+        expect(cancelled.body.message).toBe(CHANGE_IN_PROGRESS_MESSAGE);
+        expect((await storedBooking(booking.id)).status).toBe(
+          FlightBookingStatus.Confirmed,
+        );
+        expect(
+          await refunds.countDocuments({
+            bookingId: new Types.ObjectId(booking.id),
+          }),
+        ).toBe(0);
+      } finally {
+        // Back to waiting for payment, so the hold ends as usual.
+        await changes
+          .updateOne(
+            { _id: id },
+            { $set: { status: FlightChangeStatus.PendingPayment } },
+          )
+          .exec();
+      }
     });
 
     it('previews exactly what POST refunds at the 50% tier after a cheaper change, each payment rounded', async () => {
@@ -852,6 +930,8 @@ describe('Flight change (e2e, FLT-27)', () => {
       const out = await refunds.find({ paymentId: original._id }).lean().exec();
       // 999 for the cheaper fare, 12001 for the cancellation: never more than 25000.
       expect(out.reduce((sum, refund) => sum + refund.amount, 0)).toBe(13_000);
+      expect(await cabinOf(from)).toEqual({ bookedSeats: 0, heldSeats: 0 });
+      expect(await cabinOf(to)).toEqual({ bookedSeats: 0, heldSeats: 0 });
     });
 
     it('frees the seat chosen on the changed flight (FLT-28)', async () => {
@@ -878,6 +958,11 @@ describe('Flight change (e2e, FLT-27)', () => {
           passengers: [{ passengerIndex: 0, seatNumber: null }],
         },
       ]);
+      expect(await cabinOf(booking.flightId)).toEqual({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(to)).toEqual({ bookedSeats: 1, heldSeats: 0 });
     });
 
     it('expires an open change when the booking is cancelled, and gives its held seats back', async () => {
@@ -896,6 +981,10 @@ describe('Flight change (e2e, FLT-27)', () => {
       const [change] = await changesOf(booking.id);
       expect(change.status).toBe(FlightChangeStatus.Expired);
       expect(await cabinOf(to)).toEqual({ bookedSeats: 0, heldSeats: 0 });
+      expect(await cabinOf(booking.flightId)).toEqual({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
     });
 
     it('refunds every payment in full when the airline cancels the new flight (FLT-06)', async () => {
@@ -930,6 +1019,181 @@ describe('Flight change (e2e, FLT-27)', () => {
         refundPercent: 100,
         reason: RefundReason.FlightCancelled,
       });
+      expect(await cabinOf(to)).toEqual({ bookedSeats: 0, heldSeats: 0 });
+      expect(await cabinOf(booking.flightId)).toEqual({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+    });
+  });
+
+  describe('at the same moment, and the retries of the change job', () => {
+    it('gives the last seat of a flight to one of two users changing to it at once', async () => {
+      const first = await confirmedBooking();
+      const second = await confirmedBooking();
+      const to = await newFlight(PRICE, { days: 33, seats: 1 });
+      const body = {
+        newFlightId: to,
+        expectedDifference: 0,
+        policiesAccepted: true,
+      };
+
+      const answers = await Promise.all([
+        changeFlight(first.id, body),
+        changeFlight(second.id, body),
+      ]);
+
+      expect(answers.map((a) => a.status).sort()).toEqual([200, 409]);
+      expect(answers.find((a) => a.status === 409)?.body.message).toBe(
+        NOT_ENOUGH_SEATS_MESSAGE,
+      );
+      const winner = answers[0].status === 200 ? first : second;
+      const loser = winner === first ? second : first;
+      expect(await cabinOf(to)).toEqual({ bookedSeats: 1, heldSeats: 0 });
+      expect(await cabinOf(winner.flightId)).toEqual({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(loser.flightId)).toEqual({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+    });
+
+    it('keeps the seats exact when a change and a cancellation of one booking race', async () => {
+      const booking = await confirmedBooking();
+      const to = await newFlight(PRICE, { days: 32 });
+
+      const [changed, cancelled] = await Promise.all([
+        changeFlight(booking.id, {
+          newFlightId: to,
+          expectedDifference: 0,
+          policiesAccepted: true,
+        }),
+        fx
+          .http()
+          .post(`/api/flight-bookings/${booking.id}/cancel`)
+          .set('Cookie', fx.user.cookie)
+          .send({ expectedRefundPercent: 100 }),
+      ]);
+
+      const stored = await storedBooking(booking.id);
+      const onNew = stored.segments[0].flightId.toString() === to;
+      const zero = { bookedSeats: 0, heldSeats: 0 };
+      const one = { bookedSeats: 1, heldSeats: 0 };
+      if (stored.status === FlightBookingStatus.Cancelled) {
+        // Cancelled, on whichever flight it was on: no seat stays booked.
+        expect(cancelled.status).toBe(200);
+        expect(await cabinOf(booking.flightId)).toEqual(zero);
+        expect(await cabinOf(to)).toEqual(zero);
+      } else {
+        // The change won: the cancellation saw it and answered 409.
+        expect(changed.status).toBe(200);
+        expect(cancelled.status).toBe(409);
+        expect(onNew).toBe(true);
+        expect(await cabinOf(booking.flightId)).toEqual(zero);
+        expect(await cabinOf(to)).toEqual(one);
+      }
+      // Never more refunded than was paid.
+      const refunded = await refunds
+        .find({ bookingId: new Types.ObjectId(booking.id) })
+        .lean()
+        .exec();
+      expect(
+        refunded.reduce((sum, refund) => sum + refund.amount, 0),
+      ).toBeLessThanOrEqual(PRICE);
+    });
+
+    it('keeps the seats exact when the payment of a change and the end of its hold race', async () => {
+      const booking = await confirmedBooking();
+      const to = await newFlight(PRICE + 600, { days: 32 });
+      const body = (await changeTo(booking.id, to)).body as ChangeBody;
+      const [stored] = await changesOf(booking.id);
+      const holdEnd = (stored.holdExpiresAt as Date).getTime();
+      const service = fx.app.get(FlightChangeService);
+
+      // The webhook a moment before the hold ends, the job a moment after.
+      const [applied] = await Promise.all([
+        service.confirmPaid(body.id as string, new Date(holdEnd - 1)),
+        service.expireDueHolds(new Date(holdEnd + 1)),
+      ]);
+
+      const [after] = await changesOf(booking.id);
+      if (applied) {
+        expect(after.status).toBe(FlightChangeStatus.Completed);
+        expect(await cabinOf(to)).toEqual({ bookedSeats: 1, heldSeats: 0 });
+        expect(await cabinOf(booking.flightId)).toEqual({
+          bookedSeats: 0,
+          heldSeats: 0,
+        });
+      } else {
+        expect(after.status).toBe(FlightChangeStatus.Expired);
+        expect(await cabinOf(to)).toEqual({ bookedSeats: 0, heldSeats: 0 });
+        expect(await cabinOf(booking.flightId)).toEqual({
+          bookedSeats: 1,
+          heldSeats: 0,
+        });
+      }
+    });
+
+    it('gives the old seats back through the job when the first try failed, once', async () => {
+      const booking = await confirmedBooking();
+      const to = await newFlight(PRICE, { days: 32 });
+      const holds = fx.app.get(FlightSeatHoldsService);
+      jest
+        .spyOn(holds, 'unbook')
+        .mockRejectedValueOnce(new Error('database down for this test'));
+
+      const response = await changeTo(booking.id, to);
+      expect(response.body).toMatchObject({ status: 'applying' });
+      expect(await cabinOf(booking.flightId)).toEqual({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+
+      await fx.app
+        .get(FlightChangeExpiryService)
+        .run(new Date(Date.now() + FLIGHT_CHANGE_STUCK_AFTER_MS + 1000));
+
+      const [change] = await changesOf(booking.id);
+      expect(change.status).toBe(FlightChangeStatus.Completed);
+      expect(await cabinOf(booking.flightId)).toEqual({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(to)).toEqual({ bookedSeats: 1, heldSeats: 0 });
+      jest.mocked(holds.unbook).mockRestore();
+    });
+
+    it('makes the refund of a cheaper flight through the job when the first try failed', async () => {
+      const booking = await confirmedBooking();
+      const to = await newFlight(PRICE - 1500, { days: 32 });
+      const refundsService = fx.app.get(RefundsService);
+      jest
+        .spyOn(refundsService, 'refundAmount')
+        .mockRejectedValueOnce(new Error('database down for this test'));
+
+      const response = await changeTo(booking.id, to);
+      const id = (response.body as ChangeBody).id as string;
+      expect(response.body).toMatchObject({ status: 'applying' });
+      expect(await refundOfChange(id)).toBeNull();
+
+      await fx.app
+        .get(FlightChangeExpiryService)
+        .run(new Date(Date.now() + FLIGHT_CHANGE_STUCK_AFTER_MS + 1000));
+
+      expect(await refundOfChange(id)).toMatchObject({
+        amount: 1500,
+        reason: RefundReason.FareDifference,
+      });
+      const [change] = await changesOf(booking.id);
+      expect(change.status).toBe(FlightChangeStatus.Completed);
+      expect(await cabinOf(booking.flightId)).toEqual({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(to)).toEqual({ bookedSeats: 1, heldSeats: 0 });
+      jest.mocked(refundsService.refundAmount).mockRestore();
     });
   });
 

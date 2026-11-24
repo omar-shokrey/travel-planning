@@ -40,7 +40,7 @@ export interface FlightChangeQuote {
   bookingId: string;
   segmentIndex: number;
   cabin: CabinClass;
-  fromFlight: FlightResponseDto | null;
+  fromFlight: FlightResponseDto;
   toFlight: FlightResponseDto;
   oldSegmentTotal: number;
   newSegmentTotal: number;

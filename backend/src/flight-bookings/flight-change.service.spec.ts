@@ -102,12 +102,18 @@ function setPath(doc: Doc, path: string, value: unknown): void {
   parent[last] = value;
 }
 
-const applyUpdate = (doc: Doc, update: { $set?: Doc; $unset?: Doc }): void => {
+type Update = { $set?: Doc; $unset?: Doc; $addToSet?: Doc };
+
+const applyUpdate = (doc: Doc, update: Update): void => {
   for (const [path, value] of Object.entries(update.$set ?? {})) {
     setPath(doc, path, value);
   }
   for (const path of Object.keys(update.$unset ?? {})) {
     delete doc[path];
+  }
+  for (const [path, value] of Object.entries(update.$addToSet ?? {})) {
+    const list = (doc[path] as unknown[] | undefined) ?? [];
+    if (!list.includes(value)) doc[path] = [...list, value];
   }
   doc.updatedAt = NOW;
 };
@@ -145,7 +151,7 @@ function structuredCloneDocs<T>(value: T): T {
   return value;
 }
 
-/** A tiny collection: find, findOne, findById, create, updateOne, findOneAndUpdate. */
+/** A tiny collection: find, findOne, findById, countDocuments, create, updateOne, findOneAndUpdate. */
 function collection(
   initial: Doc[] = [],
   options: { uniqueOpenBooking?: boolean } = {},
@@ -184,12 +190,16 @@ function collection(
       docs.push(saved);
       return Promise.resolve({ toObject: () => clone(saved) });
     }),
-    updateOne: jest.fn((filter: Doc, update: { $set?: Doc; $unset?: Doc }) => {
+    updateOne: jest.fn((filter: Doc, update: Update) => {
       const found = one(filter);
       if (found) applyUpdate(found, update);
       return { exec: () => Promise.resolve({ matchedCount: found ? 1 : 0 }) };
     }),
-    findOneAndUpdate: jest.fn((filter: Doc, update: { $set?: Doc }) => {
+    countDocuments: jest.fn((filter: Doc) => ({
+      exec: () =>
+        Promise.resolve(docs.filter((doc) => matches(doc, filter)).length),
+    })),
+    findOneAndUpdate: jest.fn((filter: Doc, update: Update) => {
       const found = one(filter);
       if (found) applyUpdate(found, update);
       return query(found && clone(found));
@@ -1347,7 +1357,7 @@ describe('FlightChangeService: the review cases (FLT-27)', () => {
     expect(s.seatHolds.unbook).not.toHaveBeenCalled();
   });
 
-  it('abandons a paid change whose new flight the airline cancelled, giving the held seats back, and the job refunds it', async () => {
+  it('abandons a paid change whose new flight the airline cancelled, giving the held seats back: confirmPaid answers false, so the webhook refunds it', async () => {
     const s = setup();
     await s.service.change(
       BOOKING.toString(),
@@ -1444,6 +1454,89 @@ describe('FlightChangeService: the review cases (FLT-27)', () => {
 
     expect(first.status).toBe('applying');
     expect(second.status).toBe('completed');
+
+    // The job makes the busy refund on its next run.
+    await expect(busy.service.finishStuck(later)).resolves.toBe(1);
+    expect(busy.refunds.refundAmount).toHaveBeenCalledTimes(2);
+    expect(busy.changes.docs[0].status).toBe(FlightChangeStatus.Completed);
+    expect(missing.refunds.refundAmount).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives the held seats back itself when recording the hold fails, and closes the change', async () => {
+    const s = setup();
+    const update = s.changes.updateOne.getMockImplementation()!;
+    let failed = false;
+    s.changes.updateOne.mockImplementation((filter: Doc, set: Update) => {
+      if (!failed && set.$set?.heldAt) {
+        failed = true;
+        return { exec: () => Promise.reject(new Error('database down')) };
+      }
+      return update(filter, set);
+    });
+
+    await expect(
+      s.service.change(BOOKING.toString(), USER.toString(), change(3200), NOW),
+    ).rejects.toThrow('database down');
+    expect(s.seatHolds.release).toHaveBeenCalledWith(TO, CabinClass.Economy, 1);
+    expect(s.changes.docs[0]).toMatchObject({
+      status: FlightChangeStatus.Expired,
+      open: false,
+    });
+  });
+
+  it('never counts a step as done while another call has claimed it and not recorded its work', async () => {
+    const s = setup();
+    await s.service.change(
+      BOOKING.toString(),
+      USER.toString(),
+      change(3200),
+      NOW,
+    );
+    // A repeated webhook delivery: the first call claimed the step, its work is not recorded yet.
+    Object.assign(s.changes.docs[0], {
+      status: FlightChangeStatus.Applying,
+      paidAt: NOW,
+      seatsBookedAt: NOW,
+    });
+
+    const result = await s.service.apply(
+      clone(s.changes.docs[0]) as never,
+      NOW,
+    );
+
+    expect(result).toBe('unfinished');
+    expect(s.seatHolds.confirm).not.toHaveBeenCalled();
+    expect(s.bookings.updateOne).not.toHaveBeenCalled();
+    expect(s.changes.docs[0].status).toBe(FlightChangeStatus.Applying);
+  });
+
+  it('records each finished step, so a later call skips it', async () => {
+    const s = setup({
+      flights: [flight(), toFlight(FARE)],
+      airline: airlineWith(4000),
+    });
+
+    await s.service.change(BOOKING.toString(), USER.toString(), change(0), NOW);
+
+    expect(s.changes.docs[0].doneSteps).toEqual([
+      'seatsBookedAt',
+      'oldSeatsReleasedAt',
+      'chosenSeatsFreedAt',
+    ]);
+  });
+
+  it('tells whether a change of a booking is being applied (FLT-26)', async () => {
+    const s = setup();
+    await s.service.change(
+      BOOKING.toString(),
+      USER.toString(),
+      change(3200),
+      NOW,
+    );
+
+    await expect(s.service.hasApplyingChange(BOOKING)).resolves.toBe(false);
+    s.changes.docs[0].status = FlightChangeStatus.Applying;
+    await expect(s.service.hasApplyingChange(BOOKING)).resolves.toBe(true);
   });
 
   it('abandons a change whose booking total moved since it was planned (another change of the other flight)', async () => {

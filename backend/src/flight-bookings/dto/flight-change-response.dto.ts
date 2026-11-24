@@ -64,10 +64,9 @@ export class FlightChangeResponseDto {
 
   @ApiProperty({
     type: FlightResponseDto,
-    nullable: true,
-    description: 'The booked flight (null only if it no longer exists)',
+    description: 'The booked flight, with local times (GEN-06)',
   })
-  fromFlight: FlightResponseDto | null;
+  fromFlight: FlightResponseDto;
 
   @ApiProperty({
     type: FlightResponseDto,

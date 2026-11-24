@@ -28,8 +28,10 @@ export interface FlightChangeLink {
 /**
  * FLT-27: how the payments module reaches a flight change without importing
  * the flight-bookings module's code. The flight-bookings module provides it
- * under `FLIGHT_CHANGE_PAYMENT_PORT` and exports it; until it does, a payment
- * for `flight_change` answers 404 "Booking not found" and nothing else changes.
+ * under `FLIGHT_CHANGE_PAYMENT_PORT` (`FlightChangePaymentService`) and exports
+ * it. It is injected as optional: an app built without that module would
+ * answer a payment for `flight_change` with 404 "Booking not found" and
+ * change nothing else.
  *
  * It is also the payment handler of `BookingType.FlightChange`
  * (`BOOKING_PAYMENT_HANDLERS`), so the webhook confirms a change the same way

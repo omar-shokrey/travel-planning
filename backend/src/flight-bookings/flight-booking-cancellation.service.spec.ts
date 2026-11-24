@@ -12,6 +12,7 @@ import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { FlightBookingCancellationService } from './flight-booking-cancellation.service';
 import {
   CHANGE_BOOKING_CHANGED_MESSAGE,
+  CHANGE_IN_PROGRESS_MESSAGE,
   DEPARTED_MESSAGE,
   FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE,
   NOT_CANCELLABLE_MESSAGE,
@@ -104,6 +105,7 @@ function setup(
     ),
     closeOpenChangeOf: jest.fn(() => Promise.resolve()),
     closePendingChangesTo: jest.fn(() => Promise.resolve(0)),
+    hasApplyingChange: jest.fn(() => Promise.resolve(false)),
   };
   const service = new FlightBookingCancellationService(
     bookings as never,
@@ -658,5 +660,22 @@ describe('FlightBookingCancellationService after flight changes (FLT-27)', () =>
         bookingId: PAID[0].id,
       }),
     );
+  });
+
+  it('answers 409 while a change of the booking is being applied, in the preview and the cancellation, and cancels nothing', async () => {
+    const { service, changes, bookings, refunds } = setup();
+    changes.hasApplyingChange.mockResolvedValue(true);
+
+    await expect(service.preview(BOOKING_ID, USER_ID, NOW)).rejects.toThrow(
+      new ConflictException(CHANGE_IN_PROGRESS_MESSAGE),
+    );
+    await expect(service.cancel(BOOKING_ID, USER_ID, 50, NOW)).rejects.toThrow(
+      new ConflictException(CHANGE_IN_PROGRESS_MESSAGE),
+    );
+    expect(changes.hasApplyingChange).toHaveBeenCalledWith(
+      new Types.ObjectId(BOOKING_ID),
+    );
+    expect(bookings.updateOne).not.toHaveBeenCalled();
+    expect(refunds.refund).not.toHaveBeenCalled();
   });
 });

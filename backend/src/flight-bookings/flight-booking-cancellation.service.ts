@@ -22,6 +22,7 @@ import { CancelledBy } from './enums/cancelled-by.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import {
   CHANGE_BOOKING_CHANGED_MESSAGE,
+  CHANGE_IN_PROGRESS_MESSAGE,
   DEPARTED_MESSAGE,
   FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE,
   NOT_CANCELLABLE_MESSAGE,
@@ -270,10 +271,7 @@ export class FlightBookingCancellationService {
   private async quote(
     booking: FlightBookingSource,
     now: Date,
-  ): Promise<{
-    preview: FlightBookingCancellationPreviewDto;
-    paidChanges: { id: string; difference: number }[];
-  }> {
+  ): Promise<{ preview: FlightBookingCancellationPreviewDto }> {
     if (booking.status !== FlightBookingStatus.Confirmed) {
       throw new ConflictException(NOT_CANCELLABLE_MESSAGE);
     }
@@ -297,6 +295,12 @@ export class FlightBookingCancellationService {
       refundTiersOf(booking),
       daysRemaining,
     );
+    // FLT-27: a change in the middle of being applied has moved the booking
+    // but may not have refunded its cheaper fare yet: the original payment
+    // would look fuller than it is. The user cancels once it is done.
+    if (await this.changes.hasApplyingChange(booking._id)) {
+      throw new ConflictException(CHANGE_IN_PROGRESS_MESSAGE);
+    }
     const paidChanges = await this.changes.paidDifferencesOf(booking._id);
     return {
       preview: {
@@ -312,7 +316,6 @@ export class FlightBookingCancellationService {
         ),
         currency: booking.currency,
       },
-      paidChanges,
     };
   }
 }
