@@ -21,17 +21,32 @@ import type {
 import { CancelledBy } from './enums/cancelled-by.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import {
+  CHANGE_BOOKING_CHANGED_MESSAGE,
+  CHANGE_IN_PROGRESS_MESSAGE,
   DEPARTED_MESSAGE,
   FLIGHT_CANCELLED_BY_AIRLINE_MESSAGE,
   NOT_CANCELLABLE_MESSAGE,
   REFUND_CHANGED_MESSAGE,
 } from './flight-bookings.constants';
 import { BOOKING_NOT_FOUND_MESSAGE } from './flight-bookings.service';
+import { cancellationRefundOf } from './flight-change-pricing';
+import { FlightChangeService } from './flight-change.service';
 import { FlightSeatsService } from './flight-seats.service';
 import type { FlightBookingSource } from './mappers/flight-booking.mapper';
 import { FlightBooking } from './models/flight-booking.schema';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** `segments.0.flightId`, `segments.1.flightId`: the flights the booking was read on. */
+export const segmentFlightsOf = (booking: {
+  segments: readonly { flightId: Types.ObjectId }[];
+}): Record<string, Types.ObjectId> =>
+  Object.fromEntries(
+    booking.segments.map((segment, index) => [
+      `segments.${index}.flightId`,
+      segment.flightId,
+    ]),
+  );
 
 /**
  * FLT-26: a registered user cancels their own confirmed flight booking any
@@ -52,6 +67,8 @@ export class FlightBookingCancellationService {
     private readonly seatHolds: FlightSeatHoldsService,
     private readonly refunds: RefundsService,
     private readonly seatAssignments: FlightSeatsService,
+    // FLT-27: the paid changes refunded with the booking, and its open change.
+    private readonly changes: FlightChangeService,
   ) {}
 
   /**
@@ -65,16 +82,19 @@ export class FlightBookingCancellationService {
     now: Date = new Date(),
   ): Promise<FlightBookingCancellationPreviewDto> {
     const booking = await this.findOwnedOrThrow(id, userId);
-    return this.quote(booking, now);
+    return (await this.quote(booking, now)).preview;
   }
 
   /**
    * Cancels the booking if the refund is still `expectedRefundPercent` (the
    * one the user confirmed; 409 otherwise). One conditional update moves it
    * from `confirmed` to `cancelled`, so a second cancellation, or the
-   * completion job, at the same moment never cancels it twice. Then the
-   * booked seats of every segment go back, the chosen seats are freed
-   * (FLT-28) and the refund is created. A failure after the cancellation is
+   * completion job, at the same moment never cancels it twice; it also
+   * matches only the flights and total this request read, so a flight change
+   * applied in between (FLT-27) answers 409 instead. Then the booked seats of
+   * every segment go back, a flight change waiting for payment expires, the
+   * chosen seats are freed (FLT-28), and the refunds are created: the
+   * booking's payment and each paid flight change, at the same percent. A failure after the cancellation is
    * saved is logged, never thrown: the booking stays cancelled, the seat counters can be recomputed from the
    * bookings and a refund that was not sent is retried by PAY-03.
    */
@@ -85,7 +105,7 @@ export class FlightBookingCancellationService {
     now: Date = new Date(),
   ): Promise<FlightBookingCancellationResponseDto> {
     const booking = await this.findOwnedOrThrow(id, userId);
-    const quote = await this.quote(booking, now);
+    const { preview: quote } = await this.quote(booking, now);
     if (quote.refundPercent !== expectedRefundPercent) {
       throw new ConflictException(REFUND_CHANGED_MESSAGE);
     }
@@ -96,6 +116,10 @@ export class FlightBookingCancellationService {
           _id: booking._id,
           userId: booking.userId,
           status: FlightBookingStatus.Confirmed,
+          // FLT-27: still on the flights and at the total this request read,
+          // so the seats given back below are the ones the booking holds.
+          ...segmentFlightsOf(booking),
+          total: booking.total,
         },
         {
           $set: {
@@ -108,8 +132,17 @@ export class FlightBookingCancellationService {
       )
       .exec();
     if (matchedCount === 0) {
-      // Cancelled or completed in between.
-      throw new ConflictException(NOT_CANCELLABLE_MESSAGE);
+      // Cancelled or completed in between, or (FLT-27) a flight change was
+      // applied in between: then the user views the new refund again.
+      const latest = await this.bookings
+        .findOne({ _id: booking._id, userId: booking.userId })
+        .lean()
+        .exec();
+      throw new ConflictException(
+        latest?.status === FlightBookingStatus.Confirmed
+          ? CHANGE_BOOKING_CHANGED_MESSAGE
+          : NOT_CANCELLABLE_MESSAGE,
+      );
     }
 
     for (const segment of booking.segments) {
@@ -122,6 +155,15 @@ export class FlightBookingCancellationService {
           ),
         );
     }
+    // FLT-27: a change waiting for payment expires and gives its seats back.
+    await this.changes
+      .closeOpenChangeOf(booking._id, now)
+      .catch((error: unknown) =>
+        this.logger.error(
+          `Booking ${quote.bookingId} is cancelled, but its open flight change was not closed`,
+          error instanceof Error ? error.stack : error,
+        ),
+      );
     // FLT-28: the chosen seats are free again for other users.
     await this.seatAssignments
       .releaseBooking(booking._id)
@@ -154,11 +196,52 @@ export class FlightBookingCancellationService {
       );
     }
 
+    // FLT-27: each dearer flight change was paid by its own payment, refunded
+    // at the same percent (PAY-03 takes the percent of what it still holds).
+    // Read after the cancellation: no change can complete a swap any more, and
+    // one that completes after it refunds itself (refundIfCancelledMeanwhile).
+    const paidChanges = await this.changes
+      .paidDifferencesOf(booking._id)
+      .catch((error: unknown) => {
+        this.logger.error(
+          `Booking ${quote.bookingId} is cancelled, but its paid flight changes could not be read`,
+          error instanceof Error ? error.stack : error,
+        );
+        return [];
+      });
+    const changeRefunds: FlightBookingCancellationResponseDto['changeRefunds'] =
+      [];
+    for (const paid of paidChanges) {
+      try {
+        const created = await this.refunds.refund({
+          bookingType: BookingType.FlightChange,
+          bookingId: paid.id,
+          refundPercent: quote.refundPercent,
+          reason: RefundReason.UserCancellation,
+        });
+        if (created) {
+          changeRefunds.push({
+            id: created.id,
+            status: created.status,
+            amount: created.amount,
+            currency: created.currency,
+            refundPercent: created.refundPercent,
+          });
+        }
+      } catch (error) {
+        this.logger.error(
+          `Booking ${quote.bookingId} is cancelled, but the refund of its flight change ${paid.id} could not be created`,
+          error instanceof Error ? error.stack : error,
+        );
+      }
+    }
+
     return {
       ...quote,
       status: FlightBookingStatus.Cancelled,
       cancelledAt: now.toISOString(),
       refund,
+      changeRefunds,
     };
   }
 
@@ -181,12 +264,14 @@ export class FlightBookingCancellationService {
    * The refund at `now`: 409 unless the booking is confirmed and its first
    * flight has not departed. The tiers are those copied into the booking
    * (refundTiersOf: the outbound flight's), compared with the whole days
-   * left before the departure (FLT-09, refundPercentFor).
+   * left before the departure (FLT-09, refundPercentFor). FLT-27: the amount
+   * is the percent of each payment, rounded the same way PAY-03 refunds it:
+   * the original payment (what it still holds) and each paid flight change.
    */
   private async quote(
     booking: FlightBookingSource,
     now: Date,
-  ): Promise<FlightBookingCancellationPreviewDto> {
+  ): Promise<{ preview: FlightBookingCancellationPreviewDto }> {
     if (booking.status !== FlightBookingStatus.Confirmed) {
       throw new ConflictException(NOT_CANCELLABLE_MESSAGE);
     }
@@ -210,14 +295,27 @@ export class FlightBookingCancellationService {
       refundTiersOf(booking),
       daysRemaining,
     );
+    // FLT-27: a change in the middle of being applied has moved the booking
+    // but may not have refunded its cheaper fare yet: the original payment
+    // would look fuller than it is. The user cancels once it is done.
+    if (await this.changes.hasApplyingChange(booking._id)) {
+      throw new ConflictException(CHANGE_IN_PROGRESS_MESSAGE);
+    }
+    const paidChanges = await this.changes.paidDifferencesOf(booking._id);
     return {
-      bookingId: booking._id.toString(),
-      departureAt: first.departureAt.toISOString(),
-      daysRemaining,
-      refundPercent,
-      total: booking.total,
-      refundAmount: Math.round((booking.total * refundPercent) / 100),
-      currency: booking.currency,
+      preview: {
+        bookingId: booking._id.toString(),
+        departureAt: first.departureAt.toISOString(),
+        daysRemaining,
+        refundPercent,
+        total: booking.total,
+        refundAmount: cancellationRefundOf(
+          booking.total,
+          paidChanges.map((change) => change.difference),
+          refundPercent,
+        ),
+        currency: booking.currency,
+      },
     };
   }
 }

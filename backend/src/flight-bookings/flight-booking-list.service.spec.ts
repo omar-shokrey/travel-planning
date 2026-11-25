@@ -15,6 +15,9 @@ import {
 } from './flight-booking-list.service';
 import { BOOKING_NOT_FOUND_MESSAGE } from './flight-bookings.service';
 import type { FlightSeatsService } from './flight-seats.service';
+import type { FlightChangeSummaryDto } from './dto/flight-change-response.dto';
+import { FlightChangeStatus } from './enums/flight-change-status.enum';
+import type { FlightChangeService } from './flight-change.service';
 
 const USER_ID = '6740f1c2a4b5c6d7e8f90bbb';
 const BOOKING_ID = '6740f1c2a4b5c6d7e8f90aaa';
@@ -115,12 +118,23 @@ function setup(
       Promise.resolve(new Map([[BOOKING_ID, ownSeats]])),
     ),
   };
+  // FLT-27: no flight change unless a test adds one.
+  const changes = {
+    summariesOf: jest.fn((): Promise<FlightChangeSummaryDto[]> =>
+      Promise.resolve([]),
+    ),
+    summariesOfMany: jest.fn(
+      (): Promise<Map<string, FlightChangeSummaryDto[]>> =>
+        Promise.resolve(new Map()),
+    ),
+  };
   const service = new FlightBookingListService(
     bookings as never,
     flights as never,
     flightResponses as unknown as FlightResponsesService,
     refunds as unknown as RefundsService,
     seats as unknown as FlightSeatsService,
+    changes as unknown as FlightChangeService,
   );
   return {
     service,
@@ -130,6 +144,7 @@ function setup(
     flightResponses,
     refunds,
     seats,
+    changes,
   };
 }
 
@@ -376,5 +391,53 @@ describe('FlightBookingListService.details (FLT-25)', () => {
     expect(flightsFind).not.toHaveBeenCalled();
     expect(refunds.findSummaryByBooking).not.toHaveBeenCalled();
     expect(seats.findByBooking).not.toHaveBeenCalled();
+  });
+});
+
+describe('FlightBookingListService and flight changes (FLT-27)', () => {
+  const summary = (status: FlightChangeStatus): FlightChangeSummaryDto => ({
+    id: `change-${status}`,
+    status,
+    segmentIndex: 0,
+    fromFlightId: FLIGHT_A.toString(),
+    toFlightId: FLIGHT_B.toString(),
+    difference: 4200,
+    currency: 'USD',
+    holdExpiresAt:
+      status === FlightChangeStatus.PendingPayment
+        ? '2026-11-20T10:10:00.000Z'
+        : null,
+    createdAt: '2026-11-20T10:00:00.000Z',
+    completedAt: null,
+    refund: null,
+  });
+
+  it('shows the changes of each booking of the page, read in one query, and the one waiting for payment', async () => {
+    const page = [withPassengers([FLIGHT_A])];
+    const { service, changes } = setup([{ page, total: [{ count: 1 }] }]);
+    const pending = summary(FlightChangeStatus.PendingPayment);
+    changes.summariesOfMany.mockResolvedValueOnce(
+      new Map([[page[0]._id.toString(), [pending]]]),
+    );
+
+    const result = await service.list(USER_ID, query(), NOW);
+
+    expect(changes.summariesOfMany).toHaveBeenCalledWith([page[0]._id]);
+    expect(result.items[0]).toMatchObject({
+      pendingChange: pending,
+      changes: [pending],
+    });
+  });
+
+  it('shows the changes of the booking on its details, with no pending one once they are done', async () => {
+    const booking = withPassengers([FLIGHT_A]);
+    const { service, changes } = setup([], booking);
+    const done = summary(FlightChangeStatus.Completed);
+    changes.summariesOf.mockResolvedValueOnce([done]);
+
+    const details = await service.details(BOOKING_ID, USER_ID, NOW);
+
+    expect(changes.summariesOf).toHaveBeenCalledWith(booking._id);
+    expect(details).toMatchObject({ pendingChange: null, changes: [done] });
   });
 });

@@ -1,6 +1,8 @@
 import type { FlightResponseDto } from '../../flights/dto/flight-response.dto';
 import type { RefundSummaryDto } from '../../payments/refunds/dto/refund-response.dto';
 import type { FlightBookingDetailsResponseDto } from '../dto/flight-booking-details-response.dto';
+import type { FlightChangeSummaryDto } from '../dto/flight-change-response.dto';
+import { FlightChangeStatus } from '../enums/flight-change-status.enum';
 import type {
   BookedFlightResponseDto,
   FlightBookingListItemResponseDto,
@@ -13,6 +15,14 @@ import {
 
 /** The flights of a page, by id, as FlightResponsesService returns them. */
 export type FlightsById = ReadonlyMap<string, FlightResponseDto>;
+
+/** FLT-27: the change of a booking that waits for its payment, or null. */
+export const pendingChangeOf = (
+  changes: readonly FlightChangeSummaryDto[],
+): FlightChangeSummaryDto | null =>
+  changes.find(
+    (change) => change.status === FlightChangeStatus.PendingPayment,
+  ) ?? null;
 
 /** The part of a flight a list shows (FLT-25): route, times and status. */
 export function toBookedFlight(
@@ -38,12 +48,14 @@ export function toBookedFlight(
  * FLT-25: one booking in a list of its owner's bookings: reference, each
  * flight with its date, cabin and seats, the passengers' names and types,
  * and the status, and the chosen seats (FLT-28; `seats` are the booking's
- * assignments). Passport numbers and dates of birth are only in the details.
+ * assignments), and its flight changes (FLT-27, newest first, without their
+ * refunds). Passport numbers and dates of birth are only in the details.
  */
 export function toFlightBookingListItem(
   booking: FlightBookingSource,
   flights: FlightsById,
   seats: readonly SeatRecord[],
+  changes: readonly FlightChangeSummaryDto[] = [],
 ): FlightBookingListItemResponseDto {
   return {
     id: booking._id.toString(),
@@ -66,6 +78,8 @@ export function toFlightBookingListItem(
     createdAt: booking.createdAt.toISOString(),
     cancelledAt: booking.cancelledAt?.toISOString() ?? null,
     seats: toSegmentSeats(booking, seats),
+    pendingChange: pendingChangeOf(changes),
+    changes: [...changes],
   };
 }
 
@@ -74,13 +88,15 @@ export function toFlightBookingListItem(
  * returned (passengers with their passport numbers, bags, fares, totals),
  * the full flight of each segment, and the acceptance and cancellation
  * fields, and the chosen seats (FLT-28; `seats` are the booking's
- * assignments). Only owner routes call it.
+ * assignments), and its flight changes (FLT-27, newest first, each with its
+ * refund). Only owner routes call it.
  */
 export function toFlightBookingDetails(
   booking: FlightBookingSource,
   flights: FlightsById,
   refund: RefundSummaryDto | null,
   seats: readonly SeatRecord[],
+  changes: readonly FlightChangeSummaryDto[] = [],
 ): FlightBookingDetailsResponseDto {
   return {
     ...toFlightBookingResponse(booking),
@@ -93,5 +109,7 @@ export function toFlightBookingDetails(
     refundPercent: booking.refundPercent ?? null,
     refund,
     seats: toSegmentSeats(booking, seats),
+    pendingChange: pendingChangeOf(changes),
+    changes: [...changes],
   };
 }

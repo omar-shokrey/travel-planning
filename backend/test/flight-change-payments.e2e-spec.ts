@@ -1,10 +1,5 @@
 import './support/auth-env';
-import {
-  ConflictException,
-  Global,
-  Module,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -16,9 +11,14 @@ import { AppModule } from './../src/app.module';
 import { configureApp, setupSwagger } from './../src/app.setup';
 import { Role } from './../src/common/enums/role.enum';
 import { FlightBookingsService } from './../src/flight-bookings/flight-bookings.service';
+import { FlightChangePaymentService } from './../src/flight-bookings/flight-change-payment.service';
 import { NotificationLinkType } from './../src/notifications/enums/notification-link-type.enum';
 import { NotificationType } from './../src/notifications/enums/notification-type.enum';
 import { Notification } from './../src/notifications/models/notification.schema';
+import {
+  BOOKING_PAYMENT_HANDLERS,
+  type BookingPaymentHandlers,
+} from './../src/payments/booking-payment-handler';
 import { BookingType } from './../src/payments/enums/booking-type.enum';
 import { PaymentStatus } from './../src/payments/enums/payment-status.enum';
 import {
@@ -98,15 +98,12 @@ class FakeFlightChangePort implements FlightChangePaymentPort {
   });
 }
 
+/**
+ * Replaces the real port (FlightChangePaymentService, which FlightBookingsModule
+ * provides and exports) everywhere it is injected: PaymentsService, the
+ * payment handlers and the refunds' notification links.
+ */
 const port = new FakeFlightChangePort();
-
-/** Provides the fake port to the whole app, as FlightBookingsModule will. */
-@Global()
-@Module({
-  providers: [{ provide: FLIGHT_CHANGE_PAYMENT_PORT, useValue: port }],
-  exports: [FLIGHT_CHANGE_PAYMENT_PORT],
-})
-class FakeFlightChangePortModule {}
 
 interface Actor {
   id: string;
@@ -249,8 +246,11 @@ describe('Payments and refunds of a flight change (e2e, FLT-27 with PAY-01, PAY-
 
   beforeAll(async () => {
     const moduleFixture = await Test.createTestingModule({
-      imports: [AppModule, FakeFlightChangePortModule],
-    }).compile();
+      imports: [AppModule],
+    })
+      .overrideProvider(FLIGHT_CHANGE_PAYMENT_PORT)
+      .useValue(port)
+      .compile();
     // rawBody: true like main.ts, so the webhook can check its signature.
     app = moduleFixture.createNestApplication<NestExpressApplication>({
       rawBody: true,
@@ -798,7 +798,12 @@ describe('Payments and refunds of a flight change (e2e, FLT-27 with PAY-01, PAY-
   });
 });
 
-describe('A flight change payment without the flight change port (e2e, FLT-27 PR A as shipped)', () => {
+/**
+ * The app as it ships, without the fake: FlightBookingsModule provides the
+ * real port (FLT-27). A real change, created through the change route and
+ * paid through POST /api/payments, is in test/flight-change.e2e-spec.ts.
+ */
+describe('The real flight change port (e2e, FLT-27)', () => {
   let app: NestExpressApplication;
   let payments: Model<Payment>;
   let users: Model<User>;
@@ -807,7 +812,6 @@ describe('A flight change payment without the flight change port (e2e, FLT-27 PR
   let cookie: string;
 
   beforeAll(async () => {
-    // The app exactly as this PR ships it: nothing provides the port yet.
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -833,8 +837,8 @@ describe('A flight change payment without the flight change port (e2e, FLT-27 PR
       .spyOn(gateway, 'createRefund')
       .mockImplementation(() => Promise.reject(new Error('not in this test')));
     const created = await users.create({
-      name: 'flt27 no port user',
-      email: `flt27-noport-${randomUUID()}@example.com`,
+      name: 'flt27 real port user',
+      email: `flt27-realport-${randomUUID()}@example.com`,
       passwordHash: 'not-a-real-hash',
       role: Role.User,
       consentAcceptedAt: new Date(),
@@ -856,7 +860,22 @@ describe('A flight change payment without the flight change port (e2e, FLT-27 PR
     }
   });
 
-  it('answers 404 "Booking not found", calls Stripe for nothing and stores no payment', async () => {
+  it('registers FlightChangePaymentService as the port and as the payment handler of flight_change', () => {
+    const real = app.get(FlightChangePaymentService, { strict: false });
+
+    expect(app.get(FLIGHT_CHANGE_PAYMENT_PORT, { strict: false })).toBe(real);
+    expect(
+      app.get<BookingPaymentHandlers>(BOOKING_PAYMENT_HANDLERS, {
+        strict: false,
+      })[BookingType.FlightChange],
+    ).toBe(real);
+  });
+
+  it('answers POST /api/payments for a flight_change through the real port: 404 for an unknown change, Stripe never called, nothing stored', async () => {
+    const findPayable = jest.spyOn(
+      app.get(FlightChangePaymentService, { strict: false }),
+      'findPayable',
+    );
     const changeId = new Types.ObjectId().toString();
 
     const response = await request(app.getHttpServer())
@@ -866,6 +885,11 @@ describe('A flight change payment without the flight change port (e2e, FLT-27 PR
 
     expect(response.status).toBe(404);
     expect(response.body).toMatchObject({ message: BOOKING_NOT_FOUND_MESSAGE });
+    expect(findPayable).toHaveBeenCalledWith(
+      changeId,
+      userId,
+      expect.any(Date),
+    );
     expect(gateway.createPaymentIntent).not.toHaveBeenCalled();
     expect(
       await payments.countDocuments({

@@ -23,7 +23,7 @@ export interface ConfirmedLeg {
 const plural = (count: number, word: string): string =>
   `${count} ${word}${count === 1 ? '' : 's'}`;
 
-const legText = (leg: ConfirmedLeg): string =>
+export const legText = (leg: ConfirmedLeg): string =>
   `${leg.flightNumber} ${leg.departureAirport} to ${leg.arrivalAirport}, departs ${leg.departureLocal.replace('T', ' ')} ${leg.departureAirport} time, ${CABIN_LABELS[leg.cabin]}, ${plural(leg.seats, 'seat')}`;
 
 /**

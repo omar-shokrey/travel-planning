@@ -5,14 +5,18 @@ import type { FlightResponsesService } from '../flights/flight-responses.service
 import { CabinClass } from '../flights/models/cabin-class.enum';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
 import { PassengerType } from './enums/passenger-type.enum';
+import { FlightChangeStatus } from './enums/flight-change-status.enum';
 import {
   buildETicket,
+  changeLinesOf,
   FlightBookingETicketService,
 } from './flight-booking-e-ticket.service';
 import { E_TICKET_NOT_CONFIRMED_MESSAGE } from './flight-bookings.constants';
 import { BOOKING_NOT_FOUND_MESSAGE } from './flight-bookings.service';
 import type { FlightSeatsService } from './flight-seats.service';
 import type { FlightBookingSource } from './mappers/flight-booking.mapper';
+import type { FlightChangeSummaryDto } from './dto/flight-change-response.dto';
+import type { FlightChangeService } from './flight-change.service';
 
 const BOOKING_ID = new Types.ObjectId();
 const USER_ID = new Types.ObjectId();
@@ -119,14 +123,25 @@ function setup(found: unknown) {
       ]),
     ),
   };
+  // FLT-27: no flight change unless a test adds one.
+  const changes = {
+    summariesOf: jest.fn((): Promise<FlightChangeSummaryDto[]> =>
+      Promise.resolve([]),
+    ),
+    summariesOfMany: jest.fn(
+      (): Promise<Map<string, FlightChangeSummaryDto[]>> =>
+        Promise.resolve(new Map()),
+    ),
+  };
   const service = new FlightBookingETicketService(
     bookings as never,
     flightModel as never,
     airlines as unknown as AirlinesService,
     flightResponses as unknown as FlightResponsesService,
     seats as unknown as FlightSeatsService,
+    changes as unknown as FlightChangeService,
   );
-  return { service, bookings, airlines, seats };
+  return { service, bookings, airlines, seats, changes };
 }
 
 describe('FlightBookingETicketService (FLT-23)', () => {
@@ -325,5 +340,73 @@ describe('buildETicket (FLT-23)', () => {
     expect(() =>
       buildETicket(booking(), 'FB-7KQ2MX', [], ['Nile Air'], zones, []),
     ).toThrow(NotFoundException);
+  });
+});
+
+describe('changeLinesOf and the e-ticket of a changed booking (FLT-27)', () => {
+  const change = (
+    fields: Partial<FlightChangeSummaryDto>,
+  ): FlightChangeSummaryDto => ({
+    id: 'c',
+    status: FlightChangeStatus.Completed,
+    segmentIndex: 0,
+    fromFlightId: 'f1',
+    toFlightId: 'f2',
+    difference: 4200,
+    currency: 'USD',
+    holdExpiresAt: null,
+    createdAt: '2026-11-19T10:00:00.000Z',
+    completedAt: '2026-11-19T10:00:05.000Z',
+    refund: null,
+    ...fields,
+  });
+
+  it('lists each completed change oldest first with its price, and a change waiting for payment', () => {
+    const lines = changeLinesOf(
+      [
+        change({
+          id: 'newest',
+          status: FlightChangeStatus.PendingPayment,
+          segmentIndex: 1,
+          completedAt: null,
+          holdExpiresAt: '2026-11-21T08:10:00.000Z',
+        }),
+        change({ id: 'expired', status: FlightChangeStatus.Expired }),
+        change({ difference: -4005, completedAt: '2026-11-20T09:30:00.000Z' }),
+        change({}),
+      ],
+      'USD',
+    );
+
+    expect(lines).toEqual([
+      'Outbound flight changed on 2026-11-19 10:00 UTC (fare difference paid: USD 42.00)',
+      'Outbound flight changed on 2026-11-20 09:30 UTC (fare difference refunded: USD 40.05)',
+      'Return flight change waiting for payment until 2026-11-21 08:10 UTC: this ticket shows the booked flight',
+    ]);
+    expect(changeLinesOf([change({ difference: 0 })], 'USD')).toEqual([
+      'Outbound flight changed on 2026-11-19 10:00 UTC (same price)',
+    ]);
+  });
+
+  it('puts the lines on the ticket, and none for a booking never changed', () => {
+    const args = [
+      booking(),
+      'FB-7KQ2MX',
+      flights,
+      ['Nile Air'],
+      zones,
+      [],
+    ] as const;
+
+    expect(buildETicket(...args).changes).toEqual([]);
+    expect(buildETicket(...args, [change({})]).changes).toHaveLength(1);
+  });
+
+  it('reads the changes of the booking for the PDF', async () => {
+    const { service, changes } = setup(booking());
+
+    await service.eTicket(BOOKING_ID.toString(), USER_ID.toString());
+
+    expect(changes.summariesOf).toHaveBeenCalledWith(BOOKING_ID);
   });
 });

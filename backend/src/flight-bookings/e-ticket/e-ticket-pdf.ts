@@ -46,6 +46,8 @@ export interface ETicket {
   seats: number;
   /** For example `USD 525.00`, from whole cents. */
   totalPaid: string;
+  /** FLT-27: one line per flight change made or waiting for payment; empty when none. */
+  changes: string[];
 }
 
 /**
@@ -127,6 +129,14 @@ export function renderETicket(ticket: ETicket): Promise<Buffer> {
 
     doc.text(`Seats: ${ticket.seats}`);
     doc.font('Helvetica-Bold').text(`Total paid: ${ticket.totalPaid}`);
+    if (ticket.changes.length > 0) {
+      doc.moveDown();
+      doc.font('Helvetica-Bold').fontSize(14).text('Flight changes');
+      doc.font('Helvetica').fontSize(11);
+      for (const line of ticket.changes) {
+        doc.text(line);
+      }
+    }
     doc.end();
   });
 }

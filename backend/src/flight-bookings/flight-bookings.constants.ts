@@ -133,3 +133,35 @@ export const seatNotOnMapMessage = (
 ): string => `Seat ${seatNumber} is not on the seat map of the ${cabin} cabin`;
 /** FLT-28: how many times one seat claim is tried: once more after a race on the same passenger. */
 export const SEAT_CLAIM_ATTEMPTS = 2;
+
+/** FLT-27: the answers of a flight change. */
+export const CHANGE_NOT_CONFIRMED_MESSAGE =
+  'Only a confirmed booking can be changed';
+export const CHANGE_DEPARTED_MESSAGE =
+  'The flight has departed: it can no longer be changed';
+export const SAME_FLIGHT_MESSAGE =
+  'newFlightId must be another flight than the one booked';
+export const changeRouteMessage = (from: string, to: string): string =>
+  `The new flight must fly the same route: ${from} to ${to}`;
+export const OUTBOUND_AFTER_RETURN_MESSAGE =
+  'The new outbound flight must arrive before the return flight leaves';
+export const CHANGE_AGE_GROUP_MESSAGE =
+  'A passenger would be in another age group (adult, child or infant) on the new date: cancel the booking and book again';
+export const CHANGE_BAGS_MESSAGE =
+  "A passenger's extra bags are not allowed on the new flight (its airline sells no extra bags, fewer or lighter ones): choose another flight";
+export const CHANGE_DIFFERENCE_CHANGED_MESSAGE =
+  'The price difference changed since you viewed it. View the change again and confirm the new difference';
+export const CHANGE_IN_PROGRESS_MESSAGE =
+  'Another change of this booking is waiting for payment or in progress';
+export const CHANGE_REFUND_TOO_LARGE_MESSAGE =
+  'This change would refund more than what is left of the original payment: cancel the booking and book again';
+export const CHANGE_BOOKING_CHANGED_MESSAGE =
+  'The booking was changed or cancelled by another request. View it again';
+export const POLICIES_REQUIRED_MESSAGE =
+  "policiesAccepted must be true: accept the new airline's policies to change the flight";
+export const EXPECTED_DIFFERENCE_REQUIRED_MESSAGE =
+  'expectedDifference is required to change the flight: the difference the dry run showed';
+/** FLT-27: how many flight changes one run of the change job handles, of each kind. */
+export const FLIGHT_CHANGE_JOB_BATCH_SIZE = 100;
+/** FLT-27: a change still `applying` this long after its last update is finished by the job. */
+export const FLIGHT_CHANGE_STUCK_AFTER_MS = 2 * 60 * 1000;

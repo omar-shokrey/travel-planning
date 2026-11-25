@@ -37,6 +37,7 @@ const ticket: ETicket = {
   ],
   seats: 1,
   totalPaid: 'USD 250.00',
+  changes: [],
 };
 
 describe('maskPassport (FLT-23)', () => {

@@ -4,6 +4,7 @@ import { FlightStatus } from '../../flights/models/flight-status.enum';
 import { FlightBookingStatus } from '../enums/flight-booking-status.enum';
 import { PassengerType } from '../enums/passenger-type.enum';
 import { SegmentSeatsResponseDto } from './booking-seats-response.dto';
+import { FlightChangeSummaryDto } from './flight-change-response.dto';
 
 /** FLT-25: the flight of one segment, with its times at each airport (GEN-06). */
 export class BookedFlightResponseDto {
@@ -126,4 +127,19 @@ export class FlightBookingListItemResponseDto {
       'FLT-28: one entry per segment, in segment order, with the seat of each passenger who takes one',
   })
   seats: SegmentSeatsResponseDto[];
+
+  @ApiProperty({
+    type: FlightChangeSummaryDto,
+    nullable: true,
+    description:
+      'FLT-27: the flight change waiting for its payment (pay it before its `holdExpiresAt`), or `null`',
+  })
+  pendingChange: FlightChangeSummaryDto | null;
+
+  @ApiProperty({
+    type: [FlightChangeSummaryDto],
+    description:
+      'FLT-27: every flight change of the booking, newest first, without their refunds (see the details)',
+  })
+  changes: FlightChangeSummaryDto[];
 }

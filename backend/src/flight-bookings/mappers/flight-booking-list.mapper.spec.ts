@@ -8,10 +8,13 @@ import { FlightBookingStatus } from '../enums/flight-booking-status.enum';
 import { PassengerType } from '../enums/passenger-type.enum';
 import {
   toBookedFlight,
+  pendingChangeOf,
   toFlightBookingDetails,
   toFlightBookingListItem,
 } from './flight-booking-list.mapper';
 import type { FlightBookingSource } from './flight-booking.mapper';
+import type { FlightChangeSummaryDto } from '../dto/flight-change-response.dto';
+import { FlightChangeStatus } from '../enums/flight-change-status.enum';
 
 const OUT = new Types.ObjectId('6740f1c2a4b5c6d7e8f90111');
 const BACK = new Types.ObjectId('6740f1c2a4b5c6d7e8f90222');
@@ -158,6 +161,9 @@ describe('toFlightBookingListItem (FLT-25)', () => {
           passengers: [{ passengerIndex: 0, seatNumber: '2C' }],
         },
       ],
+      // FLT-27: no flight change.
+      pendingChange: null,
+      changes: [],
     });
     expect(JSON.stringify(item)).not.toContain('A12345678');
   });
@@ -239,5 +245,39 @@ describe('toFlightBookingDetails (FLT-25)', () => {
       refundPercent: null,
       refund: null,
     });
+  });
+});
+
+describe('pendingChangeOf and the changes of a booking (FLT-27)', () => {
+  const change = (
+    fields: Partial<FlightChangeSummaryDto>,
+  ): FlightChangeSummaryDto => ({
+    id: 'change',
+    status: FlightChangeStatus.Completed,
+    segmentIndex: 0,
+    fromFlightId: OUT.toString(),
+    toFlightId: BACK.toString(),
+    difference: 0,
+    currency: 'USD',
+    holdExpiresAt: null,
+    createdAt: '2026-11-19T10:00:00.000Z',
+    completedAt: '2026-11-19T10:00:01.000Z',
+    refund: null,
+    ...fields,
+  });
+
+  it('is the change waiting for payment, or null', () => {
+    const pending = change({
+      id: 'pending',
+      status: FlightChangeStatus.PendingPayment,
+      holdExpiresAt: '2026-11-19T10:10:00.000Z',
+      completedAt: null,
+    });
+
+    expect(pendingChangeOf([change({}), pending])).toBe(pending);
+    expect(
+      pendingChangeOf([change({ status: FlightChangeStatus.Expired })]),
+    ).toBeNull();
+    expect(pendingChangeOf([])).toBeNull();
   });
 });

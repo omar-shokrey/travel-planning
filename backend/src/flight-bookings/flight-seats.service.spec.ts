@@ -267,3 +267,18 @@ describe('FlightSeatsService.releaseBooking (FLT-28)', () => {
     expect(model.deleteMany).toHaveBeenCalledWith({ bookingId: BOOKING });
   });
 });
+
+describe('FlightSeatsService.releaseSegment (FLT-27)', () => {
+  it("frees the seats of one segment with a filter on the booking's id and the segment only", async () => {
+    const { service, model } = setup();
+
+    await expect(service.releaseSegment(BOOKING.toString(), 1)).resolves.toBe(
+      3,
+    );
+
+    expect(model.deleteMany).toHaveBeenCalledWith({
+      bookingId: BOOKING,
+      segmentIndex: 1,
+    });
+  });
+});

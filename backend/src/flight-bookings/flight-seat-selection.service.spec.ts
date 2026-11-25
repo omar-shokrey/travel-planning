@@ -11,6 +11,7 @@ import { PassengerType } from './enums/passenger-type.enum';
 import { SeatStatus } from './enums/seat-status.enum';
 import type { FlightBookingListService } from './flight-booking-list.service';
 import {
+  CHANGE_BOOKING_CHANGED_MESSAGE,
   INFANT_SEAT_MESSAGE,
   SEATS_DEPARTED_MESSAGE,
   SEATS_FLIGHT_CANCELLED_MESSAGE,
@@ -107,6 +108,7 @@ function setup(
       Promise.resolve([]),
     ),
     releaseBooking: jest.fn((..._args: unknown[]) => Promise.resolve(1)),
+    releaseSegment: jest.fn((..._args: unknown[]) => Promise.resolve(1)),
   };
   const lists = {
     details: jest.fn((..._args: unknown[]) => Promise.resolve(DETAILS)),
@@ -283,6 +285,32 @@ describe('FlightSeatSelectionService.select (FLT-28)', () => {
       seats.claim.mock.invocationCallOrder[0],
     );
     expect(seats.releaseBooking).not.toHaveBeenCalled();
+  });
+
+  it('frees the seats of that segment and answers 409 when its flight was changed during the claims (FLT-27)', async () => {
+    const { service, bookings, seats, lists } = setup();
+    bookings.countDocuments
+      .mockReturnValueOnce({
+        exec: jest.fn((): Promise<number> => Promise.resolve(1)),
+      })
+      .mockReturnValueOnce({
+        exec: jest.fn((): Promise<number> => Promise.resolve(0)),
+      });
+
+    const error = await select(service, {
+      seats: [{ passengerIndex: 0, seatNumber: '1A' }],
+    });
+
+    expect(error).toEqual(
+      new ConflictException(CHANGE_BOOKING_CHANGED_MESSAGE),
+    );
+    expect(bookings.countDocuments).toHaveBeenLastCalledWith(
+      { _id: BOOKING_ID, 'segments.0.flightId': expect.anything() },
+      { limit: 1 },
+    );
+    expect(seats.releaseSegment).toHaveBeenCalledWith(BOOKING_ID, 0);
+    expect(seats.releaseBooking).not.toHaveBeenCalled();
+    expect(lists.details).not.toHaveBeenCalled();
   });
 
   it('frees the seats it gave and answers 409 when the booking was cancelled during the claims', async () => {

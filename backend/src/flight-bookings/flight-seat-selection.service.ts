@@ -11,6 +11,7 @@ import type { SeatMapResponseDto } from './dto/booking-seats-response.dto';
 import type { FlightBookingDetailsResponseDto } from './dto/flight-booking-details-response.dto';
 import type { SelectSeatsDto } from './dto/select-seats.dto';
 import {
+  CHANGE_BOOKING_CHANGED_MESSAGE,
   SEATS_DEPARTED_MESSAGE,
   SEATS_NOT_CONFIRMED_MESSAGE,
   SEAT_TAKEN_MESSAGE,
@@ -152,6 +153,9 @@ export class FlightSeatSelectionService {
     // seats between the check above and the claims. Every such path writes
     // the status before it frees the seats, so reading it again here is
     // enough: if it is no longer confirmed, this request frees what it gave.
+    // FLT-27: a flight change writes the segment's new flight before it frees
+    // that segment's seats, so the segment's flight is read again the same
+    // way: if it changed, the seats claimed on the old flight are freed.
     const stillConfirmed = await this.bookings
       .countDocuments(
         { _id: booking._id, status: FlightBookingStatus.Confirmed },
@@ -161,6 +165,19 @@ export class FlightSeatSelectionService {
     if (stillConfirmed === 0) {
       await this.seats.releaseBooking(booking._id);
       throw new ConflictException(SEATS_NOT_CONFIRMED_MESSAGE);
+    }
+    const sameFlight = await this.bookings
+      .countDocuments(
+        {
+          _id: booking._id,
+          [`segments.${segmentIndex}.flightId`]: segment.flightId,
+        },
+        { limit: 1 },
+      )
+      .exec();
+    if (sameFlight === 0) {
+      await this.seats.releaseSegment(booking._id, segmentIndex);
+      throw new ConflictException(CHANGE_BOOKING_CHANGED_MESSAGE);
     }
     return this.lists.details(id, userId, now);
   }

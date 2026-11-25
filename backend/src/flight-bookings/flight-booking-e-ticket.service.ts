@@ -17,7 +17,10 @@ import {
   maskPassport,
   renderETicket,
 } from './e-ticket/e-ticket-pdf';
+import type { FlightChangeSummaryDto } from './dto/flight-change-response.dto';
 import { FlightBookingStatus } from './enums/flight-booking-status.enum';
+import { FlightChangeStatus } from './enums/flight-change-status.enum';
+import { FlightChangeService } from './flight-change.service';
 import { FlightSeatsService } from './flight-seats.service';
 import { E_TICKET_NOT_CONFIRMED_MESSAGE } from './flight-bookings.constants';
 import { BOOKING_NOT_FOUND_MESSAGE } from './flight-bookings.service';
@@ -90,6 +93,8 @@ export class FlightBookingETicketService {
     private readonly airlines: AirlinesService,
     private readonly flightResponses: FlightResponsesService,
     private readonly seats: FlightSeatsService,
+    // FLT-27: the flight changes the ticket lists.
+    private readonly changes: FlightChangeService,
   ) {}
 
   async eTicket(id: string, userId: string): Promise<ETicketFile> {
@@ -135,7 +140,10 @@ export class FlightBookingETicketService {
             .name,
       ),
     );
-    const seats = await this.seats.findByBooking(booking._id);
+    const [seats, changes] = await Promise.all([
+      this.seats.findByBooking(booking._id),
+      this.changes.summariesOf(booking._id),
+    ]);
     return buildETicket(
       booking,
       reference,
@@ -143,6 +151,7 @@ export class FlightBookingETicketService {
       airlineNames,
       zones,
       seats,
+      changes,
     );
   }
 }
@@ -162,7 +171,8 @@ export interface ETicketFlight {
  * (`airlineNames` in segment order). Times are shown at each airport with
  * luxon (GEN-06), never by adding hours; the passport is masked; money comes
  * from whole cents. A missing flight is 404; an airport with no zone throws,
- * since no zone is guessed.
+ * since no zone is guessed. FLT-27: the legs are the flights the booking
+ * flies now, and each completed or pending flight change has a line.
  */
 export function buildETicket(
   booking: FlightBookingSource,
@@ -171,6 +181,7 @@ export function buildETicket(
   airlineNames: readonly string[],
   zones: ReadonlyMap<string, string>,
   seats: readonly SeatRecord[],
+  changes: readonly FlightChangeSummaryDto[] = [],
 ): ETicket {
   const zoneOf = (code: string): string => {
     const zone = zones.get(code);
@@ -226,5 +237,42 @@ export function buildETicket(
     })),
     seats: booking.segments[0].seatsReserved,
     totalPaid: formatMoney(booking.total, booking.currency),
+    changes: changeLinesOf(changes, booking.currency),
   };
+}
+
+/**
+ * FLT-27: the e-ticket's lines about flight changes, oldest first: each
+ * completed change with its date and what happened to the price, and a
+ * change waiting for payment (this ticket still shows the booked flight).
+ * Expired changes never happened and are not listed. Dates are UTC.
+ */
+export function changeLinesOf(
+  changes: readonly FlightChangeSummaryDto[],
+  currency: string,
+): string[] {
+  const label = (index: number) => (index === 0 ? 'Outbound' : 'Return');
+  const day = (iso: string) => `${iso.slice(0, 16).replace('T', ' ')} UTC`;
+  return [...changes].reverse().flatMap((change) => {
+    if (change.status === FlightChangeStatus.Completed && change.completedAt) {
+      const money =
+        change.difference > 0
+          ? `fare difference paid: ${formatMoney(change.difference, currency)}`
+          : change.difference < 0
+            ? `fare difference refunded: ${formatMoney(-change.difference, currency)}`
+            : 'same price';
+      return [
+        `${label(change.segmentIndex)} flight changed on ${day(change.completedAt)} (${money})`,
+      ];
+    }
+    if (
+      change.status === FlightChangeStatus.PendingPayment &&
+      change.holdExpiresAt
+    ) {
+      return [
+        `${label(change.segmentIndex)} flight change waiting for payment until ${day(change.holdExpiresAt)}: this ticket shows the booked flight`,
+      ];
+    }
+    return [];
+  });
 }
